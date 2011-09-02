@@ -4,6 +4,7 @@ import numpy as nu
 from Age_date import *
 from mpi4py import MPI
 from multiprocessing import *
+import time as Time
 
 a=nu.seterr(all='ignore')
 
@@ -34,11 +35,12 @@ def MCMC_multi(data,itter,bins,cpus=cpu_count()):
     q=Queue()
     #start multiprocess mcmc
     for ii in range(cpus):
-        work.append(Process(target=MCMC_SA,args=(data,bins,i,chibest
+        work.append(Process(target=MCMC_vanila,args=(data,bins,i,chibest
                                                      ,parambest,option,q)))
         work[-1].start()
     while i.value<itter:
         print '%2.2f percent done' %(i.value/float(itter)*100)
+        sys.stdout.flush()
         #print i.value
         Time.sleep(5)
     option.value=False
@@ -56,7 +58,7 @@ def MCMC_multi(data,itter,bins,cpus=cpu_count()):
 
     outparam,outchi=nu.zeros([2,3*bins]),nu.array([nu.inf])
     for ii in temp:
-        outparam=nu.concatenate((outparam,ii[0][nu.nonzero(ii[0][:,0]>0)[0],:]
+        outparam=nu.concatenate((outparam,ii[0][~nu.isinf(ii[1]),:]
                                  ),axis=0)
         outchi=nu.concatenate((outchi,ii[1][~nu.isinf(ii[1])]))
         #outsigma[str(count)]=ii[2]
@@ -80,10 +82,11 @@ def MCMC_vanila(data,bins,i,chibest,parambest,option,q=None):
       
     
     #change random seed for random numbers for multiprocessing
-    random.jumpahead(current_process().ident)
+    nu.random.seed(current_process().ident)
     #initalize parmeters and chi squared
     lib_vals=get_fitting_info(lib_path)
-    metal_unq=nu.unique(lib_vals[0][:,0])
+    lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
+    metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
     age_unq=nu.unique(lib_vals[0][:,1])
 
     param=nu.zeros([option.itter,len(parambest)])
@@ -94,12 +97,12 @@ def MCMC_vanila(data,bins,i,chibest,parambest,option,q=None):
     #start in random place
     for k in xrange(len(parambest)):
         if k %2==0 and len(parambest)-bins-1>k:#metalicity
-            active_param[k]=10**(random.random()*nu.log10(metal_unq).ptp()+nu.log10(metal_unq)[0])
+            active_param[k]=10**(nu.random.random()*metal_unq.ptp()+metal_unq[0])
         else:#age and normilization
             if len(parambest)-bins-1<k: #normilization
-                active_param[k]=10*random.random()
+                active_param[k]=10*nu.random.random()
             else: #age
-                active_param[k]=random.random()*age_unq.ptp()/float(bins)+bin[bin_index]
+                active_param[k]=nu.random.random()*age_unq.ptp()/float(bins)+bin[bin_index]
                 bin_index+=1
     #active_param[0]=0.020
     #active_param[2]=1
@@ -107,14 +110,14 @@ def MCMC_vanila(data,bins,i,chibest,parambest,option,q=None):
     param[0,:]=nu.copy(active_param)
     parambest=nu.copy(active_param)
     chi=nu.zeros(option.itter)+nu.inf
-    sigma=nu.concatenate((nu.tile([.9,1.0],bins),
+    sigma=nu.identity(len(active_param))*nu.concatenate((nu.tile([.9,1.0],bins),
                           nu.array([nu.sqrt(bins)]*bins)))
 
     model=get_model_fit(active_param,lib_vals,age_unq,metal_unq,bins)
     model=data_match(model,data)
     #make weight paramer start closer to where ave data value
     for j in range(bins):
-        active_param[2+j]=normalize(data,model)*random.random()
+        active_param[2+j]=normalize(data,model)*nu.random.random()
     chi[0]=sum((data[:,1]-model)**2)
     
     #stuff just for age_date
@@ -154,20 +157,22 @@ def MCMC_vanila(data,bins,i,chibest,parambest,option,q=None):
                 chi[j]=nu.copy(chi[j-1])
                 Nreject+=1
  
-       #change sigma with acceptance rate
-        if i.value<option.itter*.10: 
+        if j<100: #change sigma with acceptance rate
             #k=random.randint(0,len(sigma)-1)
-            if Nacept/Nreject<.23 and all(sigma>=10**-6): 
+            if Nacept/Nreject<.23 and all(sigma.diagonal()>=10**-6): 
                #too few aceptnce decrease sigma
                 sigma=sigma/1.05
-            elif Nacept/Nreject>.25 and all(sigma<10): #not enough
+            elif Nacept/Nreject>.25 and all(sigma.diagonal()<10): #not enough
                 sigma=sigma*1.05
+        else: #use covarnence matrix
+            sigma=Covarence_mat(param,j)
 
         j+=1
         i.value=i.value+1
         acept_rate.append(nu.copy([Nacept,Nreject]))
         out_sigma.append(nu.copy(sigma))
     #return once finished 
+    param=outprep(param)
     q.put((param[option.burnin:,:],chi[option.burnin:] ))
     #q.put((param,chi,out_sigma,acept_rate))
 
@@ -177,10 +182,10 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
       
     
     #change random seed for random numbers for multiprocessing
-    random.jumpahead(current_process().ident)
+    nu.random.seed(current_process().ident)
     #initalize parmeters and chi squared
     lib_vals=get_fitting_info(lib_path)
-    metal_unq=nu.unique(lib_vals[0][:,0])
+    metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
     age_unq=nu.unique(lib_vals[0][:,1])
 
     param=nu.zeros([option.itter,len(parambest)])
@@ -191,12 +196,12 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     #start in random place
     for k in xrange(len(parambest)):
         if k %2==0 and len(parambest)-bins-1>k:#metalicity
-            active_param[k]=10**(random.random()*nu.log10(metal_unq).ptp()+nu.log10(metal_unq)[0])
+            active_param[k]=10**(nu.random.random()*nu.log10(metal_unq).ptp()+nu.log10(metal_unq)[0])
         else:#age and normilization
             if len(parambest)-bins-1<k: #normilization
-                active_param[k]=10*random.random()
+                active_param[k]=10*nu.random.random()
             else: #age
-                active_param[k]=random.random()*age_unq.ptp()/float(bins)+bin[bin_index]
+                active_param[k]=nu.random.random()*age_unq.ptp()/float(bins)+bin[bin_index]
                 bin_index+=1
     #active_param[0]=0.020
     #active_param[2]=1
@@ -251,19 +256,21 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
                 chi[j]=nu.copy(chi[j-1])
                 Nreject+=1
  
-       #change sigma with acceptance rate
-        if i.value<option.itter*.10: 
+        if j<100: #change sigma with acceptance rate
             #k=random.randint(0,len(sigma)-1)
-            if Nacept/Nreject<.23 and all(sigma>=10**-6): 
+            if Nacept/Nreject<.23 and all(sigma.diagonal()>=10**-6): 
                #too few aceptnce decrease sigma
                 sigma=sigma/1.05
-            elif Nacept/Nreject>.25 and all(sigma<10): #not enough
+            elif Nacept/Nreject>.25 and all(sigma.diagonal()<10): #not enough
                 sigma=sigma*1.05
+        else: #use covarnence matrix
+            sigma=Covarence_mat(param,j)
         j+=1
         i.value=i.value+1
         acept_rate.append(Nacept/Nreject)
         #out_sigma.append(nu.copy(sigma))
     #return once finished 
+    param=outprep(param)
     q.put((param[option.burnin:,:],chi[option.burnin:]))
     #q.put((param,chi,out_sigma,acept_rate))
 
@@ -277,6 +284,22 @@ def SA(i,rate):
     else:
         N=1.
     return (1/(1+lamdbaa*(i+1)))**N
+
+def Covarence_mat(param,j):
+    #creates a covarence matrix for the step size 
+    #only takes cov of last 1000 itterations
+    if j-1000<0:
+        return nu.cov(param[:j,:].T)
+    else:
+        return nu.cov(param[j-1000:j,:].T)
+
+def outprep(param):
+    #changes metals from log to normal
+    for i in range(0,param.shape[1],3):
+        param[:,i]=10**param[:,i]
+    return param
+
+
 
 if __name__=='__main__':
 
