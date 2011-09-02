@@ -34,7 +34,7 @@ import os,sys
 from multiprocessing import *
 from interp_func import *
 from spectra_func import *
-import random
+
 
 
 ###spectral lib stuff####
@@ -127,18 +127,18 @@ def get_model_fit(param,lib_vals,age_unq,metal_unq,bins):
             age=age[0]
             #find spectra
             closest=[]
-            for i in metal:
+            for i in 10**metal:
                 index=nu.nonzero(nu.logical_and(lib_vals[0][:,0]==i,
                                             lib_vals[0][:,1]==age))[0]
                 #closest.append(read_spec(lib_vals[1][index][0]))
                 closest.append(nu.vstack((spect[:,0],spect[:,index[0]+1])).T)
             if ii==0:
                 out=nu.vstack((closest[0][:,0],
-                          linear_interpolation(metal,closest,temp_param[0]))).T
+                          linear_interpolation(10**metal,closest,temp_param[0]))).T
                 
             else:
                 out[:,1]=out[:,1]+param[-ii-1]*linear_interpolation(
-                    metal,closest,temp_param[0])
+                    10**metal,closest,temp_param[0])
         elif line=='metal': #run 1 d interp along age only
             age=nu.array([age[0],age[-1]])
             age.sort()
@@ -147,7 +147,7 @@ def get_model_fit(param,lib_vals,age_unq,metal_unq,bins):
             closest=[]
             for i in age:
                 index=nu.nonzero(nu.logical_and(lib_vals[0][:,1]==i,
-                                            lib_vals[0][:,0]==metal))[0]
+                                            lib_vals[0][:,0]==10**metal))[0]
                 #closest.append(read_spec(lib_vals[1][index][0]))
                 closest.append(nu.vstack((spect[:,0],spect[:,index[0]+1])).T)
             if ii==0:
@@ -158,7 +158,7 @@ def get_model_fit(param,lib_vals,age_unq,metal_unq,bins):
                         age,closest,temp_param[1])
 
         elif line=='both': #on a lib spectra
-            index=nu.nonzero(nu.logical_and(lib_vals[0][:,0]==temp_param[0],
+            index=nu.nonzero(nu.logical_and(lib_vals[0][:,0]==10**temp_param[0],
                                             lib_vals[0][:,1]==temp_param[1]))[0]
             if ii==0:
                 out=read_spec(lib_vals[1][index][0])
@@ -173,17 +173,17 @@ def get_model_fit(param,lib_vals,age_unq,metal_unq,bins):
             for i in range(4):
                 #print metal[i],age[i]
                 index=nu.nonzero(nu.logical_and(lib_vals[0][:,1]==age[i],
-                                            lib_vals[0][:,0]==metal[i]))[0]
+                                            lib_vals[0][:,0]==10**metal[i]))[0]
                 #closest.append(read_spec(lib_vals[1][index][0]))
                 closest.append(nu.vstack((spect[:,0],spect[:,index[0]+1])).T)
 
         #interp
             if ii==0:
                 out=nu.vstack((closest[0][:,0],bilinear_interpolation(
-                            metal,age,closest,temp_param[0],temp_param[1]))).T
+                            10**metal,age,closest,temp_param[0],temp_param[1]))).T
             else:
                 out[:,1]=out[:,1]+param[-ii-1]*bilinear_interpolation(
-                    metal,age,closest,
+                    10**metal,age,closest,
                     temp_param[0],temp_param[1])
         if ii==0: #add normilization to first out spectra
             out[:,1]=param[-ii-1]*out[:,1]
@@ -193,7 +193,6 @@ def get_model_fit(param,lib_vals,age_unq,metal_unq,bins):
 
 def data_match(model,data):
     #makes sure data and model have same wavelength range and points
-    #####interpolate if wavelength points aren't the same#####
     if model.shape[0]==data.shape[0]: #if same number of points
         if all(model[:,0]==data[:,0]):#if they have the same x-axis
             return model[:,1]
@@ -209,12 +208,14 @@ def data_match(model,data):
             return spectra_lin_interp(model[:,0],model[:,1],data[:,0])
  
 
-def check(vals,param,bins): #checks if params are in bounds
-    for j in xrange(0,len(param)-bins,2):#check age and metalicity
-        if any(vals.max(0)<param[j:j+2]) or any(vals.min(0)>param[j:j+2]):
+def check(param,metal_unq, age_unq,bins): #checks if params are in bounds
+    age=nu.linspace(age_unq.min(),age_unq.max(),bins+1)
+    for j in xrange(bins):#check age and metalicity
+        if any([metal_unq[-1],age[j+1]]<param[j*3:j*3+2]) or any([metal_unq[0],age[j]]>
+                                                                 param[j*3:j*3+2]):
             return True
-    if any(param[-bins:]<0): #check normalizations
-        return True
+        if param[j*3+2]<0: #check normalizations
+            return True
     return False
 
 def continum_normalize(data,order):
@@ -250,26 +251,10 @@ def N_normalize(data, model,bins):
 def chain_gen_all(means,metal_unq, age_unq,bins,sigma):
     #creates new chain for MCMC, does log spacing for metalicity
     #lin spacing for everything else, runs check on values also
-    rand=sigma*.0
-    #make bins
-    bin=nu.linspace(age_unq.min(),age_unq.max(),bins+1)
-    bin_index=0
-    #create for age and weights
-    for k in xrange(rand.shape[0]):
-        if k %2==0 and rand.shape[0]-bins-1>k:#metalicity
-            rand[k]=10**random.normalvariate(nu.log10(means[k]),sigma[k])
-            while rand[k]<metal_unq.min() or rand[k]>metal_unq.max():
-                rand[k]=10**random.normalvariate(nu.log10(means[k]),sigma[k])
-        else:#age and normilization
-            rand[k]=random.normalvariate(means[k],sigma[k])
-            if rand.shape[0]-bins-1<k: #normilization
-                while rand[k]<0:
-                    rand[k]=random.normalvariate(means[k],sigma[k])
-            else: #age
-                while rand[k]<bin[bin_index] or rand[k]>bin[bin_index+1]:
-                    rand[k]=random.normalvariate(means[k],sigma[k])
-                bin_index+=1
-    return rand
+    out=nu.random.multivariate_normal(means,sigma)
+    while check(out,metal_unq, age_unq,bins):
+        out=nu.random.multivariate_normal(means,sigma)
+    return out
 
 def chain_gen_one(means,metal_unq, age_unq,bins,sigma,k):
     #changes the value of 1 paramer, does everything else of chain_gen_all
