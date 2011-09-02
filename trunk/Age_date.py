@@ -39,7 +39,7 @@ import random
 
 ###spectral lib stuff####
 global lib_path,spect
-lib_path='/home/thuso/Phd/Code/Spectra_lib/'
+lib_path='/home/thuso/Phd/Spectra_lib/'
 spect,info= load_spec_lib(lib_path)  
 #spect=edit_spec_range(spect,3200,9500)
 
