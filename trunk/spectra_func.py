@@ -60,7 +60,6 @@ def load_spec_lib(lib_path='/home/thuso/Phd/Code/Spectra_lib/'):
     out[:,0]=temp[:,0]
     #pool=Pool()
     #m=pool.map
-    tem
     m=map
     tempout=m(read_spec,lib,[lib_path]*len(lib))
     #pool.close()
@@ -73,7 +72,7 @@ def edit_spec_range(spect,lam_min,lam_max):
     return spect[index,:]
 
 def create_spectra(bins,func='flat',lam_min=3200,
-                   lam_max=9500,lib_path='/home/thuso/Phd/Code/Spectra_lib/'):
+                   lam_max=9500,lib_path='/home/thuso/Phd/Spectra_lib/'):
     #creates a SFH function and matches SSP's to it with 
     #inputted bins based on sfr/t*delta*
     lib=get_fitting_info(lib_path)
