@@ -60,8 +60,9 @@ def load_spec_lib(lib_path='/home/thuso/Phd/Code/Spectra_lib/'):
     out[:,0]=temp[:,0]
     #pool=Pool()
     #m=pool.map
+    tem
     m=map
-    tempout=m(read_spec,lib)
+    tempout=m(read_spec,lib,[lib_path]*len(lib))
     #pool.close()
     for i,j in enumerate(tempout):
         out[:,i+1]=j[:,1]
