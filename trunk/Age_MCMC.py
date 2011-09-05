@@ -34,7 +34,7 @@ def MCMC_multi(data,itter,bins,cpus=cpu_count()):
     q=Queue()
     #start multiprocess mcmc
     for ii in range(cpus):
-        work.append(Process(target=MCMC_vanila,args=(data,bins,i,chibest
+        work.append(Process(target=MCMC_SA,args=(data,bins,i,chibest
                                                      ,parambest,option,q)))
         work[-1].start()
     while i.value<itter:
@@ -180,12 +180,18 @@ def MCMC_vanila(data,bins,i,chibest,parambest,option,q=None):
 
 def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     #does MCMC and reduices the false acceptance rate over a threshold
+    #itter needs to be a array of normaly distrbuted numbers
+    #so there are no problems with multiprocessing
+
+    #part on every modual wanting to fit the spectra
+    #controls input and expot of files for fitt
       
     
     #change random seed for random numbers for multiprocessing
     nu.random.seed(current_process().ident)
     #initalize parmeters and chi squared
     lib_vals=get_fitting_info(lib_path)
+    lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
     metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
     age_unq=nu.unique(lib_vals[0][:,1])
 
@@ -197,14 +203,14 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     #start in random place
     for k in xrange(len(parambest)):
         if k %2==0 and len(parambest)-bins-1>k:#metalicity
-            active_param[k]=10**(nu.random.random()*nu.log10(metal_unq).ptp()+nu.log10(metal_unq)[0])
+            active_param[k]=(nu.random.random()*metal_unq.ptp()+metal_unq[0])
         else:#age and normilization
             if len(parambest)-bins-1<k: #normilization
                 active_param[k]=10*nu.random.random()
             else: #age
                 active_param[k]=nu.random.random()*age_unq.ptp()/float(bins)+bin[bin_index]
                 bin_index+=1
-    #active_param[0]=0.020
+    
     #active_param[2]=1
 
     param[0,:]=nu.copy(active_param)
@@ -214,9 +220,12 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
                 [metal_unq.ptp()*.1,age_unq.ptp()/bins*.1],bins),
                           nu.array([nu.sqrt(bins)]*bins)))
 
+
     model=get_model_fit(active_param,lib_vals,age_unq,metal_unq,bins)
     model=data_match(model,data)
-    #active_param[2]=normalize(data,model)
+    #make weight paramer start closer to where ave data value
+    for j in range(bins):
+        active_param[2+j]=normalize(data,model)*nu.random.random()
     chi[0]=sum((data[:,1]-model)**2)
     
     #stuff just for age_date
@@ -249,7 +258,6 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
                 
         else:
             if a>nu.random.rand():#false accept
-                acept_rate.append([a,j])
                 param[j,:]=nu.copy(active_param)
                 Nacept+=1
             else:
@@ -269,23 +277,19 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
             sigma=Covarence_mat(param,j)
         j+=1
         i.value=i.value+1
-        acept_rate.append(Nacept/Nreject)
-        #out_sigma.append(nu.copy(sigma))
+        acept_rate.append(nu.copy(Nacept/Nreject))
+        out_sigma.append(nu.copy(sigma))
     #return once finished 
     param=outprep(param)
-    q.put((param[option.burnin:,:],chi[option.burnin:]))
-    #q.put((param,chi,out_sigma,acept_rate))
+    #q.put((param[option.burnin:,:],chi[option.burnin:]))
+    q.put((param,chi,out_sigma,acept_rate))
 
 
 def SA(i,rate):
     #temperature parameter for Simulated anneling (SA). 
     #reduices false acceptance rate if a<50% as a function on acceptance rate
-    lamdbaa=1.
-    if nu.mean(rate>.5):
-        N=1.5
-    else:
-        N=1.
-    return (1/(1+lamdbaa*(i+1)))**N
+    lamdbaa=.5
+    return (1/(1+lamdbaa*(i+1)))
 
 def Covarence_mat(param,j):
     #creates a covarence matrix for the step size 
