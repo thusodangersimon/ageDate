@@ -1,9 +1,8 @@
 #!/usr/bin/env python
 
-import numpy as nu
+
 from Age_date import *
 from mpi4py import MPI
-from multiprocessing import *
 import time as Time
 
 a=nu.seterr(all='ignore')
@@ -54,23 +53,23 @@ def MCMC_multi(data,itter,bins,cpus=cpu_count()):
     #post processing
     count=0
     outsigma={}
-    #outrate,outparam,outchi={},{},{}
+    outrate,outparam,outchi={},{},{}
 
-    outparam,outchi=nu.zeros([2,3*bins]),nu.array([nu.inf])
+    #outparam,outchi=nu.zeros([2,3*bins]),nu.array([nu.inf])
     for ii in temp:
-        outparam=nu.concatenate((outparam,ii[0][~nu.isinf(ii[1]),:]
+        '''outparam=nu.concatenate((outparam,ii[0][~nu.isinf(ii[1]),:]
                                  ),axis=0)
-        outchi=nu.concatenate((outchi,ii[1][~nu.isinf(ii[1])]))
-        #outsigma[str(count)]=ii[2]
-        '''outparam[str(count)]=ii[0][nu.nonzero(ii[0][:,0]>0)[0],:]
+        outchi=nu.concatenate((outchi,ii[1][~nu.isinf(ii[1])]))'''
+        outsigma[str(count)]=ii[2]
+        outparam[str(count)]=ii[0][~nu.isinf(ii[1]),:]
         outchi[str(count)]=ii[1][~nu.isinf(ii[1])]
         outsigma[str(count)]=nu.array(ii[2])
         outrate[str(count)]=nu.array(ii[3])
-        '''
+        
         count+=1
 
-    return outparam[2:,:],outchi[1:]
-    #return outparam,outchi,outsigma,outrate
+    #return outparam[2:,:],outchi[1:]
+    return outparam,outchi,outsigma,outrate
     
 def MCMC_vanila(data,bins,i,chibest,parambest,option,q=None):
     #does MCMC parameter estimation with a floating step size till 10k iterations
@@ -97,21 +96,23 @@ def MCMC_vanila(data,bins,i,chibest,parambest,option,q=None):
     #start in random place
     for k in xrange(len(parambest)):
         if k %2==0 and len(parambest)-bins-1>k:#metalicity
-            active_param[k]=10**(nu.random.random()*metal_unq.ptp()+metal_unq[0])
+            active_param[k]=(nu.random.random()*metal_unq.ptp()+metal_unq[0])
         else:#age and normilization
             if len(parambest)-bins-1<k: #normilization
                 active_param[k]=10*nu.random.random()
             else: #age
                 active_param[k]=nu.random.random()*age_unq.ptp()/float(bins)+bin[bin_index]
                 bin_index+=1
-    #active_param[0]=0.020
+    
     #active_param[2]=1
 
     param[0,:]=nu.copy(active_param)
     parambest=nu.copy(active_param)
     chi=nu.zeros(option.itter)+nu.inf
-    sigma=nu.identity(len(active_param))*nu.concatenate((nu.tile([.9,1.0],bins),
+    sigma=nu.identity(len(active_param))*nu.concatenate((nu.tile(
+                [metal_unq.ptp()*.1,age_unq.ptp()/bins*.1],bins),
                           nu.array([nu.sqrt(bins)]*bins)))
+
 
     model=get_model_fit(active_param,lib_vals,age_unq,metal_unq,bins)
     model=data_match(model,data)
@@ -157,7 +158,7 @@ def MCMC_vanila(data,bins,i,chibest,parambest,option,q=None):
                 chi[j]=nu.copy(chi[j-1])
                 Nreject+=1
  
-        if j<100: #change sigma with acceptance rate
+        if j<1000: #change sigma with acceptance rate
             #k=random.randint(0,len(sigma)-1)
             if Nacept/Nreject<.23 and all(sigma.diagonal()>=10**-6): 
                #too few aceptnce decrease sigma
@@ -166,15 +167,15 @@ def MCMC_vanila(data,bins,i,chibest,parambest,option,q=None):
                 sigma=sigma*1.05
         else: #use covarnence matrix
             sigma=Covarence_mat(param,j)
-
+        #print Nacept/Nreject
         j+=1
         i.value=i.value+1
-        acept_rate.append(nu.copy([Nacept,Nreject]))
+        acept_rate.append(nu.copy(Nacept/Nreject))
         out_sigma.append(nu.copy(sigma))
     #return once finished 
     param=outprep(param)
-    q.put((param[option.burnin:,:],chi[option.burnin:] ))
-    #q.put((param,chi,out_sigma,acept_rate))
+    #q.put((param[option.burnin:,:],chi[option.burnin:] ))
+    q.put((param,chi,out_sigma,acept_rate))
 
 
 def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
@@ -209,7 +210,8 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     param[0,:]=nu.copy(active_param)
     parambest=nu.copy(active_param)
     chi=nu.zeros(option.itter)+nu.inf
-    sigma=nu.concatenate((nu.tile([.9,1.0],bins),
+    sigma=nu.identity(len(active_param))*nu.concatenate((nu.tile(
+                [metal_unq.ptp()*.1,age_unq.ptp()/bins*.1],bins),
                           nu.array([nu.sqrt(bins)]*bins)))
 
     model=get_model_fit(active_param,lib_vals,age_unq,metal_unq,bins)
