@@ -34,7 +34,7 @@ def MCMC_multi(data,itter,bins,cpus=cpu_count()):
     q=Queue()
     #start multiprocess mcmc
     for ii in range(cpus):
-        work.append(Process(target=MCMC_SA,args=(data,bins,i,chibest
+        work.append(Process(target=MCMC_vanila,args=(data,bins,i,chibest
                                                      ,parambest,option,q)))
         work[-1].start()
     while i.value<itter:
@@ -158,9 +158,9 @@ def MCMC_vanila(data,bins,i,chibest,parambest,option,q=None):
                 chi[j]=nu.copy(chi[j-1])
                 Nreject+=1
  
-        if j<1000: #change sigma with acceptance rate
+        if j%1000!=0: #change sigma with acceptance rate
             #k=random.randint(0,len(sigma)-1)
-            if Nacept/Nreject<.23 and all(sigma.diagonal()>=10**-6): 
+            if Nacept/Nreject<.50 and all(sigma.diagonal()>=10**-6): 
                #too few aceptnce decrease sigma
                 sigma=sigma/1.05
             elif Nacept/Nreject>.25 and all(sigma.diagonal()<10): #not enough
@@ -171,7 +171,14 @@ def MCMC_vanila(data,bins,i,chibest,parambest,option,q=None):
         j+=1
         i.value=i.value+1
         acept_rate.append(nu.copy(Nacept/Nreject))
-        out_sigma.append(nu.copy(sigma))
+        out_sigma.append(nu.copy(sigma.diagonal()))
+        #change positions to best param
+        if .5<nu.random.rand(): #every hundred itterations
+            a=nu.exp((chibest.value-chi[j])/2.0)
+            if a>1: #accept change in param
+                print 'here'
+                for k in range(len(active_param)): 
+                    param[j,k]=nu.copy(parambest[k])
     #return once finished 
     param=outprep(param)
     #q.put((param[option.burnin:,:],chi[option.burnin:] ))
@@ -300,10 +307,10 @@ def SA(i,rate):
 def Covarence_mat(param,j):
     #creates a covarence matrix for the step size 
     #only takes cov of last 1000 itterations
-    if j-1000<0:
+    if j-2000<0:
         return nu.cov(param[:j,:].T)
     else:
-        return nu.cov(param[j-1000:j,:].T)
+        return nu.cov(param[j-2000:j,:].T)
 
 def outprep(param):
     #changes metals from log to normal
