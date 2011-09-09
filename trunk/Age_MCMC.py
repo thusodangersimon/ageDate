@@ -217,7 +217,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     parambest=nu.copy(active_param)
     chi=nu.zeros(option.itter)+nu.inf
     sigma=nu.identity(len(active_param))*nu.concatenate((nu.tile(
-                [metal_unq.ptp()*.1,age_unq.ptp()/bins*.1],bins),
+                [metal_unq.ptp()*nu.random.rand(),age_unq.ptp()/bins*nu.random.rand()],bins),
                           nu.array([nu.sqrt(bins)]*bins)))
 
 
@@ -231,7 +231,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     #stuff just for age_date
     #start MCMC
     #Nacept,Nreject=nu.ones(len(active_param)),nu.ones(len(active_param))
-    Nacept,Nreject=1.0,1.0
+    Nacept,Nreject,NfalseAccept=1.0,1.0,1.0
     acept_rate,out_sigma=[],[]
     j=1
     while option.value and i.value<option.itter:
@@ -244,7 +244,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
         #active_param[2]=normalize(data,model)
         chi[j]=sum((data[:,1]-model)**2)
         #decide to accept or not
-        a=nu.exp((chi[j-1]-chi[j])/SA(i.value,acept_rate))
+        a=nu.exp((chi[j-1]-chi[j])/SA(i.value,nu.mean(acept_rate)))
         #metropolis hastings
         if a>=1: #acepted
             param[j,:]=nu.copy(active_param)
@@ -259,25 +259,26 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
         else:
             if a>nu.random.rand():#false accept
                 param[j,:]=nu.copy(active_param)
-                Nacept+=1
+                NfalseAccept+=1
             else:
                 param[j,:]=nu.copy( param[j-1,:])
                 active_param=nu.copy( param[j-1,:])
                 chi[j]=nu.copy(chi[j-1])
                 Nreject+=1
  
-        if j<100: #change sigma with acceptance rate
+        if j<1000: #change sigma with acceptance rate
             #k=random.randint(0,len(sigma)-1)
-            if Nacept/Nreject<.23 and all(sigma.diagonal()>=10**-6): 
+            if Nacept/(Nreject+Nacept+NfalseAccept)<.23 and all(sigma.diagonal()>=10**-6): 
                #too few aceptnce decrease sigma
                 sigma=sigma/1.05
-            elif Nacept/Nreject>.25 and all(sigma.diagonal()<10): #not enough
+            elif Nacept/(Nreject+Nacept+NfalseAccept)>.25 and all(sigma.diagonal()<10): #not enough
                 sigma=sigma*1.05
         else: #use covarnence matrix
-            sigma=Covarence_mat(param,j)
+            if j%100:
+                sigma=Covarence_mat(param,j)
         j+=1
         i.value=i.value+1
-        acept_rate.append(nu.copy(Nacept/Nreject))
+        acept_rate.append(nu.copy(NfalseAccept/Nacept))
         out_sigma.append(nu.copy(sigma))
     #return once finished 
     param=outprep(param)
@@ -288,8 +289,13 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
 def SA(i,rate):
     #temperature parameter for Simulated anneling (SA). 
     #reduices false acceptance rate if a<50% as a function on acceptance rate
-    lamdbaa=.5
-    return (1/(1+lamdbaa*(i+1)))
+    if rate>.7:
+        lamdbaa=.5
+        N=1.7
+    else:
+        lamdbaa=.5
+        N=0
+    return (1/(1+lamdbaa*(i+1)))**N
 
 def Covarence_mat(param,j):
     #creates a covarence matrix for the step size 
