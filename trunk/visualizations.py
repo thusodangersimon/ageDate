@@ -33,34 +33,45 @@ from Age_MCMC import * ##temp import##
 
 def make_chi_grid(data,points=500):
     #makes a 3d pic of metal,age,chi with input spectra 2-D only
-    lib_vals=get_fitting_info()
+    lib_vals=get_fitting_info(lib_path)
+    lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0])
     #create grid
-    metal,age=nu.meshgrid(nu.linspace(lib_vals[0][:,0].min(),
-                                      lib_vals[0][:,0].max(),points),
+    metal,age=nu.meshgrid(nu.linspace(nu.log10(lib_vals[0][:,0].min()),
+                                      nu.log10(lib_vals[0][:,0].max()),points),
                           nu.linspace(lib_vals[0][:,1].min(),
                                       lib_vals[0][:,1].max(),points))
-    age,N=nu.meshgrid(nu.linspace(lib_vals[0][:,1].min(),
-                                      lib_vals[0][:,1].max(),points),
-                  nu.linspace(0,700,points))    
+    #age,N=nu.meshgrid(nu.linspace(lib_vals[0][:,1].min(),
+    #                                  lib_vals[0][:,1].max(),points),
+    #              nu.linspace(0,700,points))   
+    N=nu.array([[1,1],[1,1]])
     out=age*0
-    metal_unq=nu.unique(lib_vals[0][:,0])
+    metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
     age_unq=nu.unique(lib_vals[0][:,1])
     #start making calculations for chi squared value
-    #queue=Queue()
-    #work=[]
+    po,work=Pool(),[]
     for i in range(points):
-         print '%i out of %i' %(i,points)
-         sys.stdout.flush()
-         for j in range(points):
-            model=get_model_fit([.02,age[i,j],N[i,j]],lib_vals,age_unq,metal_unq,1)
-            model=data_match(model,data)
-            out[i,j]=sum((data[:,1] - model)**2)
- 
+         #print '%i out of %i' %(i+1,points)
+         #sys.stdout.flush()
+         work.append(po.apply_async(poly_grid,(metal,age,N,lib_vals,age_unq,metal_unq,1,points,data,out,i,)))
+    po.close()
+    po.join()
+    for i in work:
+        out=out+i.get()
     return metal,age,N,out
+
+def poly_grid(metal,age,N,lib_vals,age_unq,metal_unq,bins,points,data,out,i):
+    for j in range(points):     
+        model=get_model_fit([metal[i,j],age[i,j],N[1,0]],lib_vals,age_unq,metal_unq,bins)
+        model=data_match(model,data)
+        out[i,j]=sum((data[:,1] - model)**2)
+
+    print '%i out of %i' %(i+1,points)
+    sys.stdout.flush()
+    return out
 
 def make_marg_chi_grid(data,points,bins,axis=0):
     #makes a marginalized chi grid for the axis specified just for bins=2 right now
-    lib_vals=get_fitting_info()
+    lib_vals=get_fitting_info(lib_path)
     metal_unq=nu.unique(lib_vals[0][:,0])
     age_unq=nu.unique(lib_vals[0][:,1])
     bin=nu.linspace(age_unq.min(),age_unq.max(),bins+1)
@@ -101,7 +112,7 @@ def make_marg_chi_grid(data,points,bins,axis=0):
 def make_grid_multi(data,metal,age,other_age,iss,itter,q):
     #makes chi grid for multiprocess
     out=nu.zeros([len(metal),len(other_age)])
-    lib_vals=get_fitting_info()
+    lib_vals=get_fitting_info(lib_path)
     metal_unq=nu.unique(lib_vals[0][:,0])
     age_unq=nu.unique(lib_vals[0][:,1])
     for i in iss:#x axis plot age
@@ -117,3 +128,9 @@ def make_grid_multi(data,metal,age,other_age,iss,itter,q):
 
     q.put((out,iss))
 
+def plot_model(param,bins):
+    #takes parameters and returns spectra associated with it
+    lib_vals=get_fitting_info(lib_path)
+    metal_unq=nu.unique(lib_vals[0][:,0])
+    age_unq=nu.unique(lib_vals[0][:,1])
+    return get_model_fit(param,lib_vals,age_unq,metal_unq,bins)
