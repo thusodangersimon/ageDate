@@ -161,7 +161,7 @@ def get_model_fit(param,lib_vals,age_unq,metal_unq,bins):
             index=nu.nonzero(nu.logical_and(lib_vals[0][:,0]==10**temp_param[0],
                                             lib_vals[0][:,1]==temp_param[1]))[0]
             if ii==0:
-                out=read_spec(lib_vals[1][index][0])
+                out=read_spec(lib_vals[1][index][0],lib_path)
             else:
                 out[:,1]=out[:,1]+param[-ii-1]*read_spec(lib_vals[1][index][0])[:,1]
         #run 2 d interp
