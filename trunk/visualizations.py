@@ -131,6 +131,9 @@ def make_grid_multi(data,metal,age,other_age,iss,itter,q):
 def plot_model(param,bins):
     #takes parameters and returns spectra associated with it
     lib_vals=get_fitting_info(lib_path)
-    metal_unq=nu.unique(lib_vals[0][:,0])
+    lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0])
+    metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
     age_unq=nu.unique(lib_vals[0][:,1])
+    for i in range(0,bins,3):
+        param[i]=nu.log10(param[i])
     return get_model_fit(param,lib_vals,age_unq,metal_unq,bins)
