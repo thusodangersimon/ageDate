@@ -105,12 +105,6 @@ def binary_search(array,points):
 
     return out
 
-def plot_model(param,bins):
-    #takes parameters and returns spectra associated with it
-    lib_vals=get_fitting_info(lib_path)
-    metal_unq=nu.unique(lib_vals[0][:,0])
-    age_unq=nu.unique(lib_vals[0][:,1])
-    return get_model_fit(param,lib_vals,age_unq,metal_unq,bins)
 
 
 def get_model_fit(param,lib_vals,age_unq,metal_unq,bins):
