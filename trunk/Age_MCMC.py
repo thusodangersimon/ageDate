@@ -34,7 +34,7 @@ def MCMC_multi(data,itter,bins,cpus=cpu_count()):
     q=Queue()
     #start multiprocess mcmc
     for ii in range(cpus):
-        work.append(Process(target=MCMC_SA,args=(data,bins,i,chibest
+        work.append(Process(target=MCMC_vanila,args=(data,bins,i,chibest
                                                      ,parambest,option,q)))
         work[-1].start()
     while i.value<itter:
@@ -52,24 +52,24 @@ def MCMC_multi(data,itter,bins,cpus=cpu_count()):
            count+=1
     #post processing
     count=0
-    outsigma={}
-    outrate,outparam,outchi={},{},{}
+    #outsigma={}
+    #outrate,outparam,outchi={},{},{}
 
-    #outparam,outchi=nu.zeros([2,3*bins]),nu.array([nu.inf])
+    outparam,outchi=nu.zeros([2,3*bins]),nu.array([nu.inf])
     for ii in temp:
-        '''outparam=nu.concatenate((outparam,ii[0][~nu.isinf(ii[1]),:]
+        outparam=nu.concatenate((outparam,ii[0][~nu.isinf(ii[1]),:]
                                  ),axis=0)
-        outchi=nu.concatenate((outchi,ii[1][~nu.isinf(ii[1])]))'''
-        outsigma[str(count)]=ii[2]
+        outchi=nu.concatenate((outchi,ii[1][~nu.isinf(ii[1])]))
+        '''outsigma[str(count)]=ii[2]
         outparam[str(count)]=ii[0][~nu.isinf(ii[1]),:]
         outchi[str(count)]=ii[1][~nu.isinf(ii[1])]
         outsigma[str(count)]=nu.array(ii[2])
-        outrate[str(count)]=nu.array(ii[3])
+        outrate[str(count)]=nu.array(ii[3])'''
         
         count+=1
 
-    #return outparam[2:,:],outchi[1:]
-    return outparam,outchi,outsigma,outrate
+    return outparam[2:,:],outchi[1:]
+    #return outparam,outchi,outsigma,outrate
     
 def MCMC_vanila(data,bins,i,chibest,parambest,option,q=None):
     #does MCMC parameter estimation with a floating step size till 10k iterations
@@ -141,13 +141,14 @@ def MCMC_vanila(data,bins,i,chibest,parambest,option,q=None):
         if a>=1: #acepted
             param[j,:]=nu.copy(active_param)
             Nacept+=1
-            if chi[j]< chibest.value:
-                print 'best fit value %f' %chi[j]
+            if j>5 and chi[j]< chi[:j-1].min():
+                print 'best fit value %f in iteration %i' %(chi[j],j)
                 sys.stdout.flush()
+            if .01>nu.random.rand():
                 chibest.value=nu.copy(chi[j])
                 for k in range(len(active_param)):
                     parambest[k]=nu.copy(active_param[k])
-                
+               
         else:
             if a>nu.random.rand():#false accept
                 param[j,:]=nu.copy(active_param)
@@ -166,7 +167,7 @@ def MCMC_vanila(data,bins,i,chibest,parambest,option,q=None):
             elif Nacept/Nreject>.25 and all(sigma.diagonal()[:2]<10): #not enough
                 sigma=sigma*1.05
         else: #use covarnence matrix
-            if j%2000==0:
+            if j%500==0:
                 sigma=Covarence_mat(param,j)
             
         #print Nacept/Nreject
@@ -183,8 +184,8 @@ def MCMC_vanila(data,bins,i,chibest,parambest,option,q=None):
                     param[j,k]=nu.copy(parambest[k])
     #return once finished 
     param=outprep(param)
-    #q.put((param[option.burnin:,:],chi[option.burnin:] ))
-    q.put((param,chi,out_sigma,acept_rate))
+    q.put((param[option.burnin:,:],chi[option.burnin:] ))
+    #q.put((param,chi,out_sigma,acept_rate))
 
 
 def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
@@ -236,7 +237,9 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     for j in range(bins):
         active_param[2+j]=normalize(data,model)*nu.random.random()
     chi[0]=sum((data[:,1]-model)**2)
-    
+    chibest.value=chi[0]
+    for k in range(len(active_param)):
+        parambest[k]=nu.copy(active_param[k])
     #stuff just for age_date
     #start MCMC
     #Nacept,Nreject=nu.ones(len(active_param)),nu.ones(len(active_param))
@@ -244,7 +247,8 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     acept_rate,out_sigma=[],[]
     j=1
     while option.value and i.value<option.itter:
-       #for k in xrange(len(active_param)):
+    #for j in range(j,l):
+        #for k in xrange(len(active_param)):
         active_param= chain_gen_all(active_param,metal_unq, age_unq,bins,sigma)
         #active_param[2]=1
        #calculate new model and chi
@@ -253,20 +257,21 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
         #active_param[2]=normalize(data,model)
         chi[j]=sum((data[:,1]-model)**2)
         #decide to accept or not
-        a=nu.exp((chi[j-1]-chi[j]))/SA(i.value,nu.mean(acept_rate))
+        a=nu.exp((chi[j-1]-chi[j]))
         #metropolis hastings
         if a>=1: #acepted
             param[j,:]=nu.copy(active_param)
             Nacept+=1
-            if chi[j]< chibest.value:
-                print 'best fit value %f' %chi[j]
+            if j>5 and chi[j]< chi[:j-1].min():
+                print 'best fit value %f in iteration %i' %(chi[j],j)
                 sys.stdout.flush()
+            if .01>nu.random.rand():
                 chibest.value=nu.copy(chi[j])
                 for k in range(len(active_param)):
                     parambest[k]=nu.copy(active_param[k])
                 
         else:
-            if a>nu.random.rand():#false accept
+            if a+SA(j)>nu.random.rand():#false accept
                 param[j,:]=nu.copy(active_param)
                 NfalseAccept+=1
             else:
@@ -283,29 +288,35 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
             elif Nacept/Nreject>.25 and all(sigma.diagonal()[:2]<10): #not enough
                 sigma=sigma*1.05
         else: #use covarnence matrix
-            if j%2000==0:
+            if j%500==0:
                 sigma=Covarence_mat(param,j)
 
+        '''if .01>nu.random.rand(): #every hundred itterations
+            a=nu.exp((chi[j]-chibest.value)/2.0)
+            if a>1: #accept change in param
+                #print j
+                chi[j]=nu.copy(chibest.value)
+                for k in range(len(active_param)): 
+                    param[j,k]=nu.copy(parambest[k])
+                    active_param[k]=nu.copy(parambest[k])
+                    '''
         j+=1
         i.value=i.value+1
         acept_rate.append(nu.copy(NfalseAccept/Nacept))
         out_sigma.append(nu.copy(sigma))
     #return once finished 
     param=outprep(param)
-    #q.put((param[option.burnin:,:],chi[option.burnin:]))
-    q.put((param,chi,out_sigma,acept_rate))
+    q.put((param[option.burnin:,:],chi[option.burnin:]))
+    #q.put((param,chi,out_sigma,acept_rate))
+    #return param,chi,out_sigma,acept_rate
 
-
-def SA(i,rate):
+def SA(i):
     #temperature parameter for Simulated anneling (SA). 
-    #reduices false acceptance rate if a<50% as a function on acceptance rate
-    lamdbaa=2.
-    N=1.
-    a=(1+lamdbaa*(7000.-i))**N
-    if a<0:
-        return abs(1/a)
-    else:
-        return abs(a)
+    #reduices false acceptance rate if a<60% as a function on acceptance rate
+    lam=0.4
+    return lam*(3000-i)/3000.
+
+
 
 def Covarence_mat(param,j):
     #creates a covarence matrix for the step size 
