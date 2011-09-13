@@ -236,7 +236,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     #make weight paramer start closer to where ave data value
     for j in range(bins):
         active_param[2+j]=normalize(data,model)*nu.random.random()
-    chi[0]=sum((data[:,1]-model)**2)
+    chi[0]=sum((data[:,1]-normalize(data,model)*model)**2)
     chibest.value=chi[0]
     for k in range(len(active_param)):
         parambest[k]=nu.copy(active_param[k])
@@ -250,10 +250,11 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     #for j in range(j,l):
         #for k in xrange(len(active_param)):
         active_param= chain_gen_all(active_param,metal_unq, age_unq,bins,sigma)
-        #active_param[2]=1
+        #active_param[2]=normalize(data,model)*
        #calculate new model and chi
         model=get_model_fit(active_param,lib_vals,age_unq,metal_unq,bins)
         model=data_match(model,data)
+
         #active_param[2]=normalize(data,model)
         chi[j]=sum((data[:,1]-model)**2)
         #decide to accept or not
