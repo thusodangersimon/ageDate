@@ -128,7 +128,7 @@ def get_model_fit(param,lib_vals,age_unq,metal_unq,bins):
                 closest.append(nu.vstack((spect[:,0],spect[:,index[0]+1])).T)
             if ii==0:
                 out=nu.vstack((closest[0][:,0],
-                          linear_interpolation(10**metal,closest,temp_param[0]))).T
+                          linear_interpolation(10**metal,closest,10**temp_param[0]))).T
                 
             else:
                 out[:,1]=out[:,1]+param[-ii-1]*linear_interpolation(
@@ -174,11 +174,11 @@ def get_model_fit(param,lib_vals,age_unq,metal_unq,bins):
         #interp
             if ii==0:
                 out=nu.vstack((closest[0][:,0],bilinear_interpolation(
-                            10**metal,age,closest,temp_param[0],temp_param[1]))).T
+                            10**metal,age,closest,10**temp_param[0],temp_param[1]))).T
             else:
                 out[:,1]=out[:,1]+param[-ii-1]*bilinear_interpolation(
                     10**metal,age,closest,
-                    temp_param[0],temp_param[1])
+                    10**temp_param[0],temp_param[1])
         if ii==0: #add normilization to first out spectra
             out[:,1]=param[-ii-1]*out[:,1]
     
