@@ -5,7 +5,7 @@
 # Author: Thuso S Simon
 #
 # Date: 7th of June, 2011
-#TODO:  try using cov matrix for sigma
+#TODO:  
 #     make solutions of N_normalize>0 always
 #
 #    vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
@@ -41,7 +41,7 @@ from spectra_func import *
 global lib_path,spect
 lib_path='/home/thuso/Phd/Spectra_lib/'
 spect,info= load_spec_lib(lib_path)  
-#spect=edit_spec_range(spect,3200,9500)
+spect=edit_spec_range(spect,2000,10000)
 
 def find_az_box(param,age_unq,metal_unq):
     #find closest metal
