@@ -41,7 +41,7 @@ from spectra_func import *
 global lib_path,spect
 lib_path='/home/thuso/Phd/Spectra_lib/'
 spect,info= load_spec_lib(lib_path)  
-spect=edit_spec_range(spect,2000,10000)
+
 
 def find_az_box(param,age_unq,metal_unq):
     #find closest metal
