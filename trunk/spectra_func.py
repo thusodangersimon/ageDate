@@ -71,8 +71,8 @@ def edit_spec_range(spect,lam_min,lam_max):
     index=nu.nonzero(nu.logical_and(spect[:,0]>=lam_min,spect[:,0]<=lam_max))[0]
     return spect[index,:]
 
-def create_spectra(bins,func='flat',lam_min=3200,
-                   lam_max=9500,lib_path='/home/thuso/Phd/Spectra_lib/'):
+def create_spectra(bins,func='flat',lam_min=0,
+                   lam_max=nu.inf,lib_path='/home/thuso/Phd/Spectra_lib/'):
     #creates a SFH function and matches SSP's to it with 
     #inputted bins based on sfr/t*delta*
     lib=get_fitting_info(lib_path)
@@ -81,18 +81,20 @@ def create_spectra(bins,func='flat',lam_min=3200,
 
     #####old########
     if bins==1:
-        name=lib[1][nu.random.randint(0,len(lib[0]))]
-        return nu.loadtxt(lib_path+name),[name],1
+        names=lib[1][nu.random.randint(0,len(lib[0]))]
+        spect= nu.loadtxt(lib_path+names)
+        weights=1
+    else:
     #initalize out spectra
     #make sfh and bin areas
-    if func=='normal':
-        SFR=normal(t,gal_mass)
-    elif func=='expo':
-        SFR=expo(t,gal_mass)
-    elif func=='sinc':
-        SFR=sinc(t,gal_mass)
-    else:
-       spect,names,weights=flat(bins,age_unq.min(),age_unq.max(),lib) 
+        if func=='normal':
+            SFR=normal(t,gal_mass)
+        elif func=='expo':
+            SFR=expo(t,gal_mass)
+        elif func=='sinc':
+            SFR=sinc(t,gal_mass)
+        else:
+            spect,names,weights=flat(bins,age_unq.min(),age_unq.max(),lib) 
 
     #fix wavelenth range
     index=nu.nonzero(nu.logical_and(spect[:,0]>=lam_min,spect[:,0]<=lam_max))[0]
