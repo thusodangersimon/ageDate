@@ -34,7 +34,7 @@ def MCMC_multi(data,itter,bins,cpus=cpu_count()):
     q=Queue()
     #start multiprocess mcmc
     for ii in range(cpus):
-        work.append(Process(target=MCMC_vanila,args=(data,bins,i,chibest
+        work.append(Process(target=MCMC_SA,args=(data,bins,i,chibest
                                                      ,parambest,option,q)))
         work[-1].start()
     while i.value<itter:
@@ -243,22 +243,22 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     #stuff just for age_date
     #start MCMC
     #Nacept,Nreject=nu.ones(len(active_param)),nu.ones(len(active_param))
-    Nacept,Nreject,NfalseAccept=1.0,1.0,1.0
+    Nacept,Nreject,Nexchange_ratio,T_cuurent=1.0,1.0,1.0,0.
     acept_rate,out_sigma=[],[]
-    j=1
+    j,T=1,37450725549.
     while option.value and i.value<option.itter:
     #for j in range(j,l):
         #for k in xrange(len(active_param)):
         active_param= chain_gen_all(active_param,metal_unq, age_unq,bins,sigma)
-        #active_param[2]=normalize(data,model)*
+        
        #calculate new model and chi
         model=get_model_fit(active_param,lib_vals,age_unq,metal_unq,bins)
         model=data_match(model,data)
 
-        #active_param[2]=normalize(data,model)
-        chi[j]=sum((data[:,1]-model)**2)
+        active_param[2]=normalize(data,model)
+        chi[j]=sum((data[:,1]-active_param[2]*model)**2)
         #decide to accept or not
-        a=nu.exp((chi[j-1]-chi[j]))
+        a=nu.exp((chi[j-1]-chi[j])/2)
         #metropolis hastings
         if a>=1: #acepted
             param[j,:]=nu.copy(active_param)
@@ -272,9 +272,9 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
                     parambest[k]=nu.copy(active_param[k])
                 
         else:
-            if a+SA(j)>nu.random.rand():#false accept
+            if nu.exp(nu.log(a)/SA(T_cuurent,option.itter/(cpu_count()+.0),1.8,.11))>nu.random.rand():#false accept
                 param[j,:]=nu.copy(active_param)
-                NfalseAccept+=1
+                #NfalseAccept+=1
             else:
                 param[j,:]=nu.copy( param[j-1,:])
                 active_param=nu.copy( param[j-1,:])
@@ -292,6 +292,16 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
             if j%500==0:
                 sigma=Covarence_mat(param,j)
 
+        #change temperature
+        if nu.min([1,nu.exp(-(chi[j-1]-chi[j])/(2.*SA(T_cuurent+1,option.itter/(cpu_count()+.0),1.8,.11))-(chi[j-1]+chi[j])/(2.*SA(T_cuurent,option.itter/(cpu_count()+.0),1.8,.11)))/T])>nu.random.rand():
+            T_cuurent+=1
+            Nexchange_ratio+=1   
+        #make sure the change temp rate is aroudn 2%
+        if Nexchange_ratio/(Nacept+Nreject)>.02:
+            T=T*1.05
+        elif Nexchange_ratio/(Nacept+Nreject)<.005:
+            T=T/1.05
+
         '''if .01>nu.random.rand(): #every hundred itterations
             a=nu.exp((chi[j]-chibest.value)/2.0)
             if a>1: #accept change in param
@@ -303,7 +313,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
                     '''
         j+=1
         i.value=i.value+1
-        acept_rate.append(nu.copy(NfalseAccept/Nacept))
+        acept_rate.append(nu.copy(Nexchange_ratio/(Nacept+Nreject)))
         out_sigma.append(nu.copy(sigma))
     #return once finished 
     param=outprep(param)
@@ -311,11 +321,12 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     #q.put((param,chi,out_sigma,acept_rate))
     #return param,chi,out_sigma,acept_rate
 
-def SA(i):
+def SA(i,i_fin,T_start,T_stop):
     #temperature parameter for Simulated anneling (SA). 
     #reduices false acceptance rate if a<60% as a function on acceptance rate
-    lam=0.4
-    return lam*(3000-i)/3000.
+    m=(T_start-T_stop)/(0.98*i_fin)
+    b=T_start-m
+    return m*i+b
 
 
 
