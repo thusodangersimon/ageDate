@@ -112,7 +112,7 @@ def get_model_fit(param,lib_vals,age_unq,metal_unq,bins):
     #search age_unq and metal_unq to find closet box spectra and interps
     #does multi componets spectra and uses normilization params
     for ii in range(bins):
-        temp_param=param[ii*2:ii*2+2]
+        temp_param=param[ii*3:ii*3+2]
         metal,age,line=find_az_box(temp_param,age_unq,metal_unq)
         #check to see if on a lib spectra or on a line
         if line=='age': #run 1 d interp along metal only
@@ -208,7 +208,7 @@ def check(param,metal_unq, age_unq,bins): #checks if params are in bounds
         if any([metal_unq[-1],age[j+1]]<param[j*3:j*3+2]) or any([metal_unq[0],age[j]]>
                                                                  param[j*3:j*3+2]):
             return True
-        if param[j*3+2]<-10**3: #check normalizations
+        if param[j*3+2]<-4.: #check normalizations
             return True
     return False
 
@@ -282,13 +282,13 @@ def chain_gen_one(means,metal_unq, age_unq,bins,sigma,k):
 
 if __name__=='__main__':
     import cProfile as pro
-    data,info,weight=create_spectra(2)
-    bins=2
+    data,info,weight=create_spectra(1)
+    bins=1
     chibest_global=Value('f', nu.inf)
     i=Value('i', 0)
     parambest=Array('d',nu.zeros([3*bins]))
     option=Value('b',True)
-    pro.runctx('MCMC_vanila(data,bins,i,chibest,parambest,option)'
+    pro.runctx('MCMC_SA(data,bins,i,chibest,parambest,option)'
                , globals(),{'data':data,'bins':bins,'i':i,
                             'chibest':chibest_global,'parambest':parambest
                             ,'option':option}
