@@ -117,8 +117,8 @@ def MCMC_vanila(data,bins,i,chibest,parambest,option,q=None):
     model=get_model_fit(active_param,lib_vals,age_unq,metal_unq,bins)
     model=data_match(model,data)
     #make weight paramer start closer to where ave data value
-    for j in range(bins):
-        active_param[2+j]=normalize(data,model)*nu.random.random()
+    #for j in range(bins):
+    #    active_param[2+j]=normalize(data,model)*nu.random.random()
     chi[0]=sum((data[:,1]-model)**2)+nu.abs(data[:,1]-model).max()
     
     #stuff just for age_date
@@ -161,10 +161,10 @@ def MCMC_vanila(data,bins,i,chibest,parambest,option,q=None):
  
         if j<1000: #change sigma with acceptance rate
             #k=random.randint(0,len(sigma)-1)
-            if Nacept/Nreject<.50 and all(sigma.diagonal()>=10**-6): 
+            if Nacept/Nreject<.50: #and all(sigma.diagonal()>=10**-6): 
                #too few aceptnce decrease sigma
                 sigma=sigma/1.05
-            elif Nacept/Nreject>.25 and all(sigma.diagonal()[:2]<10): #not enough
+            elif Nacept/Nreject>.25:# and all(sigma.diagonal()[:2]<10): #not enough
                 sigma=sigma*1.05
         else: #use covarnence matrix
             if j%500==0:
@@ -234,9 +234,9 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     model=get_model_fit(active_param,lib_vals,age_unq,metal_unq,bins)
     model=data_match(model,data)
     #make weight paramer start closer to where ave data value
-    for j in range(bins):
-        active_param[2+j]=normalize(data,model)*nu.random.random()
-    chi[0]=sum((data[:,1]-normalize(data,model)*model)**2)
+    #for j in range(bins):
+    #    active_param[2+j]=normalize(data,model)*nu.random.random()
+    chi[0]=sum((data[:,1]-model)**2)
     chibest.value=chi[0]
     for k in range(len(active_param)):
         parambest[k]=nu.copy(active_param[k])
@@ -255,8 +255,8 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
         model=get_model_fit(active_param,lib_vals,age_unq,metal_unq,bins)
         model=data_match(model,data)
 
-        active_param[2]=normalize(data,model)
-        chi[j]=sum((data[:,1]-active_param[2]*model)**2)
+        #active_param[2]=normalize(data,model)
+        chi[j]=sum((data[:,1]-model)**2)
         #decide to accept or not
         a=nu.exp((chi[j-1]-chi[j])/2)
         #metropolis hastings
@@ -274,7 +274,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
         else:
             if nu.exp(nu.log(a)/SA(T_cuurent,option.itter/(cpu_count()+.0),1.8,.11))>nu.random.rand():#false accept
                 param[j,:]=nu.copy(active_param)
-                #NfalseAccept+=1
+                Nacept+=1
             else:
                 param[j,:]=nu.copy( param[j-1,:])
                 active_param=nu.copy( param[j-1,:])
@@ -283,10 +283,10 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
  
         if j<1000: #change sigma with acceptance rate
             #k=random.randint(0,len(sigma)-1)
-            if Nacept/Nreject<.50 and all(sigma.diagonal()>=10**-6): 
+            if Nacept/Nreject<.50: #and all(sigma.diagonal()>=10**-6): 
                #too few aceptnce decrease sigma
                 sigma=sigma/1.05
-            elif Nacept/Nreject>.25 and all(sigma.diagonal()[:2]<10): #not enough
+            elif Nacept/Nreject>.25:# and all(sigma.diagonal()[:2]<10): #not enough
                 sigma=sigma*1.05
         else: #use covarnence matrix
             if j%500==0:
@@ -342,6 +342,7 @@ def outprep(param):
     #changes metals from log to normal
     for i in range(0,param.shape[1],3):
         param[:,i]=10**param[:,i]
+        param[:,i+2]=10**param[:,i+2]
     return param
 
 
