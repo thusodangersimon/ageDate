@@ -131,7 +131,7 @@ def get_model_fit(param,lib_vals,age_unq,metal_unq,bins):
                           linear_interpolation(10**metal,closest,10**temp_param[0]))).T
                 
             else:
-                out[:,1]=out[:,1]+param[-ii-1]*linear_interpolation(
+                out[:,1]=out[:,1]+10**param[-ii-1]*linear_interpolation(
                     10**metal,closest,temp_param[0])
         elif line=='metal': #run 1 d interp along age only
             age=nu.array([age[0],age[-1]])
@@ -148,7 +148,7 @@ def get_model_fit(param,lib_vals,age_unq,metal_unq,bins):
                 out=nu.vstack((closest[0][:,0],
                              linear_interpolation(age,closest,temp_param[1]))).T
             else:
-                out[:,1]=out[:,1]+param[-ii-1]*linear_interpolation(
+                out[:,1]=out[:,1]+10**param[-ii-1]*linear_interpolation(
                         age,closest,temp_param[1])
 
         elif line=='both': #on a lib spectra
@@ -157,7 +157,7 @@ def get_model_fit(param,lib_vals,age_unq,metal_unq,bins):
             if ii==0:
                 out=read_spec(lib_vals[1][index][0],lib_path)
             else:
-                out[:,1]=out[:,1]+param[-ii-1]*read_spec(lib_vals[1][index][0])[:,1]
+                out[:,1]=out[:,1]+10**param[-ii-1]*read_spec(lib_vals[1][index][0])[:,1]
         #run 2 d interp
         else:
             metal.sort()
@@ -176,11 +176,11 @@ def get_model_fit(param,lib_vals,age_unq,metal_unq,bins):
                 out=nu.vstack((closest[0][:,0],bilinear_interpolation(
                             10**metal,age,closest,10**temp_param[0],temp_param[1]))).T
             else:
-                out[:,1]=out[:,1]+param[-ii-1]*bilinear_interpolation(
+                out[:,1]=out[:,1]+10**param[-ii-1]*bilinear_interpolation(
                     10**metal,age,closest,
                     10**temp_param[0],temp_param[1])
         if ii==0: #add normilization to first out spectra
-            out[:,1]=param[-ii-1]*out[:,1]
+            out[:,1]=10**param[-ii-1]*out[:,1]
     
    #exit program
     return out
@@ -208,7 +208,7 @@ def check(param,metal_unq, age_unq,bins): #checks if params are in bounds
         if any([metal_unq[-1],age[j+1]]<param[j*3:j*3+2]) or any([metal_unq[0],age[j]]>
                                                                  param[j*3:j*3+2]):
             return True
-        if param[j*3+2]<0: #check normalizations
+        if param[j*3+2]<-10**3: #check normalizations
             return True
     return False
 
