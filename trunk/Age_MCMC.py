@@ -195,7 +195,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
 
     #part on every modual wanting to fit the spectra
     #controls input and expot of files for fitt
-      
+    #data[:,1]=data[:,1]*1000.  
     
     #change random seed for random numbers for multiprocessing
     nu.random.seed(current_process().ident)
@@ -212,11 +212,11 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
 
     #start in random place
     for k in xrange(len(parambest)):
-        if k %2==0 and len(parambest)-bins-1>k:#metalicity
+        if any(nu.array(range(0,len(parambest),3))==k):#metalicity
             active_param[k]=(nu.random.random()*metal_unq.ptp()+metal_unq[0])
         else:#age and normilization
-            if len(parambest)-bins-1<k: #normilization
-                active_param[k]=10*nu.random.random()
+            if any(nu.array(range(2,len(parambest),3))==k): #normilization
+                active_param[k]=4./bins*nu.random.random()
             else: #age
                 active_param[k]=nu.random.random()*age_unq.ptp()/float(bins)+bin[bin_index]
                 bin_index+=1
@@ -247,10 +247,10 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     acept_rate,out_sigma=[],[]
     j,T=1,37450725549.
     while option.value and i.value<option.itter:
+        #print j
     #for j in range(j,l):
         #for k in xrange(len(active_param)):
         active_param= chain_gen_all(active_param,metal_unq, age_unq,bins,sigma)
-        
        #calculate new model and chi
         model=get_model_fit(active_param,lib_vals,age_unq,metal_unq,bins)
         model=data_match(model,data)
@@ -283,10 +283,10 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
  
         if j<1000: #change sigma with acceptance rate
             #k=random.randint(0,len(sigma)-1)
-            if Nacept/Nreject<.50: #and all(sigma.diagonal()>=10**-6): 
+            if Nacept/Nreject<.50 and all(sigma.diagonal()[:2]>=10**-6): 
                #too few aceptnce decrease sigma
                 sigma=sigma/1.05
-            elif Nacept/Nreject>.25:# and all(sigma.diagonal()[:2]<10): #not enough
+            elif Nacept/Nreject>.25 and all(sigma.diagonal()[:2]<10): #not enough
                 sigma=sigma*1.05
         else: #use covarnence matrix
             if j%500==0:
@@ -317,6 +317,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
         out_sigma.append(nu.copy(sigma))
     #return once finished 
     param=outprep(param)
+    #param[:,2]=param[:,2]/1000.
     q.put((param[option.burnin:,:],chi[option.burnin:]))
     #q.put((param,chi,out_sigma,acept_rate))
     #return param,chi,out_sigma,acept_rate
@@ -343,37 +344,22 @@ def outprep(param):
     for i in range(0,param.shape[1],3):
         param[:,i]=10**param[:,i]
         param[:,i+2]=10**param[:,i+2]
+        
     return param
 
 
 
 if __name__=='__main__':
-
-    def Stuff(data_og,i,age,lib_vals,age_unq,metal_unq):
-        data=data_og*1.
-        chi=age*0
-        data[:,1]=data_og[:,1]*i
-        print i
-        for j in age:
-            model=get_model_fit([metal_unq[0],j,1],lib_vals,age_unq,metal_unq,1)
-            chi[j]=sum((data[:,1]- normalize(data,model[:,1])*model[:,1])**2)
-        return i,chi.ptp()
- 
-    po=Pool()
-    lib_vals=get_fitting_info()
-    metal_unq=nu.unique(lib_vals[0][:,0])
-    age_unq=nu.unique(lib_vals[0][:,1])
-    age=nu.linspace(age_unq[0],age_unq[-1],1000)
-    
-    data_og=get_model_fit([metal_unq[0],age_unq[5],1],lib_vals,age_unq,metal_unq,1)
-    data=data_og*1.
-    chi=age*0
-    max_range=[]
-    [po.apply_async(Stuff,(data_og,i,age,lib_vals,age_unq,metal_unq,),callback=max_range.append) for i in xrange(500)]
-    po.close()
-    po.join()
-    import cPickle as pik
-    pik.dump(max_range,open('max_range.pik','w'),2)
-
-     #for i in xrange(500*500):
-      #  max_range.append(Stuff(data_og,i,age,lib_vals,age_unq,metal_unq))
+    import cProfile as pro
+    data,info,weight=create_spectra(1)
+    bins=1
+    chibest_global=Value('f', nu.inf)
+    i=Value('i', 0)
+    parambest=Array('d',nu.zeros([3*bins]))
+    option=Value('b',True)
+    option.itter=5000
+    pro.runctx('MCMC_SA(data,bins,i,chibest,parambest,option)'
+               , globals(),{'data':data,'bins':bins,'i':i,
+                            'chibest':chibest_global,'parambest':parambest
+                            ,'option':option}
+               ,filename='agedata.Profile')
