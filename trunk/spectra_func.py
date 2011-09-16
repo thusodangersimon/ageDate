@@ -94,7 +94,7 @@ def create_spectra(bins,func='flat',lam_min=0,
         elif func=='sinc':
             SFR=sinc(t,gal_mass)
         else:
-            spect,names,weights=flat(bins,age_unq.min(),age_unq.max(),lib) 
+            spect,names,weights=flat(bins,age_unq.min(),age_unq.max(),lib,lib_path) 
 
     #fix wavelenth range
     index=nu.nonzero(nu.logical_and(spect[:,0]>=lam_min,spect[:,0]<=lam_max))[0]
@@ -102,16 +102,16 @@ def create_spectra(bins,func='flat',lam_min=0,
 
 #create spectra with different SFR
 ####add a weighting function
-def flat(bins,age_lower,age_upper,lib):
+def flat(bins,age_lower,age_upper,lib,lib_path='/home/thuso/Phd/Spectra_lib/'):
     #makes a sfr that is constant over time
     t=nu.linspace(age_lower,age_upper,num=bins+1)
     specra_names=[]
     for i in range(len(t)-1):
         specra_names.append(search(lib,t[i],t[i+1]))
         try:
-            outspec[:,1]=outspec[:,1]+read_spec(specra_names[-1])[:,1]
+            outspec[:,1]=outspec[:,1]+read_spec(specra_names[-1],lib_path)[:,1]
         except NameError: #for first itteration when outspec not defined
-            outspec=read_spec(specra_names[-1])
+            outspec=read_spec(specra_names[-1],lib_path)
     return outspec,specra_names,nu.ones(bins)
 
 def normal(bins,max_SFR,std_SFR):
