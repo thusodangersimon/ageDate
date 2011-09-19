@@ -195,7 +195,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
 
     #part on every modual wanting to fit the spectra
     #controls input and expot of files for fitt
-    #data[:,1]=data[:,1]*1000.  
+    data[:,1]=data[:,1]*1000.  
     
     #change random seed for random numbers for multiprocessing
     nu.random.seed(current_process().ident)
@@ -205,7 +205,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
     age_unq=nu.unique(lib_vals[0][:,1])
 
-    param=nu.zeros([option.itter,len(parambest)])
+    param=nu.zeros([option.itter+1,len(parambest)])
     active_param=nu.zeros(len(parambest))
     bin=nu.linspace(age_unq.min(),age_unq.max(),bins+1)
     bin_index=0
@@ -216,7 +216,8 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
             active_param[k]=(nu.random.random()*metal_unq.ptp()+metal_unq[0])
         else:#age and normilization
             if any(nu.array(range(2,len(parambest),3))==k): #normilization
-                active_param[k]=4./bins*nu.random.random()
+                #active_param[k]=nu.random.random()
+                pass
             else: #age
                 active_param[k]=nu.random.random()*age_unq.ptp()/float(bins)+bin[bin_index]
                 bin_index+=1
@@ -225,17 +226,19 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
 
     param[0,:]=nu.copy(active_param)
     parambest=nu.copy(active_param)
-    chi=nu.zeros(option.itter)+nu.inf
+    chi=nu.zeros(option.itter+1)+nu.inf
     sigma=nu.identity(len(active_param))*nu.concatenate((nu.tile(
                 [metal_unq.ptp()*nu.random.rand(),age_unq.ptp()/bins*nu.random.rand()],bins),
                           nu.array([nu.sqrt(bins)]*bins)))
 
 
-    model=get_model_fit(active_param,lib_vals,age_unq,metal_unq,bins)
-    model=data_match(model,data)
+    model=get_model_fit_opt(active_param,lib_vals,age_unq,metal_unq,bins)  
+    N,model=N_normalize(data,model,bins)
+    ii=0
+    for k in range(2,len(parambest),3):
+        active_param[k]=nu.log10(N[ii])
+        ii+=1
     #make weight paramer start closer to where ave data value
-    #for j in range(bins):
-    #    active_param[2+j]=normalize(data,model)*nu.random.random()
     chi[0]=sum((data[:,1]-model)**2)
     chibest.value=chi[0]
     for k in range(len(active_param)):
@@ -252,8 +255,12 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
         #for k in xrange(len(active_param)):
         active_param= chain_gen_all(active_param,metal_unq, age_unq,bins,sigma)
        #calculate new model and chi
-        model=get_model_fit(active_param,lib_vals,age_unq,metal_unq,bins)
-        model=data_match(model,data)
+        model=get_model_fit_opt(active_param,lib_vals,age_unq,metal_unq,bins)  
+        N,model=N_normalize(data,model,bins)
+        ii=0
+        for k in range(2,len(parambest),3):
+            active_param[k]=nu.log10(N[ii])
+            ii+=1
 
         #active_param[2]=normalize(data,model)
         chi[j]=sum((data[:,1]-model)**2)
