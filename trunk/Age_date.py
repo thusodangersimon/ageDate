@@ -320,8 +320,11 @@ def N_normalize(data, model,bins):
     model=data_match_new(data,model,bins)
     #do non-negitave least squares fit
     if bins==1:
-        return normalize(data,model), model
+        N=[normalize(data,model['0'])]
+        return N, N[0]*model['0']
     N,chi=nnls(nu.array(model.values()).T,data[:,1])
+    index=nu.nonzero(N==0)[0]
+    N[index]+=10**-6
     return N,nu.sum(nu.array(model.values()).T*N,1)
 
 def chain_gen_all(means,metal_unq, age_unq,bins,sigma):
@@ -364,14 +367,30 @@ def chain_gen_one(means,metal_unq, age_unq,bins,sigma,k):
 
 if __name__=='__main__':
     import cProfile as pro
-    data,info,weight=create_spectra(1)
-    bins=1
-    chibest_global=Value('f', nu.inf)
-    i=Value('i', 0)
-    parambest=Array('d',nu.zeros([3*bins]))
-    option=Value('b',True)
-    pro.runctx('MCMC_SA(data,bins,i,chibest,parambest,option)'
-               , globals(),{'data':data,'bins':bins,'i':i,
-                            'chibest':chibest_global,'parambest':parambest
-                            ,'option':option}
+    lib_vals=get_fitting_info(lib_path)
+    lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
+    metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
+    age_unq=nu.unique(lib_vals[0][:,1])
+    bins=16
+    active_param=nu.zeros(bins)
+    bin=nu.linspace(age_unq.min(),age_unq.max(),bins+1)
+    bin_index=0
+    #start in random place
+    for k in xrange(bins):
+        if any(nu.array(range(0,bins,3))==k):#metalicity
+            active_param[k]=(nu.random.random()*metal_unq.ptp()+metal_unq[0])
+        else:#age and normilization
+            if any(nu.array(range(1,bins,3))==k): #age
+                #active_param[k]=nu.random.random()
+                active_param[k]=nu.random.random()*age_unq.ptp()/float(bins)+bin[bin_index]
+                bin_index+=1
+            else: #norm
+                #active_param[k]=nu.random.random()
+                pass
+
+
+    pro.runctx('get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins)'
+               , globals(),{'param':active_param,'lib_vals':lib_vals,'age_unq':age_unq
+                            ,'metal_unq':metal_unq,'bins':bins}
                ,filename='agedata.Profile')
+ 
