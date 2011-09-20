@@ -196,7 +196,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     #part on every modual wanting to fit the spectra
     #controls input and expot of files for fitt
     data[:,1]=data[:,1]*1000.  
-    
+    cpu=float(cpu_count())
     #change random seed for random numbers for multiprocessing
     nu.random.seed(current_process().ident)
     #initalize parmeters and chi squared
@@ -207,22 +207,21 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
 
     param=nu.zeros([option.itter+1,len(parambest)])
     active_param=nu.zeros(len(parambest))
+    
     bin=nu.linspace(age_unq.min(),age_unq.max(),bins+1)
     bin_index=0
-
     #start in random place
     for k in xrange(len(parambest)):
         if any(nu.array(range(0,len(parambest),3))==k):#metalicity
             active_param[k]=(nu.random.random()*metal_unq.ptp()+metal_unq[0])
         else:#age and normilization
-            if any(nu.array(range(2,len(parambest),3))==k): #normilization
+            if any(nu.array(range(1,len(parambest),3))==k): #age
                 #active_param[k]=nu.random.random()
-                pass
-            else: #age
                 active_param[k]=nu.random.random()*age_unq.ptp()/float(bins)+bin[bin_index]
                 bin_index+=1
-    
-    #active_param[2]=1
+            else: #norm
+                #active_param[k]=nu.random.random()
+                pass
 
     param[0,:]=nu.copy(active_param)
     parambest=nu.copy(active_param)
@@ -250,9 +249,6 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     acept_rate,out_sigma=[],[]
     j,T=1,37450725549.
     while option.value and i.value<option.itter:
-        #print j
-    #for j in range(j,l):
-        #for k in xrange(len(active_param)):
         active_param= chain_gen_all(active_param,metal_unq, age_unq,bins,sigma)
        #calculate new model and chi
         model=get_model_fit_opt(active_param,lib_vals,age_unq,metal_unq,bins)  
@@ -261,8 +257,6 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
         for k in range(2,len(parambest),3):
             active_param[k]=nu.log10(N[ii])
             ii+=1
-
-        #active_param[2]=normalize(data,model)
         chi[j]=sum((data[:,1]-model)**2)
         #decide to accept or not
         a=nu.exp((chi[j-1]-chi[j])/2)
@@ -279,7 +273,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
                     parambest[k]=nu.copy(active_param[k])
                 
         else:
-            if nu.exp(nu.log(a)/SA(T_cuurent,option.itter/(cpu_count()+.0),1.8,.11))>nu.random.rand():#false accept
+            if nu.exp(nu.log(a)/SA(T_cuurent,option.itter/(cpu),1.1,.11))>nu.random.rand():#false accept
                 param[j,:]=nu.copy(active_param)
                 Nacept+=1
             else:
@@ -298,9 +292,8 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
         else: #use covarnence matrix
             if j%500==0:
                 sigma=Covarence_mat(param,j)
-
         #change temperature
-        if nu.min([1,nu.exp(-(chi[j-1]-chi[j])/(2.*SA(T_cuurent+1,option.itter/(cpu_count()+.0),1.8,.11))-(chi[j-1]+chi[j])/(2.*SA(T_cuurent,option.itter/(cpu_count()+.0),1.8,.11)))/T])>nu.random.rand():
+        if nu.min([1,nu.exp(-(chi[j-1]-chi[j])/(2.*SA(T_cuurent+1,option.itter/(cpu),1.1,.11))-(chi[j-1]+chi[j])/(2.*SA(T_cuurent,option.itter/(cpu),1.1,.11)))/T])>nu.random.rand():
             T_cuurent+=1
             Nexchange_ratio+=1   
         #make sure the change temp rate is aroudn 2%
@@ -320,11 +313,13 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
                     '''
         j+=1
         i.value=i.value+1
-        acept_rate.append(nu.copy(Nexchange_ratio/(Nacept+Nreject)))
+        acept_rate.append(nu.copy(Nacept/(Nacept+Nreject)))
         out_sigma.append(nu.copy(sigma))
     #return once finished 
     param=outprep(param)
-    #param[:,2]=param[:,2]/1000.
+    for k in range(2,len(parambest),3):
+        param[:,k]=param[:,k]/1000.
+    data[:,1]=data[:,1]/1000.
     q.put((param[option.burnin:,:],chi[option.burnin:]))
     #q.put((param,chi,out_sigma,acept_rate))
     #return param,chi,out_sigma,acept_rate
@@ -358,8 +353,8 @@ def outprep(param):
 
 if __name__=='__main__':
     import cProfile as pro
-    data,info,weight=create_spectra(1)
-    bins=1
+    data,info,weight=create_spectra(2)
+    bins=2
     chibest_global=Value('f', nu.inf)
     i=Value('i', 0)
     parambest=Array('d',nu.zeros([3*bins]))
