@@ -37,9 +37,9 @@ import numpy as nu
 def bilinear_interpolation(x,y,z_temp,x_eval,y_eval):
     #takes in x,y as a len(x)=4, z is a len(z)>4 array and x_eval and y_eval
     #are floats
-    z=nu.zeros([len(z_temp[0][:,1]),4])
+    z=nu.zeros([len(z_temp[0]),4])
     for i in xrange(len(z_temp)):
-        z[:,i]=z_temp[i][:,1]
+        z[:,i]=z_temp[i]
     x,y=nu.unique(x),nu.unique(y)
     F=(z[:,0]*(x[1]-x_eval)*(y[1]-y_eval)+z[:,1]*(x_eval-x[0])*(y[1]-y_eval)
        +z[:,2]*(x[1]-x_eval)*(y_eval-y[0])+z[:,3]*(x_eval-x[0])*(y_eval-y[0])
@@ -47,9 +47,9 @@ def bilinear_interpolation(x,y,z_temp,x_eval,y_eval):
     return F
 
 def linear_interpolation(x,y_temp,x_eval):
-    y=nu.zeros([len(y_temp[0][:,1]),2])
+    y=nu.zeros([len(y_temp[0]),2])
     for i in xrange(len(y_temp)):
-        y[:,i]=y_temp[i][:,1]
+        y[:,i]=y_temp[i]
     
     return y[:,0]+(x_eval-x[0])*(y[:,1]-y[:,0])/(x[1]-x[0])
 
