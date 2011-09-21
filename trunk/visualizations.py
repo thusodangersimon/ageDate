@@ -61,8 +61,8 @@ def make_chi_grid(data,points=500):
 
 def poly_grid(metal,age,N,lib_vals,age_unq,metal_unq,bins,points,data,out,i):
     for j in range(points):     
-        model=get_model_fit([metal[i,j],age[i,j],1],lib_vals,age_unq,metal_unq,bins)
-        model=data_match(model,data)
+        model=get_model_fit_opt([metal[i,j],age[i,j],1],lib_vals,age_unq,metal_unq,bins)
+        N,model=N_normalize(data,model,bins)
         out[i,j]=sum((data[:,1] - model)**2)
 
     print '%i out of %i' %(i+1,points)
