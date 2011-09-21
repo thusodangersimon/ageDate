@@ -110,21 +110,21 @@ def get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins):
     #search age_unq and metal_unq to find closet box spectra and interps
     #does multi componets spectra and fits optimal normalization
     out={}
-    for ii in range(bins):
+    for ii in xrange(bins):
         temp_param=param[ii*3:ii*3+2]
         metal,age,line=find_az_box(temp_param,age_unq,metal_unq)
+        closest=[]
         #check to see if on a lib spectra or on a line
         if line=='age': #run 1 d interp along metal only
             metal=nu.array([metal[0],metal[-1]])
             metal.sort()
             age=age[0]
             #find spectra
-            closest=[]
             for i in 10**metal:
                 index=nu.nonzero(nu.logical_and(lib_vals[0][:,0]==i,
                                             lib_vals[0][:,1]==age))[0]
                 #closest.append(read_spec(lib_vals[1][index][0]))
-                closest.append(nu.vstack((spect[:,0],spect[:,index[0]+1])).T)
+                closest.append(spect[:,index[0]+1])
 
             out[str(ii)]=linear_interpolation(10**metal,closest,temp_param[0])
         elif line=='metal': #run 1 d interp along age only
@@ -132,37 +132,37 @@ def get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins):
             age.sort()
             metal=metal[0]
             #find spectra
-            closest=[]
+            
             for i in age:
                 index=nu.nonzero(nu.logical_and(lib_vals[0][:,1]==i,
                                             lib_vals[0][:,0]==10**metal))[0]
                 #closest.append(read_spec(lib_vals[1][index][0]))
-                closest.append(nu.vstack((spect[:,0],spect[:,index[0]+1])).T)
+                closest.append(spect[:,index[0]+1])
             
             out[str(ii)]=linear_interpolation(age,closest,temp_param[1])
 
         elif line=='both': #on a lib spectra
             index=nu.nonzero(nu.logical_and(lib_vals[0][:,0]==10**temp_param[0],
                                             lib_vals[0][:,1]==temp_param[1]))[0]
-            out[str(ii)]=read_spec(lib_vals[1][index][0])[:,1]
+            out[str(ii)]=nu.copy(spect[:,index[0]+1])
         #run 2 d interp
         else:
             metal.sort()
             metal=nu.array(metal)[nu.array([0,3,1,2],dtype='int32')]
             age.sort()
-            closest=[]
+            
             for i in range(4):
                 #print metal[i],age[i]
                 index=nu.nonzero(nu.logical_and(lib_vals[0][:,1]==age[i],
                                             lib_vals[0][:,0]==10**metal[i]))[0]
                 #closest.append(read_spec(lib_vals[1][index][0]))
-                closest.append(nu.vstack((spect[:,0],spect[:,index[0]+1])).T)
+                closest.append(spect[:,index[0]+1])
 
         #interp
             out[str(ii)]=bilinear_interpolation(10**metal,age,closest,
                                                       10**temp_param[0],temp_param[1])
     #give wavelength axis
-    out['wave']=closest[0][:,0]
+    out['wave']=nu.copy(spect[:,0])
 
    #exit program
     return out
@@ -270,7 +270,7 @@ def data_match_new(data,model,bins):
     out={}
     if model['wave'].shape[0]==data.shape[0]: #if same number of points
         if all(model['wave']==data[:,0]):#if they have the same x-axis
-            for i in range(bins):
+            for i in xrange(bins):
                 out[str(i)]=model[str(i)]
         else: #if same number of points but different at points
             print 'data match not ready yet'
@@ -280,11 +280,11 @@ def data_match_new(data,model,bins):
                                         model['wave']<=max(data[:,0])))[0]
         if index.shape[0]==data.shape[0]: #see if need to cut only
             if sum(model['wave'][index]==data[:,0])==index.shape[0]:
-                for i in range(bins):
+                for i in xrange(bins):
                     out[str(i)]=model[str(i)][index]
                 #out['wave']=model['wave'][index]
             else: #need to interpolate but keep same size
-                for i in range(bins):
+                for i in xrange(bins):
                     mout[str(i)]=spectra_lin_interp(model['wave'][:,0],model[str(i)][:,1],data[:,0])
                 #model['wave']=data[:,0]
         else:
@@ -372,15 +372,15 @@ if __name__=='__main__':
     metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
     age_unq=nu.unique(lib_vals[0][:,1])
     bins=16
-    active_param=nu.zeros(bins)
+    active_param=nu.zeros(bins*3)
     bin=nu.linspace(age_unq.min(),age_unq.max(),bins+1)
     bin_index=0
     #start in random place
-    for k in xrange(bins):
-        if any(nu.array(range(0,bins,3))==k):#metalicity
+    for k in xrange(3*bins):
+        if any(nu.array(range(0,bins*3,3))==k):#metalicity
             active_param[k]=(nu.random.random()*metal_unq.ptp()+metal_unq[0])
         else:#age and normilization
-            if any(nu.array(range(1,bins,3))==k): #age
+            if any(nu.array(range(1,bins*3,3))==k): #age
                 #active_param[k]=nu.random.random()
                 active_param[k]=nu.random.random()*age_unq.ptp()/float(bins)+bin[bin_index]
                 bin_index+=1
@@ -388,9 +388,9 @@ if __name__=='__main__':
                 #active_param[k]=nu.random.random()
                 pass
 
-
-    pro.runctx('get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins)'
-               , globals(),{'param':active_param,'lib_vals':lib_vals,'age_unq':age_unq
-                            ,'metal_unq':metal_unq,'bins':bins}
+    model=get_model_fit_opt(active_param,lib_vals,age_unq,metal_unq,bins)
+    data,info1,weight=create_spectra(bins,lam_min=2000,lam_max=10**4)
+    pro.runctx('N_normalize(data,model,bins)'
+               , globals(),{'data':data,'model':model,'bins':bins}
                ,filename='agedata.Profile')
  
