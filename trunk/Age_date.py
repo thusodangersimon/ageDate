@@ -285,11 +285,11 @@ def data_match_new(data,model,bins):
                 #out['wave']=model['wave'][index]
             else: #need to interpolate but keep same size
                 for i in xrange(bins):
-                    mout[str(i)]=spectra_lin_interp(model['wave'][:,0],model[str(i)][:,1],data[:,0])
+                    out[str(i)]=spectra_lin_interp(model['wave'],model[str(i)],data[:,0])
                 #model['wave']=data[:,0]
         else:
             for i in range(bins):
-                out[str(i)]=spectra_lin_interp(model['wave'][:,0],model[str(i)][:,1],data[:,0])
+                out[str(i)]=spectra_lin_interp(model['wave'],model[str(i)],data[:,0])
             #model['wave']=data[:,0]
     return out
     
