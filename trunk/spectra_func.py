@@ -88,7 +88,7 @@ def create_spectra(bins,func='flat',lam_min=0,
     #initalize out spectra
     #make sfh and bin areas
         if func=='normal':
-            SFR=normal(t,gal_mass)
+            spect,names,weights=normal(bins,age_unq.min(),age_unq.max(),lib,lib_path) 
         elif func=='expo':
             SFR=expo(t,gal_mass)
         elif func=='sinc':
@@ -114,10 +114,25 @@ def flat(bins,age_lower,age_upper,lib,lib_path='/home/thuso/Phd/Spectra_lib/'):
             outspec=read_spec(specra_names[-1],lib_path)
     return outspec,specra_names,nu.ones(bins)
 
-def normal(bins,max_SFR,std_SFR):
-    pass
+def normal(bins,age_lower,age_upper,lib,lib_path):
+    bin=nu.linspace(age_lower,age_upper,bins)
+    norm=[]
+    specra_names=[]
+    for i in range(len(bin)-1):
+        specra_names.append(search(lib,bin[i],bin[i+1]))
+        norm.append(5*nu.exp(-(float(specra_names[-1][11:-5])-(age_upper+age_lower)/2.)**2/(2*(age_upper-age_lower)*.3)))
+        try:
+            outspec[:,1]=outspec[:,1]+norm[i]*read_spec(specra_names[-1],lib_path)[:,1]
+        except NameError: #for first itteration when outspec not defined
+            outspec=norm[i]*read_spec(specra_names[-1],lib_path)
+    return outspec,specra_names,nu.array(norm)
+
+    
 
 def expo(t,gal_mass,lam_min,lam_max):
+    pass
+
+def student_t(bins,max_SFR,std_SFR):
     pass
 
 def age_covert(age):
