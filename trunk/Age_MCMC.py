@@ -264,10 +264,9 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
         if a>=1: #acepted
             param[j,:]=nu.copy(active_param)
             Nacept+=1
-            if j>5 and chi[j]< chi[:j-1].min():
+            if chi[j]< chibest.value:
                 print 'best fit value %f in iteration %i' %(chi[j],j)
                 sys.stdout.flush()
-            if .01>nu.random.rand():
                 chibest.value=nu.copy(chi[j])
                 for k in range(len(active_param)):
                     parambest[k]=nu.copy(active_param[k])
