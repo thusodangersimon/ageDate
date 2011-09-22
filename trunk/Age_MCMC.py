@@ -272,7 +272,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
                     parambest[k]=nu.copy(active_param[k])
                 
         else:
-            if nu.exp(nu.log(a)/SA(T_cuurent,option.itter/(cpu),1.1,.11))>nu.random.rand():#false accept
+            if nu.exp(nu.log(a)/SA(T_cuurent,option.itter/(cpu),1.5,.11))>nu.random.rand():#false accept
                 param[j,:]=nu.copy(active_param)
                 Nacept+=1
             else:
@@ -292,7 +292,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
             if j%500==0:
                 sigma=Covarence_mat(param,j)
         #change temperature
-        if nu.min([1,nu.exp(-(chi[j-1]-chi[j])/(2.*SA(T_cuurent+1,option.itter/(cpu),1.1,.11))-(chi[j-1]+chi[j])/(2.*SA(T_cuurent,option.itter/(cpu),1.1,.11)))/T])>nu.random.rand():
+        if nu.min([1,nu.exp(-(chi[j-1]-chi[j])/(2.*SA(T_cuurent+1,option.itter/(cpu),1.5,.11))-(chi[j-1]+chi[j])/(2.*SA(T_cuurent,option.itter/(cpu),1.5,.11)))/T])>nu.random.rand():
             T_cuurent+=1
             Nexchange_ratio+=1   
         #make sure the change temp rate is aroudn 2%
