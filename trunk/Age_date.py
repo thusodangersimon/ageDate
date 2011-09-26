@@ -299,6 +299,7 @@ def check(param,metal_unq, age_unq,bins): #checks if params are in bounds
     for j in xrange(bins):#check age and metalicity
         if any([metal_unq[-1],age[j+1]]<param[j*3:j*3+2]) or any([metal_unq[0],age[j]]>
                                                                  param[j*3:j*3+2]):
+            ''' if  any([metal_unq[-1],age_unq[-1]]<param[j*3:j*3+2]) or any([metal_unq[0],age_unq[0]]>param[j*3:j*3+2]):'''
             return True
         #if param[j*3+2]<-4.: #check normalizations
         #    return True
