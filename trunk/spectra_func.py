@@ -115,16 +115,17 @@ def flat(bins,age_lower,age_upper,lib,lib_path='/home/thuso/Phd/Spectra_lib/'):
     return outspec,specra_names,nu.ones(bins)
 
 def normal(bins,age_lower,age_upper,lib,lib_path):
-    bin=nu.linspace(age_lower,age_upper,bins)
+    bin=nu.linspace(age_lower,age_upper,bins+1)
     norm=[]
     specra_names=[]
     for i in range(len(bin)-1):
         specra_names.append(search(lib,bin[i],bin[i+1]))
-        norm.append(5*nu.exp(-(float(specra_names[-1][11:-5])-(age_upper+age_lower)/2.)**2/(2*(age_upper-age_lower)*.3)))
+        norm.append(5*nu.exp(-(float(specra_names[-1][11:-5])-(7.))**2/(2*(age_upper-age_lower)*.1)))
         try:
             outspec[:,1]=outspec[:,1]+norm[i]*read_spec(specra_names[-1],lib_path)[:,1]
         except NameError: #for first itteration when outspec not defined
-            outspec=norm[i]*read_spec(specra_names[-1],lib_path)
+            outspec=read_spec(specra_names[-1],lib_path)
+            outspec[:,1]=norm[i]*outspec[:,1]
     return outspec,specra_names,nu.array(norm)
 
     
