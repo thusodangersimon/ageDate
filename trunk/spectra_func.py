@@ -72,9 +72,10 @@ def edit_spec_range(spect,lam_min,lam_max):
     return spect[index,:]
 
 def create_spectra(bins,func='flat',lam_min=0,
-                   lam_max=nu.inf,lib_path='/home/thuso/Phd/Spectra_lib/'):
+                   lam_max=nu.inf,lib_path='/home/thuso/Phd/Spectra_lib/',slope=None):
     #creates a SFH function and matches SSP's to it with 
     #inputted bins based on sfr/t*delta*
+    #slope parameter is only ineed for func="line"
     lib=get_fitting_info(lib_path)
     metal_unq=nu.unique(lib[0][:,0])
     age_unq=nu.unique(lib[0][:,1])
@@ -89,8 +90,11 @@ def create_spectra(bins,func='flat',lam_min=0,
     #make sfh and bin areas
         if func=='normal':
             spect,names,weights=normal(bins,age_unq.min(),age_unq.max(),lib,lib_path) 
-        elif func=='expo':
-            SFR=expo(t,gal_mass)
+        elif func=='line':
+            if not slope:
+                print 'Need to specify slope to use this function'
+                raise
+            spect,names,weights=line(slope,bins,age_unq.min(),age_unq.max(),lib,lib_path) 
         elif func=='sinc':
             SFR=sinc(t,gal_mass)
         else:
@@ -130,8 +134,30 @@ def normal(bins,age_lower,age_upper,lib,lib_path):
 
     
 
-def expo(t,gal_mass,lam_min,lam_max):
-    pass
+def line(slope,bins,age_lower,age_upper,lib,lib_path):
+    #makes a spectra with a line
+    #will yell if any value is less than 0
+    bin=nu.linspace(age_lower,age_upper,bins+1)
+    norm=[]
+    specra_names=[]
+    for i in range(len(bin)-1):
+        specra_names.append(search(lib,bin[i],bin[i+1]))
+        if slope>=0:        
+            norm.append(float(specra_names[-1][11:-5])*slope)
+        else:
+            norm.append(float(specra_names[-1][11:-5])*slope+(1.-slope*age_upper))
+        try:
+            outspec[:,1]=outspec[:,1]+norm[i]*read_spec(specra_names[-1],lib_path)[:,1]
+        except NameError: #for first itteration when outspec not defined
+            outspec=read_spec(specra_names[-1],lib_path)
+            outspec[:,1]=norm[i]*outspec[:,1]
+
+    if any(nu.array(norm)<0):
+        print 'Value less than zero'
+        raise
+    return outspec,specra_names,nu.array(norm)
+
+
 
 def student_t(bins,max_SFR,std_SFR):
     pass
