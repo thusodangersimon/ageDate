@@ -35,7 +35,7 @@ from multiprocessing import *
 from interp_func import *
 from spectra_func import *
 from scipy.optimize import nnls
-
+import time as Time
 
 ###spectral lib stuff####
 global lib_path,spect
@@ -301,8 +301,8 @@ def check(param,metal_unq, age_unq,bins): #checks if params are in bounds
                                                                  param[j*3:j*3+2]):
             ''' if  any([metal_unq[-1],age_unq[-1]]<param[j*3:j*3+2]) or any([metal_unq[0],age_unq[0]]>param[j*3:j*3+2]):'''
             return True
-        #if param[j*3+2]<-4.: #check normalizations
-        #    return True
+        if not (0<param[j*3+2] and param[j*3+2]<10): #check normalizations
+            return True
     return False
 
 def continum_normalize(data,order):
@@ -332,8 +332,11 @@ def chain_gen_all(means,metal_unq, age_unq,bins,sigma):
     #creates new chain for MCMC, does log spacing for metalicity
     #lin spacing for everything else, runs check on values also
     out=nu.random.multivariate_normal(means,sigma)
+    t=Time.time()
     while check(out,metal_unq, age_unq,bins):
         out=nu.random.multivariate_normal(means,sigma)
+        if Time.time()-t>.5:
+            sigma=sigma/1.05
     return out
 
 def chain_gen_one(means,metal_unq, age_unq,bins,sigma,k):
