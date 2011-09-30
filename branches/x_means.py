@@ -31,107 +31,47 @@
 from scipy.cluster import vq as sci
 import numpy as nu
 
-def xmeans(point):
+def xmean(points,min_points=5):
     #does x_means clustering on a set of points ans splits up into x clusers
     #uses scipy's kmeans clusering to and the baysian information critera
     #to coose correct number of clusters
-    cluser,asocate_point=sci.kmeans2(point,2)
-    #plot lab.plot(point[asocate_point==0,0],point[asocate_point==0,1],'.',point[asocate_point==1,0],point[asocate_point==1,1],'.')
+   
+    max_cluster=sum(points.shape)/float(min_points)+1
+    #inital split
+    cluster,asocate_point=sci.kmeans2(points,2)
     
-    #determine if should split
-    while True: #make sure kmeans converges
-        try:
-            BIC2=Like(point[asocate_point==0],cluser[0])+Like(point[asocate_point==1],cluser[1])
-            BIC1=Like(point,nu.mean(point,axis=0))
-            break
-        except ZeroDivisionError:
-            pass
-    if nu.sum(BIC2-BIC1)>nu.log(10): #accept split
-        k=3
-        pre_cluser,pre_asocate_point=sci.kmeans2(point,k-1)
-        while nu.sum(BIC2-BIC1)>nu.log(5) or nu.sum(BIC2-BIC1)==0.0:
-            cluser,asocate_point=sci.kmeans2(point,k)
-            try:
-                BIC2,BIC1=[0.0]*cluser.shape[1],[0.0]*cluser.shape[1]
-            except IndexError: #if 1 dimensional
-                BIC2,BIC1=0.0,0.0
-            for i in range(k):
-                try:
-                    BIC2=BIC2+Like(point[asocate_point==i],cluser[i])
-                except ZeroDivisionError:
-                    continue
-                if i<k-2:
-                    try:
-                        BIC1=BIC1+Like(point[pre_asocate_point==i],pre_cluser[i])
-                    except ZeroDivisionError:
-                        pre_cluser,pre_asocate_point=sci.kmeans2(point,k-1)
-                        continue
-            if nu.sum(BIC2-BIC1)>nu.log(5):
-                pre_cluser,pre_asocate_point=cluser.copy(),asocate_point.copy()
-                k+=1
-               # print k
-    else:
-        return nu.mean(point,axis=0),nu.zeros(len(point))
+    if BIC1(points,nu.mean(points,0),nu.cov(points.T))>BIC2(points,asocate_point):
+        return nu.mean(points),nu.zeros(points.shape)
+    else: #start split algorythom
+        pass
+    
+def BIC1(points,mean,cov):
+    #finds BIC of cluster with 1 mean: from xmeans paper
+    mean_minus=points-mean
+    try:
+        n_dim=points.shape[1]
+    except IndexError:
+        n_dim=1
+    try:
+        cov_diag=cov.diagonal()
+    except ValueError:
+        cov_diag=cov
+    invcov=cov**-1
+    a=0 #a=sum(Transpose(pt[j]-mean).invcov.(pt[j]-mean))
+    for i in xrange(points.shape[0]):
+        a+=nu.sum(nu.dot(mean_minus[i],nu.dot(invcov,mean_minus[i].T)))
+                        
+    n_points=sum(points.shape)
+    return n_points*n_dim*nu.log(2*nu.pi)+nu.sum(n_points*nu.log(cov_diag))+2*a+0.5*n_dim*(n_dim+3.)*nu.log(n_points)
         
-    return pre_cluser,pre_asocate_point
+def BIC2(points):
+    #find BIC with cluster with 2 means: from xmeans paper
+    out=0
+    mean,asocate_point=sci.kmeans2(points,2)
+    for i in range(2):
+        out+=BIC1(points[asocate_point==i,:],mean[i],nu.cov(points[asocate_point==i,:].T))
 
-def xmean_spit(point):
-    #splits each cluster and tests to see if good split, Hierarical way
-    
-    #starts with 1 cluster and increases from there
-    cluster_old=nu.mean(point,axis=0)
-    associate_old =nu.zeros(len(point))
-    #starts with 2 clusers and compares
-    cluster_new,associate_new=sci.kmeans2(point,2)
-    #calculate if should keep split
-    BIC2=Like(point[asocate_point==0],cluster_new[0])+Like(point[asocate_point==1],cluster_new[1])
-    BIC1=Like(point,cluster_old)
-
-    #determine if should split
-    while True: #make sure kmeans converges
-        try:
-            BIC2=Like(point[asocate_point==0],cluster_new[0])+Like(point[asocate_point==1],cluster_new[1])
-            BIC1=Like(point,nu.mean(point,axis=0))
-            break
-        except ZeroDivisionError:
-            pass
-    if nu.sum(BIC2-BIC1)>nu.log(10): #accept split, split into sub clusers
-        new_point={'1':point[asocate_point==0,:],'2':point[asocate_point==1,:]} 
-        while nu.sum(BIC2-BIC1)>nu.log(5) or nu.sum(BIC2-BIC1)==0.0:
-            cluser,asocate_point=sci.kmeans2(point,k)
-            try:
-                BIC2,BIC1=[0.0]*cluser.shape[1],[0.0]*cluser.shape[1]
-            except IndexError: #if 1 dimensional
-                BIC2,BIC1=0.0,0.0
-            for i in range(k):
-                try:
-                    BIC2=BIC2+Like(point[asocate_point==i],cluser[i])
-                except ZeroDivisionError:
-                    continue
-                if i<k-2:
-                    try:
-                        BIC1=BIC1+Like(point[pre_asocate_point==i],pre_cluser[i])
-                    except ZeroDivisionError:
-                        pre_cluser,pre_asocate_point=sci.kmeans2(point,k-1)
-                        continue
-            if nu.sum(BIC2-BIC1)>nu.log(5):
-                pre_cluser,pre_asocate_point=cluser.copy(),asocate_point.copy()
-                k+=1
-               # print k
-    else:
-        return nu.mean(point,axis=0),nu.zeros(len(point))
-        
-    return pre_cluser,pre_asocate_point
-  
-
-def Like(x,mu):
-    #determines the ln likelihood that the points are assocated with the clusers
-    #assuming gaussan distribution
-    #calculate maximul likelyhood sigma 
-    var=(len(x)-1)/float(len(x))*sum((x-mu)**2)
-    return (-len(x)/2.)*nu.log(2*nu.pi*var)-1/(2.*var)*sum((x-mu)**2)
-    
-
+    return out
     
 def kdtree(point_list, depth=0):
 #makes trees to partition points into cluster for speed up of x-means
