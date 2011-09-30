@@ -3,7 +3,7 @@
 
 from Age_date import *
 from mpi4py import MPI
-import time as Time
+#import time as Time
 
 a=nu.seterr(all='ignore')
 
@@ -104,8 +104,8 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
                 active_param[k]=nu.mean([bin[bin_index],bin[1+bin_index]])
                 bin_index+=1
             else: #norm
-                #active_param[k]=nu.random.random()
-                pass
+                active_param[k]=10*nu.random.random()
+                
 
     param[0,:]=nu.copy(active_param)
     parambest=nu.copy(active_param)
@@ -114,7 +114,8 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
                 [metal_unq.ptp()*nu.random.rand(),age_unq.ptp()/bins*nu.random.rand()],bins),
                           nu.array([nu.sqrt(bins)]*bins)))
 
-
+    #for k in range(0,len(parambest),3):
+    #    active_param[k]=nu.log10(0.0080)
     model=get_model_fit_opt(active_param,lib_vals,age_unq,metal_unq,bins)  
     '''N,model=N_normalize(data,model,bins)
     ii=0
@@ -128,7 +129,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     N=nu.array(N)
     model=nu.sum(nu.array(model.values()).T*N,1)
     #make weight paramer start closer to where ave data value
-    chi[0]=sum((data[:,1]-model)**2)
+    chi[0]=sum((data[:,1]-normalize(data,model)*model)**2)
     chibest.value=chi[0]
     for k in range(len(active_param)):
         parambest[k]=nu.copy(active_param[k])
@@ -144,6 +145,8 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
         for k in range(1,len(parambest),3):
             active_param[k]=nu.mean([bin[bin_index],bin[1+bin_index]])
             bin_index+=1
+        #for k in range(0,len(parambest),3):
+        #    active_param[k]=nu.log10(0.0080)
        #calculate new model and chi
         model=get_model_fit_opt(active_param,lib_vals,age_unq,metal_unq,bins)  
         '''N,model=N_normalize(data,model,bins)
@@ -158,7 +161,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
         N=nu.array(N)
         model=nu.sum(nu.array(model.values()).T*N,1)
 
-        chi[j]=sum((data[:,1]-model)**2)
+        chi[j]=sum((data[:,1]-normalize(data,model)*model)**2)
         #decide to accept or not
         a=nu.exp((chi[j-1]-chi[j])/2)
         #metropolis hastings
@@ -217,8 +220,8 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
         out_sigma.append(nu.copy(sigma))
     #return once finished 
     param=outprep(param)
-    for k in range(2,len(parambest),3):
-        param[:,k]=param[:,k]/1000.
+    #for k in range(2,len(parambest),3):
+    #    param[:,k]=param[:,k]/1000.
     data[:,1]=data[:,1]/1000.
     q.put((param[option.burnin:,:],chi[option.burnin:]))
     #q.put((param,chi,out_sigma,acept_rate))
@@ -245,7 +248,7 @@ def outprep(param):
     #changes metals from log to normal
     for i in range(0,param.shape[1],3):
         param[:,i]=10**param[:,i]
-        param[:,i+2]=10**param[:,i+2]
+        param[:,i+2]=param[:,i+2]/10.
         
     return param
 
