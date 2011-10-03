@@ -44,47 +44,47 @@ changes the Pi(thedta)d theta into dX 1-D integral and evalueates it by trapizod
 
 """
 
-import numpy as nu
 
-import mpl_toolkits.mplot3d.axes3d as lab3
-import pylab as lab
 
-#test modual
-import Gauss_landscape as gl
-from x-means import x_means
-
+#import Gauss_landscape as gl
+from x_means import xmean
+from Age_date import *
 
 def nested_sampling(data,N,bins,elogf=1.1,stop=10**-3):
 #main nested sampling program
     #sample N points evenly through out boundaries
     #param location [points in M dimensions,like] 
-    points=nu.zeros([N,3*bins+1])
+    points=nu.zeros([N,3*bins+2])
+    data[:,1]=data[:,1]*1000.
     #get boundaries
     lib_vals=get_fitting_info(lib_path)
-    metal_unq=nu.unique(lib_vals[0][:,0])
+    lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
+    metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
     age_unq=nu.unique(lib_vals[0][:,1])
     bin=nu.linspace(age_unq.min(),age_unq.max(),bins+1)
     bin_index=0
-
     #start in random place
     for k in xrange(points.shape[1]):
-        if k %2==0 and points.shape[1]-bins-1>k:#metalicity
-            points[:,k]=10**(nu.random.rand(points.shape[0])*nu.log10(metal_unq).ptp()+nu.log10(metal_unq)[0])
-        elif k==points.shape[1]-1:#likelihood area don't need to populate.. yet
-            continue
+        if any(nu.array(range(0,points.shape[1],3))==k):#metalicity
+           points[:,k]=(nu.random.random(points.shape[0])*metal_unq.ptp()+metal_unq[0])
         else:#age and normilization
-            if points.shape[1]-bins-1<k: #normilization
-                points[:,k]=1000*nu.random.rand(points.shape[0])
-            else: #age
-                points[:,k]=nu.random.rand(points.shape[0])*age_unq.ptp()/float(bins)+bin[bin_index]
+            if any(nu.array(range(1,points.shape[1],3))==k): #age
+                points[:,k]=nu.random.random(points.shape[0])*age_unq.ptp()/float(bins)+bin[bin_index]
+                #points[:,k]=nu.mean([bin[bin_index],bin[1+bin_index]])
                 bin_index+=1
-
-        
+            else: #norm
+                points[:,k]=nu.random.random(points.shape[0])
+                       
     #calculate likeihood for each point and sort
+    po=Pool()
+    temp=[]
     for j in points:
-        temp=get_model_fit(j[:-1],lib_vals,age_unq,metal_unq,bins)
-        temp=data_match(temp,data)
-        j[-1]=sum((data[:,1]-temp))**2
+        #multicore
+        po.apply_async(multi_samp,(j,data,lib_vals,metal_unq,age_unq,bins,),callback=temp.append)
+        #j=multi_samp(j,data,lib_vals,metal_unq,age_unq,bins)
+    po.close()
+    po.join()
+    points=nu.copy(nu.array(temp))
 
     index=nu.argsort(points[:,-1])
     points=points[index,:]
@@ -98,7 +98,7 @@ def nested_sampling(data,N,bins,elogf=1.1,stop=10**-3):
     #evid=[0]
     i,n_fail=1,0
     #start nested sampling
-    while (points[-1,-1]-points[0,-1])*prior_vol[-1]>10**-4 or i<500: ####put in stop condition later
+    while (points[-1,-1]-points[0,-1])*prior_vol[-1]>2*10**-3 or i<500: ####put in stop condition later
         #step 2 and 3
         print (points[-1,-1]-points[0,-1])*prior_vol[-1]
         likelihood.append(points[0,-1])
@@ -111,20 +111,17 @@ def nested_sampling(data,N,bins,elogf=1.1,stop=10**-3):
         #find new sampling by L_new>L_old ###slow
         temp_points=ellipse_Samp(points[:N-2,:].max(0),points[:N-2,:].min(0),age_unq,metal_unq,
                                  elogf,bins)
-        temp=get_model_fit(temp_points[:-1],lib_vals,age_unq,metal_unq,bins)
-        temp=data_match(temp,data)
-        temp_points[-1]=sum((data[:,1]-temp))**2
+        
+        temp_points=multi_samp(temp_points,data,lib_vals,metal_unq,age_unq,bins)
 
         while points[-1,-1]<=temp_points[-1]:
             temp_points=ellipse_Samp(points[:N-2,:].max(0),points[:N-2,:].min(0),age_unq,metal_unq,
                                  elogf,bins)
-            temp=get_model_fit(temp_points[:-1],lib_vals,age_unq,metal_unq,bins)
-            temp=data_match(temp,data)
-            temp_points[-1]=sum((data[:,1]-temp))**2
+            temp_points=multi_samp(temp_points,data,lib_vals,metal_unq,age_unq,bins)
             n_fail+=1
         #print abs(i-n_fail)/float(i)
         #insert new point, sort
-        points[-1,:]=temp_points+0.0
+        points[-1,:]=nu.copy(temp_points)
         index=nu.argsort(points[:,-1])
         points=points[index,:]
         i+=1
@@ -137,12 +134,12 @@ def nested_sampling(data,N,bins,elogf=1.1,stop=10**-3):
 #calculate evidence for remaing points
     for j in range(i+1,i+len(points[:,0])):
         #evid.append(points[j-i,0]*(nu.exp(-(j-1.0)/(N+.0))-nu.exp(-(j+1.0)/(N+.0)))/2.0)
-        likelihood.append(points[j-i-1,0])
+        likelihood.append(points[j-i-1,-1])
         weight.append((nu.exp(-(j-1.0)/(N+.0))-nu.exp(-(j+1.0)/(N+.0)))/2.0)
         prior_vol.append(nu.exp(-(j)/(N+.0)))
         #old_points.append([eval(old_points_txt)])
     #turn list into for manipulation
-    likelihood,weight,prior_vol,old_points=nu.array(likelihood),nu.array(weight),nu.array(prior_vol),nu.array(old_points)[:,0]
+    likelihood,weight,prior_vol,old_points=nu.array(likelihood),nu.array(weight),nu.array(prior_vol),nu.array(old_points)
     #calculate the uncertany in evidence
     #calculate entropy
     H=nu.nansum(likelihood*weight/sum(likelihood*weight)*nu.log(likelihood/sum(likelihood*weight)))
@@ -150,8 +147,8 @@ def nested_sampling(data,N,bins,elogf=1.1,stop=10**-3):
     #calculate uncertanty in evidemce
     evid=likelihood*weight
     evid_error=nu.sqrt(H/float(N))
-
-    return evid,prior_vol[1:],evid_error,old_points
+    data[:,1]=data[:,1]/1000.
+    return evid,nu.array(prior_vol[1:]),evid_error,old_points
 
 def ellipse_Samp(point_max,point_min,age_unq,metal_unq,elogf,bins):
     #samples points inside a N-d ellipse given input points and expanded by elogf
@@ -160,20 +157,32 @@ def ellipse_Samp(point_max,point_min,age_unq,metal_unq,elogf,bins):
     #make sure in boundaries of paramerter space
     bin=nu.linspace(age_unq.min(),age_unq.max(),bins+1)
     bin_index=0
-    #create for age and weights
-    for k in xrange(temp_out.shape[0]-1):
-        if k %2==0 and temp_out.shape[0]-bins-2>k:#metalicity
-            while temp_out[k]<metal_unq.min() or temp_out[k]>metal_unq.max():
-                temp_out[k]=(nu.random.rand()*(point_max[k]-point_min[k])+point_min[k])*elogf
+    #start in random place
+    for k in xrange(len(temp_out)-2):
+        if any(nu.array(range(0,len(temp_out)-2,3))==k):#metalicity
+           temp_out[k]=(nu.random.random()*metal_unq.ptp()+metal_unq[0])
         else:#age and normilization
-            if temp_out.shape[0]-bins-2<k: #normilization
-                while temp_out[k]<0:
-                    temp_out[k]=(nu.random.rand()*(point_max[k]-point_min[k])+point_min[k])*elogf
-            else: #age
-                while temp_out[k]<bin[bin_index] or temp_out[k]>bin[bin_index+1]:
-                    temp_out[k]=(nu.random.rand()*(point_max[k]-point_min[k])+point_min[k])*elogf
+            if any(nu.array(range(1,len(temp_out)-2,3))==k): #age
+                temp_out[k]=nu.random.random()*age_unq.ptp()/float(bins)+bin[bin_index]
+                #points[:,k]=nu.mean([bin[bin_index],bin[1+bin_index]])
                 bin_index+=1
+            else: #norm
+                temp_out[k]=nu.random.random()
+ 
     return temp_out
+
+def multi_samp(j,data,lib_vals,metal_unq,age_unq,bins):
+    #callable function for generating first iteration of points
+    model=get_model_fit_opt(j[:-2],lib_vals,age_unq,metal_unq,bins) 
+    model=data_match_new(data,model,bins)
+    N=[]
+    for k in range(2,len(j),3):
+        N.append(j[k])
+    N=nu.array(N)
+    model=nu.sum(nu.array(model.values()).T*N,1)
+    j[-2]=normalize(data,model)
+    j[-1]=sum((data[:,1]-j[-2]*model)**2)
+    return j
 
 ########################################################
 
