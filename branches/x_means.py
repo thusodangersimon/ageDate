@@ -36,24 +36,57 @@ def xmean(points,min_points=5):
     #uses scipy's kmeans clusering to and the baysian information critera
     #to coose correct number of clusters
    
-    max_cluster=sum(points.shape)/float(min_points)+1
+    max_cluster=int(round(sum(points.shape)/float(min_points)+1))
     #inital split
-    cluster,asocate_point=sci.kmeans2(points,2)
+    #cluster,asocate_point=sci.kmeans2(points,2)
     
-    if BIC1(points,nu.mean(points,0),nu.cov(points.T))>BIC2(points,asocate_point):
-        return nu.mean(points),nu.zeros(points.shape)
-    else: #start split algorythom
-        pass
-    
-def BIC1(points,mean,cov):
+    if BIC1(points)<BIC2(points):
+        return {'0':points}
+    #check for min points
+    means,asocate_point=sci.kmeans2(points,2)
+    if sum(asocate_point)<=min_points or points.shape[0]-sum(asocate_point)<=min_points:
+        return {'0':points}
+     #start split algorithm
+    n_cluster=1 #python numbering 0= 1 cluster
+    out={}
+    for i in range(2):# star splitting
+        out[str(i)]=nu.copy(points[asocate_point==i,:])
+    #associate=nu.copy(asocate_point)
+    i=0
+    while i<max_cluster:
+        if BIC1(out[str(i)])>BIC2(out[str(i)]):#create new cluser
+            means,asocate_point=sci.kmeans2(out[str(i)],2)
+            if sum(asocate_point)<=min_points or out[str(i)].shape[0]-sum(asocate_point)<=min_points: #check for min points
+                i+=1
+                #check exit conditions
+                if i==n_cluster+1:
+                    break
+            n_cluster+=1    
+            try:
+                out[str(n_cluster)]= nu.copy(out[str(i)][asocate_point==0,:]) #create new clust before overwriting
+                out[str(i)]=nu.copy(out[str(i)][asocate_point==1,:])
+            except IndexError:
+                print nu.unique(asocate_point)
+        else:
+            i+=1
+            #check exit conditions
+            if i==n_cluster+1:
+                break
+    return out
+            
+def BIC1(points):
     #finds BIC of cluster with 1 mean: from xmeans paper
+    
+    mean=nu.mean(points,0)
+    n_points=nu.prod(points.shape)
+    cov=nu.cov(points.T)
     mean_minus=points-mean
     try:
         n_dim=points.shape[1]
     except IndexError:
         n_dim=1
     try:
-        cov_diag=cov.diagonal()
+        cov_diag=nu.prod(cov.diagonal())
     except ValueError:
         cov_diag=cov
     invcov=cov**-1
@@ -61,16 +94,45 @@ def BIC1(points,mean,cov):
     for i in xrange(points.shape[0]):
         a+=nu.sum(nu.dot(mean_minus[i],nu.dot(invcov,mean_minus[i].T)))
                         
-    n_points=sum(points.shape)
-    return n_points*n_dim*nu.log(2*nu.pi)+nu.sum(n_points*nu.log(cov_diag))+2*a+0.5*n_dim*(n_dim+3.)*nu.log(n_points)
+    
+    #return n_dim*nu.log(2*nu.pi)+2*nu.log(cov_diag)+2*a+n_dim*nu.log(n_points)
+    return n_points*n_dim*nu.log(2*nu.pi)+n_points*nu.log(cov_diag)+2*a+0.5*n_dim*(n_dim+3.)*nu.log(n_points)
         
 def BIC2(points):
     #find BIC with cluster with 2 means: from xmeans paper
-    out=0
-    mean,asocate_point=sci.kmeans2(points,2)
+    n_points_tot=float(nu.prod(points.shape))
+    i=0
+    while True: #if gives LinAlgError try again till sucess or 100 times
+        try:
+            mean,asocate_point=sci.kmeans2(points,2)
+            break
+        except: #nu.linalg.LinAlgError:
+            i+=1
+            if i==100:
+                return nu.inf
+            
+    try:
+        n_dim=points.shape[1]
+    except IndexError:
+        n_dim=1
+    out=n_points_tot*n_dim*nu.log(2*nu.pi)+2*n_points_tot*nu.log(n_points_tot)+ (n_dim**2+3*n_dim+1)*nu.log(n_points_tot)
     for i in range(2):
-        out+=BIC1(points[asocate_point==i,:],mean[i],nu.cov(points[asocate_point==i,:].T))
+        x=points[asocate_point==i,:]
+        n_points=nu.prod(x.shape)
+        mean_minus=x-mean[i]
+        cov=nu.cov(x.T)
+        invcov=cov**-1
+        try:
+            cov_diag=nu.prod(cov.diagonal())
+        except ValueError:
+            cov_diag=cov
+        n_points=nu.prod(x.shape)
+        a=0 #a=sum(Transpose(pt[j]-mean).invcov.(pt[j]-mean))
+        for j in xrange(x.shape[0]):
+            a+=nu.sum(nu.dot(mean_minus[j],nu.dot(invcov,mean_minus[j].T)))
 
+        out+= n_points*nu.log(cov_diag)+2*a-2*n_points*nu.log(n_points)
+    
     return out
     
 def kdtree(point_list, depth=0):
@@ -101,7 +163,7 @@ def toyI():
     #1-d 3 clusers
     x=[]
     for i in range(50):
-        x.append(nu.random.randn())
+        x.append(nu.random.randn()*.1)
                  
     for i in range(50):
         x.append(nu.random.randn()+10)
@@ -117,8 +179,9 @@ def toyI():
     pl.hold(True)
     pl.plot(x[assos==0],nu.ones(len(x[assos==0])),'.',x[assos==1],nu.ones(len(x[assos==1])),'.',x[assos==2],nu.ones(len(x[assos==2])),'.',label='Data')
     #try xmeans 
-    clus,assos=xmeans(x)
-    pl.plot(clus,nu.ones(len(clus)),'k+',ms=20,mew=5,label='x-mean centroids')
+    clus=xmeans(x)
+    for i in clus.keys():
+        pl.plot(clus[i],nu.ones(len(clus[i])),'k+',ms=20,mew=5,label='x-mean centroids '+i)
     pl.legend()
     lab.show()
     
@@ -129,7 +192,7 @@ def toyII():
     for i in range(250):
         x[i,:]=nu.random.randn(2)+[0,-nu.sqrt(75)/2.]
                  
-    for i in range(250,500):
+    for i in range(250,750):
         x[i,:]=nu.random.randn(2)+[5,5]
     for i in range(500,750):
         x[i,:]=nu.random.randn(2)+[-5,5]
@@ -139,9 +202,9 @@ def toyII():
     pl=fig.add_subplot(111)
     pl.hold(True)
     pl.plot(x[assos==0,0],x[assos==0,1],'.',x[assos==1,0],x[assos==1,1],'.',x[assos==2,0],x[assos==2,1],'.')
-    clus,assos=xmeans(x)
-    for i in range(clus.shape[0]):
-        pl.plot(clus[i,0],clus[i,1],'k+',ms=20,mew=5)
+    clus=xmeans(x)
+    for i in clus.keys():
+        pl.plot(clus[i][:,0],clus[i][:,1],'k+',ms=20,mew=5)
     lab.show()
 
 def toyIII():
@@ -167,7 +230,7 @@ def toyIII():
     pl.hold(True)
     for i in nu.unique(assos):
         pl.plot(x[assos==i,0],x[assos==i,1],'.')
-    clus,assos=xmeans(x)
-    for i in range(clus.shape[0]):
-        pl.plot(clus[i,0],clus[i,1],'k+',ms=20,mew=5)
+    clus=xmeans(x)
+    for i in clus.keys():
+        pl.plot(clus[i][:,0],clus[i][:,1],'k+',ms=20,mew=5)
     lab.show()
