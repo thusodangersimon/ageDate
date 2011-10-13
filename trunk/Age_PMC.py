@@ -105,7 +105,7 @@ def PMC_mixture(data,bins,n_dist=5,pop_num=10**4):
             if sum(lik[:,-1]<=11399)<30:
                 lik[:,-1] =(1/lik[:,-1])
             else:
-                lik[:,-1] =nu.exp(-lik[:,-1])
+                lik[:,-1] =nu.exp(-lik[:,-1]/2.)
         else:
             if sum(lik[:,-1]<=11399)<30:
                 for j in lik:
@@ -167,6 +167,7 @@ def resample_first(lik):
 
 def resample(lik,alpha,mu,sigma):
     #resamples points according to weights and makes new 
+    #try this for pool.map map(norm_func,lik[:,:-1],[[mu]]*len(lik),[[sigma]]*len(lik))
     weight_norm=lik[:,-1]/sum(lik[:,-1])
     rho=nu.zeros([lik.shape[0],len(alpha)])
     for i in xrange(lik.shape[0]):#probablity of point beloging to distribution
@@ -220,14 +221,18 @@ def student_t(x,mu,sigma,v=4):
     
 def norm_func(x,mu,sigma):
     #calculates values of normal dist for set of points
-    out=nu.zeros(mu.shape[0])
-    for i in range(mu.shape[0]):
-        out[i]=(2*nu.pi)**(-len(mu[i])/2.)*nu.linalg.det(sigma[i])**(-.5)
+    
+    print x.shape
+    print mu[0]
+    print sigma[0].shape[0]
+    out=nu.zeros(mu[0].shape[0])
+    for i in range(mu[0].shape[0]):
+        out[i]=(2*nu.pi)**(-len(mu[0][i])/2.)*nu.linalg.det(sigma[0][i])**(-.5)
         try:
-            out[i]=out[i]*nu.exp(-.5*(nu.dot((x-mu[i]),nu.dot(nu.linalg.inv(sigma[i]),(x-mu[i]).T))))
+            out[i]=out[i]*nu.exp(-.5*(nu.dot((x-mu[0][i]),nu.dot(nu.linalg.inv(sigma[0][i]),(x-mu[0][i]).T))))
         except nu.linalg.LinAlgError:
             #sigma[i][sigma[i]==0]=10**-6
-            out[i]=out[i]*nu.exp(-.5*(nu.dot((x-mu[i]),nu.dot(sigma[i]**-1,(x-mu[i]).T))))
+            out[i]=out[i]*nu.exp(-.5*(nu.dot((x-mu[0][i]),nu.dot(sigma[0][i]**-1,(x-mu[0][i]).T))))
             
     return out
 

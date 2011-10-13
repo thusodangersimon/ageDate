@@ -40,7 +40,7 @@ import time as Time
 ###spectral lib stuff####
 global lib_path,spect
 lib_path='/home/thuso/Phd/Spectra_lib/'
-spect,info= load_spec_lib(lib_path)  
+#spect,info= load_spec_lib(lib_path)  
 
 
 def find_az_box(param,age_unq,metal_unq):
@@ -192,7 +192,7 @@ def get_model_fit(param,lib_vals,age_unq,metal_unq,bins):
                           linear_interpolation(10**metal,closest,10**temp_param[0]))).T
                 
             else:
-                out[:,1]=out[:,1]+10**param[-ii-1]*linear_interpolation(
+                out[:,1]=out[:,1]+linear_interpolation(
                     10**metal,closest,temp_param[0])
         elif line=='metal': #run 1 d interp along age only
             age=nu.array([age[0],age[-1]])
@@ -209,7 +209,7 @@ def get_model_fit(param,lib_vals,age_unq,metal_unq,bins):
                 out=nu.vstack((closest[0][:,0],
                              linear_interpolation(age,closest,temp_param[1]))).T
             else:
-                out[:,1]=out[:,1]+10**param[-ii-1]*linear_interpolation(
+                out[:,1]=out[:,1]+linear_interpolation(
                         age,closest,temp_param[1])
 
         elif line=='both': #on a lib spectra
@@ -218,7 +218,7 @@ def get_model_fit(param,lib_vals,age_unq,metal_unq,bins):
             if ii==0:
                 out=read_spec(lib_vals[1][index][0],lib_path)
             else:
-                out[:,1]=out[:,1]+10**param[-ii-1]*read_spec(lib_vals[1][index][0])[:,1]
+                out[:,1]=out[:,1]+read_spec(lib_vals[1][index][0])[:,1]
         #run 2 d interp
         else:
             metal.sort()
@@ -237,11 +237,11 @@ def get_model_fit(param,lib_vals,age_unq,metal_unq,bins):
                 out=nu.vstack((closest[0][:,0],bilinear_interpolation(
                             10**metal,age,closest,10**temp_param[0],temp_param[1]))).T
             else:
-                out[:,1]=out[:,1]+10**param[-ii-1]*bilinear_interpolation(
+                out[:,1]=out[:,1]+bilinear_interpolation(
                     10**metal,age,closest,
                     10**temp_param[0],temp_param[1])
-        if ii==0: #add normilization to first out spectra
-            out[:,1]=10**param[-ii-1]*out[:,1]
+        '''if ii==0: #add normilization to first out spectra
+            out[:,1]=10**param[-ii-1]*out[:,1]'''
     
    #exit program
     return out
@@ -297,18 +297,16 @@ def data_match_new(data,model,bins):
 def check(param,metal_unq, age_unq,bins): #checks if params are in bounds
     age=nu.linspace(age_unq.min(),age_unq.max(),bins+1)
     for j in xrange(bins):#check age and metalicity
-        if any([metal_unq[-1],age[j+1]]<param[j*3:j*3+2]) or any([metal_unq[0],age[j]]>
+        '''if any([metal_unq[-1],age[j+1]]<param[j*3:j*3+2]) or any([metal_unq[0],age[j]]>
                                                                  param[j*3:j*3+2]):
-            ''' if  any([metal_unq[-1],age_unq[-1]]<param[j*3:j*3+2]) or any([metal_unq[0],age_unq[0]]>param[j*3:j*3+2]):'''
+            ''' 
+        if any([metal_unq[-1],age_unq[-1]]<param[j*3:j*3+2]) or any([metal_unq[0],age_unq[0]]>param[j*3:j*3+2]):
             return True
-        if not (0<param[j*3+2] and param[j*3+2]<10): #check normalizations
+        if any(nu.diff(param.take(range(1,bins*3,3)))<.5):
+            return True
+        if not (0<param[j*3+2]): #and param[j*3+2]<1): #check normalizations
             return True
     return False
-
-def continum_normalize(data,order):
-    #does a polynomial fit to the continum to flatten it out
-    #Y=nu.poly1d(nu.polyfit(data[:,0],data[:,1],order)) 
-    pass
 
 def normalize(data,model):
     #normalizes the model spectra so it is closest to the data
@@ -337,37 +335,11 @@ def chain_gen_all(means,metal_unq, age_unq,bins,sigma):
         out=nu.random.multivariate_normal(means,sigma)
         if Time.time()-t>.5:
             sigma=sigma/1.05
+    #N=sum(means.take(range(2,bins*3,3)))
+    #for i in range(2,bins*3,3):#normalize normalization to 1
+    #    means[i]=means[i]/N
+
     return out
-
-def chain_gen_one(means,metal_unq, age_unq,bins,sigma,k):
-    #changes the value of 1 paramer, does everything else of chain_gen_all
-    rand=sigma*.0
-    #make bins if needed for age
-    if not (k %2==0 and rand.shape[0]-bins-1>k):
-        bin=nu.linspace(age_unq.min(),age_unq.max(),bins+1)
-    #set correct age bin range
-        bin_index=-1
-        for kk in xrange(rand.shape[0]):
-            if not (kk %2==0 and rand.shape[0]-bins-1>kk):
-                if not rand.shape[0]-bins-1<kk:
-                    bin_index+=1
-                    if kk==k:
-                        break
-
-    if k %2==0 and rand.shape[0]-bins-1>k:#metalicity
-        rand[k]=10**random.normalvariate(nu.log10(means[k]),sigma[k])
-        while rand[k]<metal_unq.min() or rand[k]>metal_unq.max():
-            rand[k]=10**random.normalvariate(nu.log10(means[k]),sigma[k])
-    else:#age and normilization
-        rand[k]=random.normalvariate(means[k],sigma[k])
-        if rand.shape[0]-bins-1<k: #normilization
-            while rand[k]<0:
-                rand[k]=random.normalvariate(means[k],sigma[k])
-        else: #age
-            while rand[k]<bin[bin_index] or rand[k]>bin[bin_index+1]:
-                rand[k]=random.normalvariate(means[k],sigma[k])
-    means[k]=rand[k]
-    return means
 
 if __name__=='__main__':
     import cProfile as pro
