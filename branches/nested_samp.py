@@ -101,12 +101,12 @@ def nested_sampling(data,N,bins,elogf=1.1,stop=10**-3):
     while (points[-1,-1]-points[0,-1])*prior_vol[-1]>2*10**-3 or i<500: ####put in stop condition later
         #step 2 and 3
         print (points[-1,-1]-points[0,-1])*prior_vol[-1], i
-        likelihood.append(points[-1,-1])
+        likelihood.append(nu.exp(-points[-1,-1]))
         weight.append((nu.exp(-(i-1.0)/(N+.0))-nu.exp(-(i+1.0)/(N+.0)))/2.0)
         #evid.append(points[0,0]*(nu.exp(-(i-1.0)/(N+.0))-nu.exp(-(i+1.0)/(N+.0)))/2.0)
         prior_vol.append(nu.exp(-i/(N+.0)))
         #recode old point for later inference
-        old_points.append(points[-1,:])
+        old_points.append(nu.copy(points[-1,:]))
         #step 4 get new liklihood value
         #find new sampling by L_new>L_old ###slow
         
@@ -129,8 +129,7 @@ def nested_sampling(data,N,bins,elogf=1.1,stop=10**-3):
         temp_points= cov_ellipse_samp(points,age_unq,metal_unq,elogf,bins)
         temp_points=multi_samp(temp_points,data,lib_vals,metal_unq,age_unq,bins)
         while points[-5,-1]<=temp_points[-1]:
-            temp_points=ellipse_Samp(points[:N-2,:].max(0),points[:N-2,:].min(0),age_unq,metal_unq,
-                                 elogf,bins)
+            temp_points=cov_ellipse_samp(points,age_unq,metal_unq,elogf,bins)
             temp_points=multi_samp(temp_points,data,lib_vals,metal_unq,age_unq,bins)
             n_fail+=1
  
@@ -149,9 +148,9 @@ def nested_sampling(data,N,bins,elogf=1.1,stop=10**-3):
 #calculate evidence for remaing points
     for j in range(len(points[:,0])):
         #evid.append(points[j-i,0]*(nu.exp(-(j-1.0)/(N+.0))-nu.exp(-(j+1.0)/(N+.0)))/2.0)
-        likelihood.append(points[j,-1])
+        likelihood.append(nu.exp(points[j,-1]))
         weight.append((nu.exp(-(j-1.0+i)/(N+.0))-nu.exp(-(j+1.0+i)/(N+.0)))/2.0)
-        prior_vol.append(nu.exp(-(j+j)/(N+.0)))
+        prior_vol.append(nu.exp(-(j+i)/(N+.0)))
         old_points.append(points[-j,:])
         #old_points.append([eval(old_points_txt)])
     #turn list into for manipulation
