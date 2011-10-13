@@ -61,12 +61,13 @@ def xmean(points,min_points=5):
                 #check exit conditions
                 if i==n_cluster+1:
                     break
-            n_cluster+=1    
-            try:
-                out[str(n_cluster)]= nu.copy(out[str(i)][asocate_point==0,:]) #create new clust before overwriting
-                out[str(i)]=nu.copy(out[str(i)][asocate_point==1,:])
-            except IndexError:
-                print nu.unique(asocate_point)
+            else:
+                n_cluster+=1    
+                try:
+                    out[str(n_cluster)]= nu.copy(out[str(i)][asocate_point==0,:]) #create new clust before overwriting
+                    out[str(i)]=nu.copy(out[str(i)][asocate_point==1,:])
+                except IndexError:
+                    print nu.unique(asocate_point)
         else:
             i+=1
             #check exit conditions
