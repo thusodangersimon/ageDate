@@ -43,27 +43,28 @@ def make_chi_grid(data,points=500):
     #age,N=nu.meshgrid(nu.linspace(lib_vals[0][:,1].min(),
     #                                  lib_vals[0][:,1].max(),points),
     #              nu.linspace(0,700,points))   
-    N=nu.array([[1,1],[1,1]])
+    #N=nu.array([[1,1],[1,1]])
     out=age*0
     metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
     age_unq=nu.unique(lib_vals[0][:,1])
     #start making calculations for chi squared value
     po,work=Pool(),[]
-    for i in range(points):
+    for i in xrange(points):
          #print '%i out of %i' %(i+1,points)
          #sys.stdout.flush()
-         work.append(po.apply_async(poly_grid,(metal,age,N,lib_vals,age_unq,metal_unq,1,points,data,out,i,)))
+         work.append(po.apply_async(poly_grid,(metal,age,lib_vals,age_unq,metal_unq,1,points,data,out,i,)))
     po.close()
     po.join()
     for i in work:
         out=out+i.get()
-    return metal,age,N,out
+    return metal,age,out
 
-def poly_grid(metal,age,N,lib_vals,age_unq,metal_unq,bins,points,data,out,i):
-    for j in range(points):     
+def poly_grid(metal,age,lib_vals,age_unq,metal_unq,bins,points,data,out,i):
+    for j in xrange(points):     
         model=get_model_fit_opt([metal[i,j],age[i,j],1],lib_vals,age_unq,metal_unq,bins)
-        N,model=N_normalize(data,model,bins)
-        out[i,j]=sum((data[:,1] - model)**2)
+        N,model,chi=N_normalize(data,model,bins)
+        #out[i,j]=sum((data[:,1] - model)**2)
+        out[i,j]=nu.copy(N)
 
     print '%i out of %i' %(i+1,points)
     sys.stdout.flush()
