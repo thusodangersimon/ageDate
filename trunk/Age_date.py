@@ -126,7 +126,7 @@ def get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins):
                 #closest.append(read_spec(lib_vals[1][index][0]))
                 closest.append(spect[:,index[0]+1])
 
-            out[str(ii)]=linear_interpolation(10**metal,closest,temp_param[0])
+            out[str(ii)]=linear_interpolation(10**metal,closest,10**temp_param[0])
         elif line=='metal': #run 1 d interp along age only
             age=nu.array([age[0],age[-1]])
             age.sort()
@@ -164,85 +164,6 @@ def get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins):
     #give wavelength axis
     out['wave']=nu.copy(spect[:,0])
 
-   #exit program
-    return out
-
-
-def get_model_fit(param,lib_vals,age_unq,metal_unq,bins):
-    #does dirty work to make spectra models
-    #search age_unq and metal_unq to find closet box spectra and interps
-    #does multi componets spectra and uses normilization params
-    for ii in range(bins):
-        temp_param=param[ii*3:ii*3+2]
-        metal,age,line=find_az_box(temp_param,age_unq,metal_unq)
-        #check to see if on a lib spectra or on a line
-        if line=='age': #run 1 d interp along metal only
-            metal=nu.array([metal[0],metal[-1]])
-            metal.sort()
-            age=age[0]
-            #find spectra
-            closest=[]
-            for i in 10**metal:
-                index=nu.nonzero(nu.logical_and(lib_vals[0][:,0]==i,
-                                            lib_vals[0][:,1]==age))[0]
-                #closest.append(read_spec(lib_vals[1][index][0]))
-                closest.append(nu.vstack((spect[:,0],spect[:,index[0]+1])).T)
-            if ii==0:
-                out=nu.vstack((closest[0][:,0],
-                          linear_interpolation(10**metal,closest,10**temp_param[0]))).T
-                
-            else:
-                out[:,1]=out[:,1]+linear_interpolation(
-                    10**metal,closest,temp_param[0])
-        elif line=='metal': #run 1 d interp along age only
-            age=nu.array([age[0],age[-1]])
-            age.sort()
-            metal=metal[0]
-            #find spectra
-            closest=[]
-            for i in age:
-                index=nu.nonzero(nu.logical_and(lib_vals[0][:,1]==i,
-                                            lib_vals[0][:,0]==10**metal))[0]
-                #closest.append(read_spec(lib_vals[1][index][0]))
-                closest.append(nu.vstack((spect[:,0],spect[:,index[0]+1])).T)
-            if ii==0:
-                out=nu.vstack((closest[0][:,0],
-                             linear_interpolation(age,closest,temp_param[1]))).T
-            else:
-                out[:,1]=out[:,1]+linear_interpolation(
-                        age,closest,temp_param[1])
-
-        elif line=='both': #on a lib spectra
-            index=nu.nonzero(nu.logical_and(lib_vals[0][:,0]==10**temp_param[0],
-                                            lib_vals[0][:,1]==temp_param[1]))[0]
-            if ii==0:
-                out=read_spec(lib_vals[1][index][0],lib_path)
-            else:
-                out[:,1]=out[:,1]+read_spec(lib_vals[1][index][0])[:,1]
-        #run 2 d interp
-        else:
-            metal.sort()
-            metal=nu.array(metal)[nu.array([0,3,1,2],dtype='int32')]
-            age.sort()
-            closest=[]
-            for i in range(4):
-                #print metal[i],age[i]
-                index=nu.nonzero(nu.logical_and(lib_vals[0][:,1]==age[i],
-                                            lib_vals[0][:,0]==10**metal[i]))[0]
-                #closest.append(read_spec(lib_vals[1][index][0]))
-                closest.append(nu.vstack((spect[:,0],spect[:,index[0]+1])).T)
-
-        #interp
-            if ii==0:
-                out=nu.vstack((closest[0][:,0],bilinear_interpolation(
-                            10**metal,age,closest,10**temp_param[0],temp_param[1]))).T
-            else:
-                out[:,1]=out[:,1]+bilinear_interpolation(
-                    10**metal,age,closest,
-                    10**temp_param[0],temp_param[1])
-        '''if ii==0: #add normilization to first out spectra
-            out[:,1]=10**param[-ii-1]*out[:,1]'''
-    
    #exit program
     return out
 
@@ -302,10 +223,10 @@ def check(param,metal_unq, age_unq,bins): #checks if params are in bounds
             ''' 
         if any([metal_unq[-1],age_unq[-1]]<param[j*3:j*3+2]) or any([metal_unq[0],age_unq[0]]>param[j*3:j*3+2]):
             return True
-        if any(nu.diff(param.take(range(1,bins*3,3)))<.5):
-            return True
-        if not (0<param[j*3+2]): #and param[j*3+2]<1): #check normalizations
-            return True
+        #if any(nu.abs(nu.diff(param.take(range(1,bins*3,3))))<.3):
+        #    return True
+        '''if not (0<param[j*3+2]): #and param[j*3+2]<1): #check normalizations
+            return True'''
     return False
 
 def normalize(data,model):
@@ -320,11 +241,11 @@ def N_normalize(data, model,bins):
     #do non-negitave least squares fit
     if bins==1:
         N=[normalize(data,model['0'])]
-        return N, N[0]*model['0']
+        return N, N[0]*model['0'],sum((data[:,1]-N[0]*model['0'])**2)
     N,chi=nnls(nu.array(model.values()).T,data[:,1])
     index=nu.nonzero(N==0)[0]
     N[index]+=10**-6
-    return N,nu.sum(nu.array(model.values()).T*N,1)
+    return N,nu.sum(nu.array(model.values()).T*N,1),chi**2
 
 def chain_gen_all(means,metal_unq, age_unq,bins,sigma):
     #creates new chain for MCMC, does log spacing for metalicity
@@ -335,11 +256,21 @@ def chain_gen_all(means,metal_unq, age_unq,bins,sigma):
         out=nu.random.multivariate_normal(means,sigma)
         if Time.time()-t>.5:
             sigma=sigma/1.05
+            if Time.time()-t>2.:
+                print "I'm %i and I'm stuck" %current_process().ident
+                print means,sigma
+                raise
     #N=sum(means.take(range(2,bins*3,3)))
     #for i in range(2,bins*3,3):#normalize normalization to 1
     #    means[i]=means[i]/N
 
     return out
+
+def multivariate_student(mu,sigma,n):
+    #samples from a multivariate student t distriburtion
+    #with mean mu,sigma as covarence matrix, and n is degrees of freedom
+    #as n->inf this goes to gaussian
+    return mu+nu.random.multivariate_normal([0]*len(mu),sigma)*(n/nu.random.chisquare(n))**0.5
 
 if __name__=='__main__':
     import cProfile as pro
