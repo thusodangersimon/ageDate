@@ -88,7 +88,7 @@ def create_spectra(bins,func='flat',lam_min=0,
     else:
     #initalize out spectra
     #make sfh and bin areas
-        if func=='normal':
+        if func=='norm':
             spect,names,weights=normal(bins,age_unq.min(),age_unq.max(),lib,lib_path) 
         elif func=='line':
             if not slope:
