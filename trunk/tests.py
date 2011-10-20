@@ -73,7 +73,7 @@ out=nu.zeros(len(    lam=spect[:,0]
     return metal[nu.argsort(age)],age[nu.argsort(age)],N[N>10**-4][nu.argsort(age)]/1000.
 
 
-'''
+
 age1=[]
 for i in info1:
     age1.append(float(i[11:-5]))
