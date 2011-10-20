@@ -29,17 +29,63 @@
 """ uses PMC to find prosterior of stellar spectra age, metalicity and SFR"""
 
 from Age_date import *
-from mpi4py import MPI
+import pypar as par
 from x_means import xmean
 #import time as Time
 
-a=nu.seterr(all='ignore')
+#a=nu.seterr(all='ignore')
 
 def test():
-    comm = MPI.COMM_WORLD
-#size = comm.Get_size()
-    rank = comm.Get_rank()
-    print 'i am %i' %rank
+    myID = par.rank()
+    bins=2
+    n_dist=5
+    pop_num=10**4
+    if myID==0: #master process
+        data,info1,weight=create_spectra(bins,'line',2000,10**4,slope=1.2)
+        lib_vals=get_fitting_info(lib_path)
+        lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
+        metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
+        age_unq=nu.unique(lib_vals[0][:,1])
+    #initalize importance functions
+        alpha=nu.array([n_dist**-1.]*n_dist) #[U,N]
+        points=nu.zeros([pop_num,bins*3])
+        bin_index=0
+        age_bins=nu.linspace(age_unq.min(),age_unq.max(),bins+1)
+        for k in xrange(bins*3):
+            if any(nu.array(range(0,bins*3,3))==k):#metalicity
+                points[:,k]=(nu.random.random(pop_num)*metal_unq.ptp()+metal_unq[0])
+            else:#age and normilization
+                if any(nu.array(range(1,bins*3,3))==k): #age
+                #mu[k]=nu.random.random()
+                    points[:,k]=nu.random.rand(pop_num)*age_unq.ptp()/float(bins)+age_bins[bin_index]
+               # mu[k]=nu.mean([bin[bin_index],bin[1+bin_index]])
+                    bin_index+=1
+                else: #norm stuff
+                    points[:,k]=nu.random.random(pop_num)*10**4
+        #send message to calculate liklihoods
+        par.send()
+
+like_gen,(data,ii,lib_vals,age_unq,metal_unq,bins,),callback=lik.appen
+
+
+    else:
+        lib_vals=get_fitting_info(lib_path)
+        lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
+        metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
+        age_unq=nu.unique(lib_vals[0][:,1])
+    #initalize importance functions
+        alpha=nu.array([n_dist**-1.]*n_dist) #[U,N]
+        print '%i is ready!' %myID
+        while True:
+            todo=par.receive(0)
+            if todo=='lik': #calculate likelihood
+                pass
+            if todo=='q': #do norm stuff
+                pass
+
+
+
+    par.finalize()
 
 def PMC_mixture(data,bins,n_dist=5,pop_num=10**4):
     #uses population monte carlo to find best fits and prosteror
@@ -100,6 +146,7 @@ def PMC_mixture(data,bins,n_dist=5,pop_num=10**4):
     #calculate weights
     #keep in log space if are smaller than percision
     #alpha,mu,sigma=resample_first(lik)
+    pool=Pool()
     for i in range(10): #start refinement loop
         if i==0:
             if sum(lik[:,-1]<=11399)<30:
@@ -108,11 +155,14 @@ def PMC_mixture(data,bins,n_dist=5,pop_num=10**4):
                 lik[:,-1] =nu.exp(-lik[:,-1]/2.)
         else:
             if sum(lik[:,-1]<=11399)<30:
-                for j in lik:
-                    j[-1] =(1/j[-1])/(nu.nansum(alpha*norm_func(j[:-1],mu,sigma)))
+                 lik[:,-1] =(1/lik[:,-1])                  
             else:
-                for j in lik:
-                    j[-1] =nu.exp(-j[-1])/(nu.nansum(alpha*norm_func(j[:-1],mu,sigma)))
+                lik[:,-1] =nu.exp(-lik[:,-1]/2.)
+            args=(lik[:,:-1],[[mu]]*len(lik),[[sigma]]*len(lik))
+            q_sum=pool.map(norm_func,iterable=args)
+            pool.close()
+            pool.join()
+
         #create best chi sample
         parambest=nu.zeros(bins*3)
         for j in range(bins*3):
@@ -219,12 +269,8 @@ def student_t(x,mu,sigma,v=4):
     #t dist with v degrees of freedom
     pass
     
-def norm_func(x,mu,sigma):
+def norm_func(x,mu,sigma,**kwargs):
     #calculates values of normal dist for set of points
-    
-    print x.shape
-    print mu[0]
-    print sigma[0].shape[0]
     out=nu.zeros(mu[0].shape[0])
     for i in range(mu[0].shape[0]):
         out[i]=(2*nu.pi)**(-len(mu[0][i])/2.)*nu.linalg.det(sigma[0][i])**(-.5)
@@ -321,3 +367,6 @@ def pop_builder(pop_num,alpha,mu,sigma,age_unq,metal_unq,bins):
 def toy():
 
     pass
+
+if __name__=='__main__':
+    test()
