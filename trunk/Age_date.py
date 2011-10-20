@@ -245,7 +245,8 @@ def N_normalize(data, model,bins):
     N,chi=nnls(nu.array(model.values()).T,data[:,1])
     index=nu.nonzero(N==0)[0]
     N[index]+=10**-6
-    return N,nu.sum(nu.array(model.values()).T*N,1),chi**2
+    index=nu.int64(model.keys())
+    return N,nu.sum(nu.array(model.values()).T*N[index],1),chi**2
 
 def chain_gen_all(means,metal_unq, age_unq,bins,sigma):
     #creates new chain for MCMC, does log spacing for metalicity
