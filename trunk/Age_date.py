@@ -167,24 +167,22 @@ def get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins):
    #exit program
     return out
 
-def data_match(model,data):
-    #makes sure data and model have same wavelength range and points
-    if model.shape[0]==data.shape[0]: #if same number of points
-        if all(model[:,0]==data[:,0]):#if they have the same x-axis
-            return model[:,1]
-        else: #if same number of points but different at points
-            print 'data match not ready yet'
-            raise
-    else: #not same shape, interp and or cut
-        index=nu.nonzero(nu.logical_and(model[:,0]>=min(data[:,0]),
-                                        model[:,0]<=max(data[:,0])))[0]
-        if index.shape[0]==data.shape[0]: #see if need to cut only
-            if sum(model[index,0]==data[:,0])==index.shape[0]:
-                return model[index,1]
-            else: #need to interpolate but keep same size
-                return spectra_lin_interp(model[:,0],model[:,1],data[:,0])
+def data_match_all(data):
+    #makes sure data and model have same wavelength range and points for library
+    model={}
+    global spect
+    for i in xrange(spect[0,:].shape[0]):
+        if i==0:
+            model['wave']=nu.copy(spect[:,i])
         else:
-            return spectra_lin_interp(model[:,0],model[:,1],data[:,0])
+            model[str(i-1)]=nu.copy(spect[:,i])
+
+    model=data_match_new(data,model,spect[0,:].shape[0]-1)
+    out=nu.zeros([model['0'].shape[0],len(model.keys())+1])
+    out[:,0]=nu.copy(data[:,0])
+    for i in model.keys():
+        out[:,int(i)+1]=model[i]
+    spect=nu.copy(out)
 
 def data_match_new(data,model,bins):
     #makes sure data and model have same wavelength range and points but with a dictionary
