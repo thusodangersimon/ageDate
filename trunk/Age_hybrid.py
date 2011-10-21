@@ -43,10 +43,12 @@ def nn_ls_fit(data,max_bins=16,min_norm=10**-4,spect=spect):
             model[str(i-1)]=nu.copy(spect[:,i])
 
     model=data_match_new(data,model,spect[0,:].shape[0]-1)
-    index=nu.float64(model.keys())
+    index=nu.int64(model.keys())
+    
     #nnls fit
     N,chi=nnls(nu.array(model.values()).T,data[:,1])
     N=N[index.argsort()]
+    
     #check if above max number of binns
     if len(N[N>min_norm])>max_bins:
         #remove the lowest normilization
@@ -87,74 +89,38 @@ def grid_fit(data,spect=spect):
     age_grid=nu.linspace(age_unq.min(),age_unq.max(),1000)
     metal_grid=nu.linspace(metal_unq.min(),metal_unq.max(),1000)
     N_grid=nu.linspace(0,max(best_N)+10.,1000)
+    norm_range=nu.array([0,max(best_N)+10.])
     #out lists
-    out=[]
-    chi=[]
+    out={}
     #inital best fit
     bins=len(best_age)
     param=make_correct_params(best_metal,best_age,best_N)
-    model=get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins) 
-    model=data_match_new(data,model,bins)
-    index=nu.int64(model.keys())
-    chi.append(sum((data[:,1]-nu.sum(nu.array(model.values()).T*best_N[index],1))**2))
-    out.append(nu.copy(param))
-    sigma=nu.identity(bins*3)*.01
-    sigma_counter=0
+    #model=get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins) 
+    #model=data_match_new(data,model,bins)
+    #index=nu.int64(model.keys())
+    #chi.append(sum((data[:,1]-nu.sum(nu.array(model.values()).T*best_N[index],1))**2))
+    #out.append(nu.copy(param))
     for i in xrange(len(param)):
+        pool=Pool()
+        out[str(i)]=[]
         if any(i==nu.arange(0,bins*3,3)): #metal
             for j in metal_grid:
-                #for k in xrange(200):
-                    #gen new vectors
-                    #new_param=chain_gen_all(out[-1],metal_unq, age_unq,bins,sigma)
-                    param[i]=nu.copy(j) #make sure correct place
-                    #calc chi
-                    model=get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins) 
-                    model=data_match_new(data,model,bins)
-                    index=nu.int64(model.keys())
-                    chi.append(sum((data[:,1]-nu.sum(nu.array(model.values()).T*best_N[index],1))**2))
-                    out.append(nu.copy(param))
-                    #make new sigma every 200 itterations
-                    sigma_counter+=1
-                    if sigma_counter%50==0:
-                        print sigma_counter
-                        sigma=nu.cov(nu.array(out)[sigma_counter-50:].T)
+                pool.apply_async( multi_unitfor_grid,(data,param,lib_vals,metal_unq,age_unq,norm_range,bins,j,i),callback=out[str(i)].append)
+            pool.close()
+            pool.join()
 
+                
         elif any(i==nu.arange(1,bins*3,3)): #age
             for j in age_grid:
-                #for k in xrange(200):
-                    #gen new vectors
-                    #new_param=chain_gen_all(out[-1],metal_unq, age_unq,bins,sigma)
-                    param[i]=nu.copy(j) #make sure correct place
-                    #calc chi
-                    model=get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins) 
-                    model=data_match_new(data,model,bins)
-                    index=nu.int64(model.keys())
-                    chi.append(sum((data[:,1]-nu.sum(nu.array(model.values()).T*best_N[index],1))**2))
-                    out.append(nu.copy(param))
-                    #make new sigma every 200 itterations
-                    sigma_counter+=1
-                    if sigma_counter%50==0:
-                        print sigma_counter
-                        sigma=nu.cov(nu.array(out)[sigma_counter-50:].T)
+                pool.apply_async( multi_unitfor_grid,(data,param,lib_vals,metal_unq,age_unq,norm_range,bins,j,i),callback=out[str(i)].append)
+            pool.close()
+            pool.join()
 
         elif any(i==nu.arange(2,bins*3,3)): #norm
             for j in N_grid:
-                #for k in xrange(200):
-                    #gen new vectors
-                    #new_param=chain_gen_all(out[-1],metal_unq, age_unq,bins,sigma)
-                    param[i]=nu.copy(j) #make sure correct place
-                    #calc chi
-                    model=get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins) 
-                    model=data_match_new(data,model,bins)
-                    index=nu.int64(model.keys())
-                    chi.append(sum((data[:,1]-nu.sum(nu.array(model.values()).T*best_N[index],1))**2))
-                    out.append(nu.copy(param))
-                    #make new sigma every 200 itterations
-                    sigma_counter+=1
-                    if sigma_counter%50==0:
-                        print sigma_counter
-                        sigma=nu.cov(nu.array(out)[sigma_counter-50:].T)
-
+                pool.apply_async( multi_unitfor_grid,(data,param,lib_vals,metal_unq,age_unq,norm_range,bins,j,i),callback=out[str(i)].append)
+            pool.close()
+            pool.join()
 
 def make_correct_params(metal,age,norm):
     #turns seprate lists of age,metal,norm in to the correct format to be used for fitting
@@ -164,4 +130,40 @@ def make_correct_params(metal,age,norm):
         out[i:i+3]=[nu.log10(metal[index]),age[index],norm[index]]
         index+=1
 
+    return out
+
+def gen_new_param_uniform(index,metal_unq,age_unq,norm_range):
+    #generates uniform parameters for testing   
+    points=nu.zeros(index.shape)
+    for k in index:
+        if any(nu.array(range(0,index.shape[0],3))==k):#metalicity
+            points[k]=(nu.random.random()*metal_unq.ptp()+metal_unq[0])
+        else:#age and normilization
+            if any(nu.array(range(1,index.shape[0],3))==k): #age
+                points[k]=nu.random.rand()*age_unq.ptp()+age_unq[0]
+            else: #norm stuff
+                    points[k]=nu.random.random()*norm_range.ptp()+norm_range.min()
+ 
+    return points
+
+def multi_unitfor_grid(data,param,lib_vals,metal_unq,age_unq,norm_range,bins,j,i):
+    #for multiprocessing
+    time=[]
+    out=[j,0.]
+    nu.random.seed(current_process().pid*nu.random.randint(1,999999999))
+
+    for k in xrange(200):
+        #gen new vectors
+        new_param=gen_new_param_uniform(nu.arange(len(param)),metal_unq,age_unq,norm_range)
+        
+        
+        new_param[i]=nu.copy(j) #make sure correct place
+        
+        #calc chi
+        model=get_model_fit_opt(new_param,lib_vals,age_unq,metal_unq,bins)
+        #model=data_match_new(data,model,bins)
+        #remove wave dict
+        index=nu.int64(model.keys())
+        out[1]+=sum((data[:,1]-nu.sum(nu.array(model.values()).T*new_param.take(range(2,bins*3,3))[index],1))**2)
+    print -nu.mean(time)
     return out
