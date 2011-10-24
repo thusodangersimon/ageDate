@@ -90,6 +90,8 @@ def grid_fit(data,spect=spect):
     metal_grid=nu.linspace(metal_unq.min(),metal_unq.max(),1000)
     N_grid=nu.linspace(0,max(best_N)+10.,1000)
     norm_range=nu.array([0,max(best_N)+10.])
+    #match lib with data
+    data_match_all(data)
     #out lists
     out={}
     #inital best fit
@@ -104,23 +106,43 @@ def grid_fit(data,spect=spect):
         pool=Pool()
         out[str(i)]=[]
         if any(i==nu.arange(0,bins*3,3)): #metal
+            work=[]
+            w=work.append
             for j in metal_grid:
-                pool.apply_async( multi_unitfor_grid,(data,param,lib_vals,metal_unq,age_unq,norm_range,bins,j,i),callback=out[str(i)].append)
+                w(pool.apply_async( multi_unitfor_grid,(data,param,lib_vals,metal_unq,age_unq,norm_range,bins,j,i)))
             pool.close()
             pool.join()
-
+            for j in work:
+                out[str(i)].append(j.get())
                 
         elif any(i==nu.arange(1,bins*3,3)): #age
+            work=[]
+            w=work.append
             for j in age_grid:
-                pool.apply_async( multi_unitfor_grid,(data,param,lib_vals,metal_unq,age_unq,norm_range,bins,j,i),callback=out[str(i)].append)
+                w(pool.apply_async( multi_unitfor_grid,(data,param,lib_vals,metal_unq,age_unq,norm_range,bins,j,i)))
             pool.close()
             pool.join()
+            for j in work:
+                out[str(i)].append(j.get())
 
         elif any(i==nu.arange(2,bins*3,3)): #norm
+            work=[]
+            w=work.append
             for j in N_grid:
-                pool.apply_async( multi_unitfor_grid,(data,param,lib_vals,metal_unq,age_unq,norm_range,bins,j,i),callback=out[str(i)].append)
+                w(pool.apply_async( multi_unitfor_grid,(data,param,lib_vals,metal_unq,age_unq,norm_range,bins,j,i)))
             pool.close()
             pool.join()
+            for j in work:
+                out[str(i)].append(j.get())
+
+    #get ready for output
+    for i in out.keys():
+        out[i]=nu.array(out[i])
+        if any(int(i)==nu.arange(0,bins*3,3)): #take log of metals
+            out[i][:,0]=nu.log10(out[i][:,0])
+
+        out[i]=out[i][out[i][:,0].argsort(),:]
+    return out,param
 
 def make_correct_params(metal,age,norm):
     #turns seprate lists of age,metal,norm in to the correct format to be used for fitting
@@ -148,22 +170,24 @@ def gen_new_param_uniform(index,metal_unq,age_unq,norm_range):
 
 def multi_unitfor_grid(data,param,lib_vals,metal_unq,age_unq,norm_range,bins,j,i):
     #for multiprocessing
-    time=[]
-    out=[j,0.]
+    #time=[]
+    out=nu.array([j,0.])
     nu.random.seed(current_process().pid*nu.random.randint(1,999999999))
-
-    for k in xrange(200):
+    index=xrange(2,bins*3,3)
+    for k in xrange(1000):
         #gen new vectors
+        #t=Time.time()
         new_param=gen_new_param_uniform(nu.arange(len(param)),metal_unq,age_unq,norm_range)
-        
-        
         new_param[i]=nu.copy(j) #make sure correct place
-        
         #calc chi
         model=get_model_fit_opt(new_param,lib_vals,age_unq,metal_unq,bins)
-        #model=data_match_new(data,model,bins)
-        #remove wave dict
-        index=nu.int64(model.keys())
-        out[1]+=sum((data[:,1]-nu.sum(nu.array(model.values()).T*new_param.take(range(2,bins*3,3))[index],1))**2)
-    print -nu.mean(time)
+        #fastest way
+        model['wave']= model['wave']*.0
+        for ii in model.keys():
+            if ii!='wave':
+                model['wave']+=model[ii]*new_param[index[int(ii)]]
+        
+        out[1]+=nu.sum((data[:,1]-model['wave'])**2)
+        #time.append(Time.time()-t)
+    #print nu.mean(time)
     return out
