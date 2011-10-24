@@ -65,7 +65,7 @@ def test():
         #send message to calculate liklihoods
         par.send()
 
-like_gen,(data,ii,lib_vals,age_unq,metal_unq,bins,),callback=lik.appen
+        #like_gen,(data,ii,lib_vals,age_unq,metal_unq,bins,),callback=lik.appen
 
 
     else:
@@ -83,14 +83,13 @@ like_gen,(data,ii,lib_vals,age_unq,metal_unq,bins,),callback=lik.appen
             if todo=='q': #do norm stuff
                 pass
 
-
-
     par.finalize()
 
-def PMC_mixture(data,bins,n_dist=5,pop_num=10**4):
+def PMC_mixture(data,bins,n_dist=1,pop_num=10**4):
     #uses population monte carlo to find best fits and prosteror
     #data[:,1]=data[:,1]*1000.      
    #initalize parmeters and chi squared
+    data_match_all(data)
     lib_vals=get_fitting_info(lib_path)
     lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
     metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
@@ -129,7 +128,7 @@ def PMC_mixture(data,bins,n_dist=5,pop_num=10**4):
                # mu[k]=nu.mean([bin[bin_index],bin[1+bin_index]])
                 bin_index+=1
             else: #norm
-                points[:,k]=nu.random.random(pop_num)*10**4
+                points[:,k]=nu.random.random(pop_num)*10**3
  
     #build population parameters
     print 'initalizing mixture'
@@ -145,9 +144,8 @@ def PMC_mixture(data,bins,n_dist=5,pop_num=10**4):
     lik=nu.array(lik,dtype=nu.float128)
     #calculate weights
     #keep in log space if are smaller than percision
-    #alpha,mu,sigma=resample_first(lik)
-    pool=Pool()
-    for i in range(10): #start refinement loop
+    #pool=Pool()
+    for i in range(50): #start refinement loop
         if i==0:
             if sum(lik[:,-1]<=11399)<30:
                 lik[:,-1] =(1/lik[:,-1])
@@ -158,10 +156,8 @@ def PMC_mixture(data,bins,n_dist=5,pop_num=10**4):
                  lik[:,-1] =(1/lik[:,-1])                  
             else:
                 lik[:,-1] =nu.exp(-lik[:,-1]/2.)
-            args=(lik[:,:-1],[[mu]]*len(lik),[[sigma]]*len(lik))
-            q_sum=pool.map(norm_func,iterable=args)
-            pool.close()
-            pool.join()
+            q_sum=nu.sum(map(norm_func,lik[:,:-1],[[mu]]*len(lik),[[sigma]]*len(lik)),1)
+            lik[:,-1]=lik[:,-1]/q_sum
 
         #create best chi sample
         parambest=nu.zeros(bins*3)
@@ -184,8 +180,6 @@ def PMC_mixture(data,bins,n_dist=5,pop_num=10**4):
         pool.close()
         pool.join()
         lik=nu.array(lik,dtype=nu.float128)
-        #for j in lik:
-         #   j[-1] =(1/j[-1])/(nu.nansum(alpha*norm_func(j[:-1],mu,sigma)))
 
     return lik,mu,sigma
 
@@ -219,12 +213,12 @@ def resample(lik,alpha,mu,sigma):
     #resamples points according to weights and makes new 
     #try this for pool.map map(norm_func,lik[:,:-1],[[mu]]*len(lik),[[sigma]]*len(lik))
     weight_norm=lik[:,-1]/sum(lik[:,-1])
-    rho=nu.zeros([lik.shape[0],len(alpha)])
-    for i in xrange(lik.shape[0]):#probablity of point beloging to distribution
-        rho[i,:]= norm_func(lik[i,:-1],mu,sigma)/(sum(norm_func(lik[i,:-1],mu,sigma)))
-    for i in xrange(len(alpha)): #calculate alpha
+    rho=nu.array(map(norm_func,lik[:,:-1],[[mu]]*len(lik),[[sigma]]*len(lik)))
+    for i in xrange(rho.shape[1]):
+        rho[:,i]=rho[:,i]/nu.sum(rho,1)
+     #calculate alpha
         alpha[i]=nu.sum( weight_norm*rho[:,i])
-    for i in xrange(len(alpha)):#calc mu and sigma
+    #calc mu and sigma
         for j in xrange(mu.shape[1]):
             mu[i,j]=nu.sum(weight_norm*lik[:,j]*rho[:,i])/alpha[i]
     for k in xrange(mu.shape[0]):
@@ -285,19 +279,20 @@ def norm_func(x,mu,sigma,**kwargs):
 def like_gen(data,active_param,lib_vals,age_unq,metal_unq,bins):
    #calcs chi squared values
     model=get_model_fit_opt(active_param,lib_vals,age_unq,metal_unq,bins)  
-    model=data_match_new(data,model,bins)
-    N=[]
-    for k in range(2,len(active_param),3):
-        N.append(active_param[k])
-    N=nu.array(N)
-    model=nu.sum(nu.array(model.values()).T*N,1)
+    #model=data_match_new(data,model,bins)
+    index=xrange(2,bins*3,3)
+    model['wave']= model['wave']*.0
+    for ii in model.keys():
+        if ii!='wave':
+            model['wave']+=model[ii]*active_param[index[int(ii)]]
+
     #make weight paramer start closer to where ave data value
-    return nu.hstack((active_param,sum((data[:,1]-model)**2)))
+    return nu.hstack((active_param,nu.sum((data[:,1]-model['wave'])**2)))
  
 def pop_builder(pop_num,alpha,mu,sigma,age_unq,metal_unq,bins):
     #creates pop_num of points for evaluation
     #only uses a multivarate norm and unifor dist for now
-
+                     
     #check if alpha sums to 1
     if sum(alpha)!=1:
         alpha=alpha/sum(alpha)
