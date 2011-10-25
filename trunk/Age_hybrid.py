@@ -76,7 +76,7 @@ def info_convert(info_txt):
     return metal[nu.argsort(age)],age[nu.argsort(age)]
 
 
-def grid_fit(data,spect=spect):
+def grid_fit(data,grid_points=500,spect=spect):
     #does nnls to fit data, then uses a adaptive grid to find uncertanty on params
     lib_vals=get_fitting_info(lib_path)
     lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
@@ -86,10 +86,6 @@ def grid_fit(data,spect=spect):
     #nnls fits
     best_metal,best_age,best_N=nn_ls_fit(data)
     #make iterations ready
-    age_grid=nu.linspace(age_unq.min(),age_unq.max(),1000)
-    metal_grid=nu.linspace(metal_unq.min(),metal_unq.max(),1000)
-    N_grid=nu.linspace(0,max(best_N)+10.,1000)
-    norm_range=nu.array([0,max(best_N)+10.])
     #match lib with data
     data_match_all(data)
     #out lists
@@ -97,18 +93,16 @@ def grid_fit(data,spect=spect):
     #inital best fit
     bins=len(best_age)
     param=make_correct_params(best_metal,best_age,best_N)
-    #model=get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins) 
-    #model=data_match_new(data,model,bins)
-    #index=nu.int64(model.keys())
-    #chi.append(sum((data[:,1]-nu.sum(nu.array(model.values()).T*best_N[index],1))**2))
-    #out.append(nu.copy(param))
+    #make error testing lists
+    grid=gen_lists(param,age_unq,metal_unq,bins,grid_points)
+    norm_range=nu.array([0.,param.max()])
     for i in xrange(len(param)):
         pool=Pool()
         out[str(i)]=[]
         if any(i==nu.arange(0,bins*3,3)): #metal
             work=[]
             w=work.append
-            for j in metal_grid:
+            for j in grid[str(i)]:
                 w(pool.apply_async( multi_unitfor_grid,(data,param,lib_vals,metal_unq,age_unq,norm_range,bins,j,i)))
             pool.close()
             pool.join()
@@ -118,7 +112,7 @@ def grid_fit(data,spect=spect):
         elif any(i==nu.arange(1,bins*3,3)): #age
             work=[]
             w=work.append
-            for j in age_grid:
+            for j in grid[str(i)]:
                 w(pool.apply_async( multi_unitfor_grid,(data,param,lib_vals,metal_unq,age_unq,norm_range,bins,j,i)))
             pool.close()
             pool.join()
@@ -128,7 +122,7 @@ def grid_fit(data,spect=spect):
         elif any(i==nu.arange(2,bins*3,3)): #norm
             work=[]
             w=work.append
-            for j in N_grid:
+            for j in grid[str(i)]:
                 w(pool.apply_async( multi_unitfor_grid,(data,param,lib_vals,metal_unq,age_unq,norm_range,bins,j,i)))
             pool.close()
             pool.join()
@@ -143,6 +137,40 @@ def grid_fit(data,spect=spect):
 
         out[i]=out[i][out[i][:,0].argsort(),:]
     return out,param
+
+def gen_lists(param,age_unq,metal_unq,bins,points):
+    #generates lin spaceds lists near values in param with num_points=points
+    out={}
+    for i in xrange(len(param)):
+        if any(i==nu.arange(0,bins*3,3)): #metal
+            #check to see of edge of param space
+            if param[i]==metal_unq[0]:
+                out[str(i)]=nu.linspace(metal_unq[0],metal_unq[1],points)
+            elif param[i]==metal_unq[-1]:
+                out[str(i)]=nu.linspace(metal_unq[-2],metal_unq[-1],points)
+            else:
+                out[str(i)]=nu.linspace(param[i]-nu.mean(nu.diff(metal_unq)),param[i]+nu.mean(nu.diff(metal_unq)),points)
+
+        if any(i==nu.arange(1,bins*3,3)): #age
+            if param[i]==age_unq[0]:
+                out[str(i)]=nu.linspace(age_unq[0],age_unq[2],points)
+            elif param[i]==age_unq[-1]:
+                out[str(i)]=nu.linspace(age_unq[-3],age_unq[-1],points)
+            else:
+                out[str(i)]=nu.linspace(param[i]-nu.mean(nu.diff(age_unq))*2,param[i]+nu.mean(nu.diff(age_unq))*2,points)
+ 
+        if any(i==nu.arange(2,bins*3,3)): #norm
+            #make sure above zero
+            norm=5.
+            while True:
+                if param[i]-norm<0:
+                    norm=norm/1.05
+                else:
+                    break
+
+            out[str(i)]=nu.linspace(param[i]-norm,param[i]+norm,points)
+
+    return out
 
 def make_correct_params(metal,age,norm):
     #turns seprate lists of age,metal,norm in to the correct format to be used for fitting
@@ -174,7 +202,7 @@ def multi_unitfor_grid(data,param,lib_vals,metal_unq,age_unq,norm_range,bins,j,i
     out=nu.array([j,0.])
     nu.random.seed(current_process().pid*nu.random.randint(1,999999999))
     index=xrange(2,bins*3,3)
-    for k in xrange(1000):
+    for k in xrange(200):
         #gen new vectors
         #t=Time.time()
         new_param=gen_new_param_uniform(nu.arange(len(param)),metal_unq,age_unq,norm_range)
