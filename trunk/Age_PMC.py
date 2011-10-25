@@ -96,52 +96,36 @@ def PMC_mixture(data,bins,n_dist=1,pop_num=10**4):
     age_unq=nu.unique(lib_vals[0][:,1])
     #initalize importance functions
     alpha=nu.array([n_dist**-1.]*n_dist) #[U,N]
-    '''#for multivarate dist params
-    mu=nu.zeros([n_dist,bins*3])
-    age_bins=nu.linspace(age_unq.min(),age_unq.max(),bins+1)
-    for jj in range(n_dist):
+    out={}
+    while True:
+        points=nu.zeros([pop_num,bins*3])
         bin_index=0
-        for k in xrange(mu.shape[1]):
-            if any(nu.array(range(0,mu.shape[1],3))==k):#metalicity
-                mu[jj,k]=(nu.random.random()*metal_unq.ptp()+metal_unq[0])
+        age_bins=nu.linspace(age_unq.min(),age_unq.max(),bins+1)
+        for k in xrange(bins*3):
+            if any(nu.array(range(0,bins*3,3))==k):#metalicity
+                points[:,k]=(nu.random.random(pop_num)*metal_unq.ptp()+metal_unq[0])
             else:#age and normilization
-                if any(nu.array(range(1,mu.shape[1],3))==k): #age
+                if any(nu.array(range(1,bins*3,3))==k): #age
                 #mu[k]=nu.random.random()
-                    mu[jj,k]=nu.random.rand()*age_unq.ptp()/float(bins)+age_bins[bin_index]
+                    points[:,k]=nu.random.rand(pop_num)*age_unq.ptp()/float(bins)+age_bins[bin_index]
                # mu[k]=nu.mean([bin[bin_index],bin[1+bin_index]])
                     bin_index+=1
                 else: #norm
-                    mu[jj,k]=nu.random.random()*10**4
-    sigma=nu.array([nu.identity(bins*3)]*n_dist)
-    for i in range(n_dist):
-        sigma[i]=sigma[i]*(1000*nu.random.random()/bins)'''
-    points=nu.zeros([pop_num,bins*3])
-    bin_index=0
-    age_bins=nu.linspace(age_unq.min(),age_unq.max(),bins+1)
-    for k in xrange(bins*3):
-        if any(nu.array(range(0,bins*3,3))==k):#metalicity
-            points[:,k]=(nu.random.random(pop_num)*metal_unq.ptp()+metal_unq[0])
-        else:#age and normilization
-            if any(nu.array(range(1,bins*3,3))==k): #age
-                #mu[k]=nu.random.random()
-                points[:,k]=nu.random.rand(pop_num)*age_unq.ptp()/float(bins)+age_bins[bin_index]
-               # mu[k]=nu.mean([bin[bin_index],bin[1+bin_index]])
-                bin_index+=1
-            else: #norm
-                points[:,k]=nu.random.random(pop_num)*10**3
+                    points[:,k]=nu.random.random(pop_num)*10**3
  
     #build population parameters
-    print 'initalizing mixture'
+                    print 'initalizing mixture'
     #points=pop_builder(pop_num,alpha,mu,sigma,age_unq,metal_unq,bins)
     
     #get likelihoods
-    lik=[]
-    pool=Pool()
-    for ii in points:
-        pool.apply_async(like_gen,(data,ii,lib_vals,age_unq,metal_unq,bins,),callback=lik.append)
-    pool.close()
-    pool.join()
-    lik=nu.array(lik,dtype=nu.float128)
+        lik=[]
+        pool=Pool()
+        for ii in points:
+            pool.apply_async(like_gen,(data,ii,lib_vals,age_unq,metal_unq,bins,),callback=lik.append)
+            pool.close()
+            pool.join()
+        lik=nu.array(lik,dtype=nu.float128)
+        
     #calculate weights
     #keep in log space if are smaller than percision
     #pool=Pool()
@@ -158,7 +142,7 @@ def PMC_mixture(data,bins,n_dist=1,pop_num=10**4):
                 lik[:,-1] =nu.exp(-lik[:,-1]/2.)
             q_sum=nu.sum(map(norm_func,lik[:,:-1],[[mu]]*len(lik),[[sigma]]*len(lik)),1)
             lik[:,-1]=lik[:,-1]/q_sum
-
+        out[str(i)]=nu.copy(lik)
         #create best chi sample
         parambest=nu.zeros(bins*3)
         for j in range(bins*3):
@@ -181,7 +165,7 @@ def PMC_mixture(data,bins,n_dist=1,pop_num=10**4):
         pool.join()
         lik=nu.array(lik,dtype=nu.float128)
 
-    return lik,mu,sigma
+    return nu.vstack(out.values())
 
 def resample_first(lik):
     #uses xmeans clustering to adaptivly find starting  mixture densities
@@ -225,26 +209,6 @@ def resample(lik,alpha,mu,sigma):
         for i in xrange(mu.shape[1]):
             for j in xrange(mu.shape[1]):
                 sigma[k][i,j]=nu.sum(weight_norm*rho[:,k]*(lik[:,i]-mu[k,i])*(lik[:,j]-mu[k,j]).T)/alpha[k]
-    '''    
-    for i in range(len(alpha)):
-        if i==0:#calc indexes for sample
-            start=0
-        else:
-            start=stop
-        stop=start+int(lik.shape[0]*alpha[i])
-        
-        temp_lik=lik[start:stop,:]
-        temp_weight=weight_norm[start:stop]
-        for j in range(temp_lik.shape[1]-1): #gen cdf for each param
-            sort_index=temp_lik[:,j].argsort()
-            x,y=nu.array(temp_lik[sort_index,j],dtype=nu.float64),nu.array(nu.cumsum(temp_weight[sort_index])/sum(temp_weight),dtype=nu.float64)
-            #gen rand numbers
-            lik[start:stop,j]=nu.interp(nu.random.rand(stop-start),y,x)
-
-        mu[i]=nu.mean(lik[start:stop,:-1],0)
-        sigma[i]=nu.cov(lik[start:stop,:-1].T)
-        alpha[i]=sum(temp_weight) #calculate new alpha
-        '''
     #alpha=alpha/sum(alpha)
     #remove samples with not enough values
     while any(alpha*lik.shape[0]<100):
