@@ -71,8 +71,61 @@ def edit_spec_range(spect,lam_min,lam_max):
     index=nu.nonzero(nu.logical_and(spect[:,0]>=lam_min,spect[:,0]<=lam_max))[0]
     return spect[index,:]
 
+def interp_create_spectra(bins,func='flat', lam_min=0,
+                   lam_max=nu.inf,slope=None,lib_path='/home/thuso/Phd/Spectra_lib/'):
+    #does everything from create_spectra but values not only from libary
+
+    #initalize everything
+    from Age_date import get_model_fit_opt
+    lib_vals=get_fitting_info(lib_path)
+    lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0])
+    metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
+    age_unq=nu.unique(lib_vals[0][:,1])
+    #generate random parameters
+    age=nu.random.rand(bins)*age_unq.ptp()+age_unq.min()
+    metal=nu.random.rand(bins)*metal_unq.ptp()+metal_unq.min()
+    age.sort()
+    #generate normilization according to function
+    if func=='flat':
+        norm=nu.ones(bins)
+    elif func=='slope':
+        norm=slope*age
+    elif func=='norm':
+        norm=5*nu.exp(-(age-8.5)**2/(2))
+    elif func=='expo':
+        pass
+    elif func=='sinc':
+        pass
+    elif func=='stnt':
+        norm=5*(1+(age-8.5)**2/.4)**(-(.4+1)/2)
+    if bins==1:
+        norm[0]=1.
+    #turn params into standard format
+    param=nu.zeros(len(age)*3)
+    index=0
+    for i in range(0,len(age)*3,3):
+        param[i:i+3]=[metal[index],age[index],norm[index]]
+        index+=1
+    #get spectra
+    model=get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins)
+    #get specified wavelenght range
+    index=nu.nonzero(nu.logical_and(model['wave']>=lam_min,model['wave']<=lam_max))[0]
+    #combine and apply wavelength range
+    out=nu.zeros([len(index),2])
+    for i in model.keys():
+        if i=='wave':
+            out[:,0]=model[i][index]
+            continue
+        out[:,1]+=model[i][index]*param.take(xrange(2,len(param),3))[int(i)]
+    #turn age and metal into spect format
+    info_out=[]
+    for i in xrange(len(age)):
+        info_out.append('ssp_%1.4f_%1.6f.spec' %(10**metal[i],age[i]))
+
+    return out,info_out,norm
+
 def create_spectra(bins,func='flat',lam_min=0,
-                   lam_max=nu.inf,lib_path='/home/thuso/Phd/Spectra_lib/',slope=None):
+                   lam_max=nu.inf,slope=None,lib_path='/home/thuso/Phd/Spectra_lib/'):
     #creates a SFH function and matches SSP's to it with 
     #inputted bins based on sfr/t*delta*
     #slope parameter is only ineed for func="line"
