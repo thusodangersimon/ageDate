@@ -97,7 +97,8 @@ def interp_create_spectra(bins,func='flat', lam_min=0,
     elif func=='sinc':
         pass
     elif func=='stnt':
-        norm=5*(1+(age-8.5)**2/.4)**(-(.4+1)/2)
+        #double peak
+        norm=5*(1+((age-8.5)/.05)**2/.4)**(-(.4+1)/2)+(1+((age-5.5)/.05)**2/.4)**(-(.4+1)/2)
     if bins==1:
         norm[0]=1.
     #turn params into standard format
