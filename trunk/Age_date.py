@@ -271,6 +271,47 @@ def multivariate_student(mu,sigma,n):
     #as n->inf this goes to gaussian
     return mu+nu.random.multivariate_normal([0]*len(mu),sigma)*(n/nu.random.chisquare(n))**0.5
 
+def nn_ls_fit(data,max_bins=16,min_norm=10**-4,spect=spect):
+    #uses non-negitive least squares to fit data
+    #spect is libaray array
+    #match wavelength of spectra to data change in to appropeate format
+    model={}
+    for i in xrange(spect[0,:].shape[0]):
+        if i==0:
+            model['wave']=nu.copy(spect[:,i])
+        else:
+            model[str(i-1)]=nu.copy(spect[:,i])
+
+    model=data_match_new(data,model,spect[0,:].shape[0]-1)
+    index=nu.int64(model.keys())
+    
+    #nnls fit
+    N,chi=nnls(nu.array(model.values()).T,data[:,1])
+    N=N[index.argsort()]
+    
+    #check if above max number of binns
+    if len(N[N>min_norm])>max_bins:
+        #remove the lowest normilization
+        N_max_arg=nu.nonzero(N>min_norm)[0]
+        N_max_arg=N_max_arg[N[N_max_arg].argsort()]
+        #sort by norm value
+        current=[]
+        for i in xrange(N_max_arg.shape[0]-1,-1,-1):
+            current.append(info[N_max_arg[i]])
+            if len(current)==max_bins:
+                break
+        current=nu.array(current)
+    else:
+        current=info[N>min_norm]
+    metal,age=[],[]
+    for i in current:
+        metal.append(float(i[4:10]))
+        age.append(float(i[11:-5]))
+    metal,age=nu.array(metal),nu.array(age)
+    #check if any left
+    return metal[nu.argsort(age)],age[nu.argsort(age)],N[N>min_norm][nu.argsort(age)]
+
+
 if __name__=='__main__':
     import cProfile as pro
     lib_vals=get_fitting_info(lib_path)
