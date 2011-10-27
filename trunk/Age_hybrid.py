@@ -31,40 +31,6 @@ in a multitude of ways, using grid,MCMC and population fitting'''
 
 from Age_date import *
 
-def nn_ls_fit(data,max_bins=16,min_norm=10**-4,spect=spect):
-    #uses non-negitive least squares to fit data
-    #spect is libaray array
-    #match wavelength of spectra to data change in to appropeate format
-    model={}
-    for i in xrange(spect[0,:].shape[0]):
-        if i==0:
-            model['wave']=nu.copy(spect[:,i])
-        else:
-            model[str(i-1)]=nu.copy(spect[:,i])
-
-    model=data_match_new(data,model,spect[0,:].shape[0]-1)
-    index=nu.int64(model.keys())
-    
-    #nnls fit
-    N,chi=nnls(nu.array(model.values()).T,data[:,1])
-    N=N[index.argsort()]
-    
-    #check if above max number of binns
-    if len(N[N>min_norm])>max_bins:
-        #remove the lowest normilization
-        print 'removing bins is not ready yet'
-        raise
-    current=info[N>min_norm]
-    metal,age=[],[]
-    for i in current:
-        metal.append(float(i[4:10]))
-        age.append(float(i[11:-5]))
-    metal,age=nu.array(metal),nu.array(age)
-    #check if any left
-    if len(current)<2:
-        return float(current[4:10]),float(current[11:-5]),N[N>min_norm]
-
-    return metal[nu.argsort(age)],age[nu.argsort(age)],N[N>min_norm][nu.argsort(age)]
 
 def info_convert(info_txt):
     #takes info array from Age_date.create_data and turns in floats for plotting
