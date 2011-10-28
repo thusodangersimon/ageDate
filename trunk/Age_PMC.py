@@ -190,13 +190,14 @@ def PMC(data,bins,pop_num=10**4):
     metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
     age_unq=nu.unique(lib_vals[0][:,1])
     #initalize importance functions
-    alpha=nu.array([5**-1.]*5)
-    func_type=[]
-    for i in xrange(5):
+    #alpha=nu.array([5**-1.]*5)
+    alpha=nu.array([1.])
+    func_type=[student_t]
+    '''for i in xrange(5):
         if nu.random.rand()>.5:
             func_type.append(norm_func)
         else:
-           func_type.append(student_t) 
+           func_type.append(student_t) '''
     start_stuff=nn_ls_fit(data,max_bins=bins)
     mu,sigma=[],[]
     #sort out first guess
@@ -206,12 +207,11 @@ def PMC(data,bins,pop_num=10**4):
         temp[1+i*bins*3]=start_stuff[1][i]
         temp[2+i*bins*3]=start_stuff[2][i]
     mu.append(nu.copy(temp))
-    sigma.append(nu.identity(bins*3))
+    #sigma.append(nu.identity(bins*3))
     #other guesses
     
     out={}
-    points=nu.zeros([pop_num,bins*3])
-    for i in range(1,len(alpha)):
+    for i in range(len(alpha)):
         sigma.append(nu.identity(bins*3))
         for k in xrange(bins*3):
             if any(nu.array(range(0,bins*3,3))==k):#metalicity
@@ -224,16 +224,14 @@ def PMC(data,bins,pop_num=10**4):
                 else: #norm
                     temp[k]=nu.random.random()*10**3
                     sigma[-1][k,k]=nu.random.rand()*10**3/4
-        mu.append(nu.copy(temp))
+        #mu.append(nu.copy(temp))
     mu,sigma=nu.array(mu),nu.array(sigma)
     #find best inital guess of mean and cov of prosterior
     print 'initalizing mixture'
-    points=pop_builder(pop_num,alpha,mu,sigma,age_unq,metal_unq,bins)
-    j=0
-    while True:
+    j,grad=0,[]
+    while j<4:
     #get likelihoods
-        if not j==0:
-            points=pop_builder(pop_num,alpha,mu,sigma,age_unq,metal_unq,bins)
+        points=pop_builder(pop_num,alpha,mu,sigma,age_unq,metal_unq,bins)
         lik=[]
         pool=Pool()
         for ii in points:
@@ -245,22 +243,35 @@ def PMC(data,bins,pop_num=10**4):
             lik[:,-1] =(1/lik[:,-1])                  
         else:
             lik[:,-1] =nu.exp(-lik[:,-1]/2.)
-        pool=Pool()
-        start=0
-        for ii in range(len(alpha)):
+        #pool=Pool()
+        #start=0
+        #for ii in range(len(alpha)):
             
             #q_sum=nu.sum(map(norm_func,lik[:,:-1],[[mu]]*len(lik),[[sigma]]*len(lik)),1)
-            q_sum=nu.sum(map(student_t,lik[:,:-1],[[mu]]*len(lik),[[sigma]]*len(lik)),1)
-
-        lik=lik[lik[:,-1].argsort(),:]
-        #find min and bootstrap (sort of)
-        mu=nu.array([lik[:100,:-1].mean(0)])
-        sigma=nu.array([nu.cov(lik[:100,:-1].T)])*2.
+        IFunc=nu.array(map(func_type[0],lik[:,:-1],[[mu]]*len(lik),[[sigma]]*len(lik)))
+        #lik[:,-1]=lik[:,-1]/nu.sum(IFunc,1)
+        grad.append(nu.hstack((mu[0],min_func(lik[:,-1],IFunc))))
+        #find gradient using "chi squared disttance"
+        if j>1:
+            v=(grad[-1][:-1]-grad[-2][:-1])/(grad[-1][-1]-grad[-2][-1])
+            if nu.sum(v)==0: #perteb it
+                v=nu.array([nu.random.rand(len(mu[0]))-.5])
+            mu=nu.array([grad[-1][:-1]-grad[-1][-1]*v])
+            alpha,mu,sigma=resample(lik,alpha,mu,sigma,IFunc,False)
+            
+            
+        else:
+            alpha,mu,sigma=resample(lik,alpha,mu,sigma,IFunc)
         j+=1
         print "number of trys is %i" %i
         if sum(lik[:,-1]<=11399)>3000:
             break
  
+
+def min_func(Pi,IFunc):
+    #calculates chi squared function for minization
+    Pi_norm=Pi/nu.sum(IFunc,1)/nu.sum(Pi/nu.sum(IFunc,1))
+    return 1/(nu.sum(Pi_norm**2))
 
 def resample_first(lik):
     #uses xmeans clustering to adaptivly find starting  mixture densities
@@ -288,18 +299,19 @@ def resample_first(lik):
 
     return alpha,mu,sigma
 
-def resample(lik,alpha,mu,sigma):
+def resample(lik,alpha,mu,sigma,rho,option=True):
     #resamples points according to weights and makes new 
     #try this for pool.map map(norm_func,lik[:,:-1],[[mu]]*len(lik),[[sigma]]*len(lik))
     weight_norm=lik[:,-1]/nu.sum(lik[:,-1])
-    rho=nu.array(map(norm_func,lik[:,:-1],[[mu]]*len(lik),[[sigma]]*len(lik)))
+    #rho=nu.array(map(func,lik[:,:-1],[[mu]]*len(lik),[[sigma]]*len(lik)))
     for i in xrange(rho.shape[1]):
         rho[:,i]=rho[:,i]/nu.sum(rho,1)
      #calculate alpha
         alpha[i]=nu.sum( weight_norm*rho[:,i])
     #calc mu and sigma
-        for j in xrange(mu.shape[1]):
-            mu[i,j]=nu.sum(weight_norm*lik[:,j]*rho[:,i])/alpha[i]
+        if option:
+            for j in xrange(mu.shape[1]):
+                mu[i,j]=nu.sum(weight_norm*lik[:,j]*rho[:,i])/alpha[i]
     for k in xrange(mu.shape[0]):
         for i in xrange(mu.shape[1]):
             for j in xrange(mu.shape[1]):
