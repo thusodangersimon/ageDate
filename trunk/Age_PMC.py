@@ -185,6 +185,7 @@ def PMC_mixture_old(data,bins,n_dist=1,pop_num=10**4):
 def PMC(data,bins,pop_num=10**4):
     #does PMC but minimizes Kullback-Leibler divergence to find best fit
     data_match_all(data)
+    data[:,1]=data[:,1]*1000.
     lib_vals=get_fitting_info(lib_path)
     lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
     metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
@@ -228,49 +229,47 @@ def PMC(data,bins,pop_num=10**4):
     mu,sigma=nu.array(mu),nu.array(sigma)
     #find best inital guess of mean and cov of prosterior
     print 'initalizing mixture'
-    j,grad=0,[]
-    while j<4:
+    j,grad,lik,Sig=0,[],[],[]
+    while j<8:
     #get likelihoods
-        points=pop_builder(pop_num,alpha,mu,sigma,age_unq,metal_unq,bins)
-        lik=[]
+        points=pop_builder(pop_num,alpha,mu,nu.copy(sigma),age_unq,metal_unq,bins)
+        #lik=[]
         pool=Pool()
         for ii in points:
             pool.apply_async(like_gen,(data,ii,lib_vals,age_unq,metal_unq,bins,),callback=lik.append)
         pool.close()
         pool.join()
-        lik=nu.array(lik,dtype=nu.float128)
-        if sum(lik[:,-1]<=11399)<30:
-            lik[:,-1] =(1/lik[:,-1])                  
+        new_lik=nu.copy(nu.array(lik,dtype=nu.float128))
+        if sum(new_lik[:,-1]<=11399)<30:
+            mu= nu.float64(new_lik[new_lik[:,-1].min()==new_lik[:,-1],:-1])
+            continue
         else:
-            lik[:,-1] =nu.exp(-lik[:,-1]/2.)
-        #pool=Pool()
-        #start=0
-        #for ii in range(len(alpha)):
-            
-            #q_sum=nu.sum(map(norm_func,lik[:,:-1],[[mu]]*len(lik),[[sigma]]*len(lik)),1)
-        IFunc=nu.array(map(func_type[0],lik[:,:-1],[[mu]]*len(lik),[[sigma]]*len(lik)))
+            new_lik[:,-1] =nu.exp(-new_lik[:,-1]/2.)
+        
         #lik[:,-1]=lik[:,-1]/nu.sum(IFunc,1)
-        grad.append(nu.hstack((mu[0],min_func(lik[:,-1],IFunc))))
+        grad.append(nu.float64(nu.hstack((mu[0],min_func(new_lik[:,-1])/new_lik.shape[0]))))
+        Sig.append(nu.copy(sigma[0]))
+        
         #find gradient using "chi squared disttance"
-        if j>1:
+        '''if j>1:
             v=(grad[-1][:-1]-grad[-2][:-1])/(grad[-1][-1]-grad[-2][-1])
             if nu.sum(v)==0: #perteb it
                 v=nu.array([nu.random.rand(len(mu[0]))-.5])
             mu=nu.array([grad[-1][:-1]-grad[-1][-1]*v])
-            alpha,mu,sigma=resample(lik,alpha,mu,sigma,IFunc,False)
+            alpha,mu,sigma=resample(lik,alpha,mu,sigma,func_type,False)
             
             
-        else:
-            alpha,mu,sigma=resample(lik,alpha,mu,sigma,IFunc)
+        else:'''
+        alpha,mu,sigma=resample(new_lik,alpha,mu,sigma,func_type)
         j+=1
-        print "number of trys is %i" %i
-        if sum(lik[:,-1]<=11399)>3000:
-            break
+        print "number of trys is %i" %j
+        #if sum(lik[:,-1]<=11399)>3000:
+       #     break
  
 
-def min_func(Pi,IFunc):
+def min_func(Pi):
     #calculates chi squared function for minization
-    Pi_norm=Pi/nu.sum(IFunc,1)/nu.sum(Pi/nu.sum(IFunc,1))
+    Pi_norm=Pi/nu.sum(Pi)
     return 1/(nu.sum(Pi_norm**2))
 
 def resample_first(lik):
@@ -299,10 +298,11 @@ def resample_first(lik):
 
     return alpha,mu,sigma
 
-def resample(lik,alpha,mu,sigma,rho,option=True):
+def resample(lik,alpha,mu,sigma,func_type,option=True):
     #resamples points according to weights and makes new 
     #try this for pool.map map(norm_func,lik[:,:-1],[[mu]]*len(lik),[[sigma]]*len(lik))
     weight_norm=lik[:,-1]/nu.sum(lik[:,-1])
+    rho=nu.array(map(func_type[0],lik[:,:-1],[[mu]]*len(lik),[[sigma]]*len(lik)))
     #rho=nu.array(map(func,lik[:,:-1],[[mu]]*len(lik),[[sigma]]*len(lik)))
     for i in xrange(rho.shape[1]):
         rho[:,i]=rho[:,i]/nu.sum(rho,1)
@@ -334,6 +334,7 @@ def student_t(x,mu,sigma,n=1.,**kwargs):
     #t dist with n degrees of freedom
     out=nu.zeros(mu[0].shape[0])
     for i in xrange(mu[0].shape[0]):
+        #print sigma[0][i]
         try:
             out[i]=gamma(n+sigma[0][i].shape[0])/2./(gamma(n/2.)*(n*nu.pi)**(sigma[0][i].shape[0]/2.)*
                                                      nu.linalg.det(sigma[0][i])**(-.5)*
@@ -370,7 +371,7 @@ def like_gen(data,active_param,lib_vals,age_unq,metal_unq,bins):
     #make weight paramer start closer to where ave data value
     return nu.hstack((active_param,nu.sum((data[:,1]-model['wave'])**2)))
  
-def pop_builder(pop_num,alpha,mu,sigma,age_unq,metal_unq,bins):
+def pop_builder(pop_num,alpha,mu,sig,age_unq,metal_unq,bins):
     #creates pop_num of points for evaluation
     #only uses a multivarate norm and unifor dist for now
                      
@@ -392,37 +393,42 @@ def pop_builder(pop_num,alpha,mu,sigma,age_unq,metal_unq,bins):
         except ValueError:
             print alpha
             raise
-        points[start:stop,:]=nu.random.multivariate_normal(mu[j],sigma[j],(stop-start))
+        points[start:stop,:]=nu.random.multivariate_normal(mu[j],sig[j],(stop-start))
+        if nu.sum(points[:,0]==0)>0:
+            index=nu.nonzero(points[:,0]==0)[0]
+            points[index,:]=nu.random.multivariate_normal(mu[j],sig[j],len(index))
         #check for values outside range
         #bin_index=0
         for i in range(bins*3):
-            if i==0 or i%3==0: #metalicity
+            if any(i==nu.array(range(0,bins*3,3))): #metalicity
                 index=nu.nonzero(nu.logical_or(points[start:stop,i]< metal_unq[0],points[start:stop,i]> metal_unq[-1]))[0]
                 while index.shape[0]>0:
                     index+=start
-                    points[index,:]=nu.random.multivariate_normal(mu[j],sigma[j],len(index))
+                    points[index,:]=nu.random.multivariate_normal(mu[j],sig[j],len(index))
                     index=nu.nonzero(nu.logical_or(points[start:stop,i]< metal_unq[0],points[start:stop,i]> metal_unq[-1]))[0]  
-                    sigma[j][i,i]=sigma[j][i,i]/2.
+                    sig[j][i,i]=sig[j][i,i]/2.
             elif (i-1)%3==0 or i-1==0:#age
                 index=nu.nonzero(nu.logical_or(points[start:stop,i]< age_unq[0],points[start:stop,i]>age_unq[-1]))[0]
                 while index.shape[0]>0:
                     index+=start
-                    points[index,:]=nu.random.multivariate_normal(mu[j],sigma[j],len(index))
+                    points[index,:]=nu.random.multivariate_normal(mu[j],sig[j],len(index))
                     index=nu.nonzero(nu.logical_or(points[start:stop,i]< age_unq[0],points[start:stop,i]> age_unq[-1]))[0] 
-                    sigma[j][i,i]=sigma[j][i,i]/2.
+                    sig[j][i,i]=sig[j][i,i]/2.
             elif (i-2)%3==0 or i==2: #norm
                 if nu.any(points[:,i]<0):
                     points[:,i]=nu.abs(points[:,i])
-    #check for any missed values in array
-    if nu.sum(points[:,0]==0)>0:
-        index=nu.nonzero(points[:,0]==0)[0]
-        alpha_index = nu.nonzero(alpha==alpha.max())[0][0] #gen points from most probablity place
-        points[index,:]=nu.random.multivariate_normal(mu[alpha_index],sigma[alpha_index],len(index))
-        for j in index:
-            while check(points[j,:],metal_unq, age_unq, bins):
-                points[j,:]=nu.random.multivariate_normal(mu[alpha_index],sigma[alpha_index])
-        for j in range(2,bins*3,3):
-            points[:,j]=nu.abs(points[:,j])
+        #one last check to see if all points are in param range
+    for i in range(bins*3):
+        if any(i==nu.array(range(0,bins*3,3))): #metal
+            index=nu.nonzero(points[:,i]<metal_unq[0])[0] #lower range
+            points[index,i]=nu.copy(metal_unq[0])
+            index=nu.nonzero(points[:,i]>metal_unq[-1])[0] #upper range
+            points[index,i]=nu.copy(metal_unq[-1])
+        elif any(i==nu.array(range(1,bins*3,3))): #age
+            index=nu.nonzero(points[:,i]<age_unq[0])[0] #lower range
+            points[index,i]=nu.copy(age_unq[0])
+            index=nu.nonzero(points[:,i]>age_unq[-1])[0] #upper range
+            points[index,i]=nu.copy(age_unq[-1])
 
     return points
 
