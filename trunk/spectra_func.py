@@ -78,7 +78,8 @@ def from_file(files,lookback,lam_min=0,lam_max=nu.inf,lib_path='/home/thuso/Phd/
     datas=datas[datas[:,2]>0,:]
     #put in right format
     datas[:,1]=nu.log10((datas[:,1]+lookback)*10**9)
-    return own_array_spect(datas[:,1],datas[:,3],datas[:,2],lam_min=lam_min,lam_max=lam_max)
+    return own_array_spect(datas[:,1],nu.log10(datas[:,3]),datas[:,2],lam_min=lam_min,lam_max=lam_max)
+
 def own_array_spect(age,metal=None,norm=None,Norm_max=5,lam_min=0,lam_max=nu.inf,lib_path='/home/thuso/Phd/Spectra_lib/'):
     #takes an input age array and or metal, Norm  with same lenght
     #and turns it into composite spectra
@@ -93,15 +94,15 @@ def own_array_spect(age,metal=None,norm=None,Norm_max=5,lam_min=0,lam_max=nu.inf
     #clip age values not in limits
     index=nu.nonzero(nu.logical_or(age>age_unq[-1],age<age_unq[0]))[0]
     age=nu.delete(age,index)
-    if metal:
+    if any(metal):
         metal=nu.delete(metal,index)
-    if norm:
+    if any(norm):
         norm=nu.delete(norm,index)
     #make metal array and or norm if not exsist
-    if not metal:
+    if not any(metal):
         #keep metals constant
         metal=nu.array([metal_unq[nu.random.randint(len(metal_unq))]]*age.shape[0])
-    if not norm:
+    if not any(norm):
         #make 1 peak gausian
         norm=nu.exp(-(nu.log10(15*10**9)-age)**2/.2)*Norm_max
     #turn into correct format to make specra
