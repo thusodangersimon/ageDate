@@ -32,6 +32,7 @@ from Age_date import *
 import pypar as par
 from x_means import xmean
 from scipy.special import gamma
+from scipy.optimize import fmin_l_bfgs_b
 #import time as Time
 
 #a=nu.seterr(all='ignore')
@@ -184,8 +185,9 @@ def PMC_mixture_old(data,bins,n_dist=1,pop_num=10**4):
 
 def PMC(data,bins,pop_num=10**4):
     #does PMC but minimizes Kullback-Leibler divergence to find best fit
-    data_match_all(data)
+    #data_match_all(data)
     data[:,1]=data[:,1]*1000.
+    f=PMC_func(data,bins)
     lib_vals=get_fitting_info(lib_path)
     lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
     metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
@@ -235,13 +237,19 @@ def PMC(data,bins,pop_num=10**4):
         points=pop_builder(pop_num,alpha,mu,nu.copy(sigma),age_unq,metal_unq,bins)
         #lik=[]
         pool=Pool()
-        for ii in points:
+        #lik=pool.map_async(f.func_all,points)
+        lik=map(f.func_all,points)
+        '''for ii in points:
             pool.apply_async(like_gen,(data,ii,lib_vals,age_unq,metal_unq,bins,),callback=lik.append)
         pool.close()
-        pool.join()
+        pool.join()'''
         new_lik=nu.copy(nu.array(lik,dtype=nu.float128))
         if sum(new_lik[:,-1]<=11399)<30:
             mu= nu.float64(new_lik[new_lik[:,-1].min()==new_lik[:,-1],:-1])
+            try:
+                temp_mu=fmin_l_bfgs_b(f.func,mu[0],bounds = f.bounds,approx_grad=True)
+            except IndexError:
+                temp_mu=mu*0.
             continue
         else:
             new_lik[:,-1] =nu.exp(-new_lik[:,-1]/2.)
@@ -432,6 +440,106 @@ def pop_builder(pop_num,alpha,mu,sig,age_unq,metal_unq,bins):
 
     return points
 
+class PMC_func:
+    #makes more like function, so input params and the chi is outputted
+    def __init__(self,data,bins,spect=spect):
+        data_match_all(data)
+        self.data=data
+        lib_vals=get_fitting_info(lib_path)
+        lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
+        metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
+        age_unq=nu.unique(lib_vals[0][:,1])
+        self.lib_vals=lib_vals
+        self.age_unq= age_unq
+        self.metal_unq,self.bins,self.spect=metal_unq,bins,spect
+        self.bounds()
+
+    def func(self,param):
+        #so can evalulate like normal function
+        if len(param)!=self.bins*3:
+            return nu.nan
+        print param
+        return like_gen(self.data,param,self.lib_vals,self.age_unq,self.metal_unq,self.bins)[-1]
+    
+    def func_all(self,param):
+        if len(param)!=self.bins*3:
+            return nu.nan
+        return like_gen(self.data,param,self.lib_vals,self.age_unq,self.metal_unq,self.bins)
+ 
+    def min_bound(self):
+        #outputs an array of minimum values for parameters
+        out=nu.zeros(self.bins*3)
+        for k in range(self.bins*3):
+            if any(nu.array(range(0,self.bins*3,3))==k): #metal
+                out[k]=self.metal_unq[0]
+            elif any(nu.array(range(1,self.bins*3,3))==k): #age
+                out[k]=self.age_unq[0]
+            elif any(nu.array(range(2,self.bins*3,3))==k): #norm
+                out[k]=0.0
+        return out
+
+    def max_bound(self):
+        #outputs an array of maximum values for parameters
+        out=nu.zeros(self.bins*3)
+        for k in range(self.bins*3):
+            if any(nu.array(range(0,self.bins*3,3))==k): #metal
+                out[k]=self.metal_unq[-1]
+            elif any(nu.array(range(1,self.bins*3,3))==k): #age
+                out[k]=self.age_unq[-1]
+            elif any(nu.array(range(2,self.bins*3,3))==k): #norm
+                out[k]=nu.inf
+        return out
+
+    def bounds(self):
+        Min=self.min_bound()
+        Max=self.max_bound()
+        out=[]
+        for i in range(len(Min)):
+            out.append((Min[i],Max[i]))
+        self.bounds=nu.copy(out)
+        return out
+
+    def func_prime(self,param,index,h=10**-6):
+    #takes 1st deriv of func
+    #use [f(x+h,params)-f(x-h,params)]/2h
+        temp=nu.copy(param)
+        temp[index]+=h
+        fplus=self.func(temp)
+        temp[index]-=2*h
+        fminus=self.func(temp)
+        return (fplus-fminus)/(2*h)
+
+    def func_2prime(self,param,index,h=10**-6):
+    #takes 2nd deriv of func
+        #does (f(x+h)+f(x-h)-2F(x))/h**2
+        temp=nu.copy(param)
+        temp[index]+=h
+        fplus=self.func(temp)
+        temp[index]-=2*h
+        fminus=self.func(temp)
+        return (fplus+fminus-2*self.func(param))/h**2.
+
+    def step_newton(self,param):
+        #calculates the step used for newton rapshon method
+        #handels boundaries and nan's
+        temp_param=nu.copy(param)
+        for itter in range(10**3):
+            print temp_param
+            for i in range(self.bins*3):
+                #temp_param[i]-=self.func_prime(temp_param,i)/self.func_2prime(temp_param,i)
+                temp_param[i]-=self.func(temp_param)/self.func_prime(temp_param,i)
+                if nu.isnan(temp_param[i]) or nu.isinf(temp_param[i]):
+                    print 'warrning: function not continuous'
+                    raise ValueError
+                if temp_param[i]<self.bounds[i][0]:
+                    if nu.any(i==nu.arange(2,6,3)):
+                        temp_param[i]=1.
+                    else:
+                        temp_param[i]=nu.copy(self.bounds[i][0])
+                elif temp_param[i]>self.bounds[i][1]:
+                    temp_param[i]=nu.copy(self.bounds[i][1])
+
+#sci.fmin_l_bfgs_b(f.func,[-2.,5.7.,10], bounds = f.bounds,approx_grad=True)
 
 def toy():
 
