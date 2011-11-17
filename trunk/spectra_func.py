@@ -71,6 +71,62 @@ def edit_spec_range(spect,lam_min,lam_max):
     index=nu.nonzero(nu.logical_and(spect[:,0]>=lam_min,spect[:,0]<=lam_max))[0]
     return spect[index,:]
 
+def from_file(files,lookback,lam_min=0,lam_max=nu.inf,lib_path='/home/thuso/Phd/Spectra_lib/'):
+    #takes files with coulmn of age,norm and metalicity and turns into spectra
+    datas=nu.loadtxt(files)
+    #remove zeors
+    datas=datas[datas[:,2]>0,:]
+    #put in right format
+    datas[:,1]=nu.log10((datas[:,1]+lookback)*10**9)
+    return own_array_spect(datas[:,1],datas[:,3],datas[:,2],lam_min=lam_min,lam_max=lam_max)
+def own_array_spect(age,metal=None,norm=None,Norm_max=5,lam_min=0,lam_max=nu.inf,lib_path='/home/thuso/Phd/Spectra_lib/'):
+    #takes an input age array and or metal, Norm  with same lenght
+    #and turns it into composite spectra
+    #interpolates values an removes values out of bounds
+    
+    #initalize everything
+    from Age_date import get_model_fit_opt
+    lib_vals=get_fitting_info(lib_path)
+    lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0])
+    metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
+    age_unq=nu.unique(lib_vals[0][:,1])
+    #clip age values not in limits
+    index=nu.nonzero(nu.logical_or(age>age_unq[-1],age<age_unq[0]))[0]
+    age=nu.delete(age,index)
+    if metal:
+        metal=nu.delete(metal,index)
+    if norm:
+        norm=nu.delete(norm,index)
+    #make metal array and or norm if not exsist
+    if not metal:
+        #keep metals constant
+        metal=nu.array([metal_unq[nu.random.randint(len(metal_unq))]]*age.shape[0])
+    if not norm:
+        #make 1 peak gausian
+        norm=nu.exp(-(nu.log10(15*10**9)-age)**2/.2)*Norm_max
+    #turn into correct format to make specra
+    param=nu.zeros(len(age)*3)
+    index=0
+    for i in range(0,len(age)*3,3):
+        param[i:i+3]=[metal[index],age[index],norm[index]]
+        index+=1
+    #get spectra
+    model=get_model_fit_opt(param,lib_vals,age_unq,metal_unq,len(age))
+    index=nu.nonzero(nu.logical_and(model['wave']>=lam_min,model['wave']<=lam_max))[0]
+    #combine and apply wavelength range
+    out=nu.zeros([len(index),2])
+    for i in model.keys():
+        if i=='wave':
+            out[:,0]=model[i][index]
+            continue
+        out[:,1]+=model[i][index]*param.take(xrange(2,len(param),3))[int(i)]
+    #turn age and metal into spect format
+    info_out=[]
+    for i in xrange(len(age)):
+        info_out.append('ssp_%1.4f_%1.6f.spec' %(10**metal[i],age[i]))
+
+    return out,info_out,norm
+
 def interp_create_spectra(bins,func='flat', lam_min=0,
                    lam_max=nu.inf,slope=None,lib_path='/home/thuso/Phd/Spectra_lib/'):
     #does everything from create_spectra but values not only from libary
@@ -211,8 +267,6 @@ def line(slope,bins,age_lower,age_upper,lib,lib_path):
         raise
     return outspec,specra_names,nu.array(norm)
 
-
-
 def student_t(bins,max_SFR,std_SFR):
     pass
 
@@ -223,7 +277,7 @@ def age_covert(age):
 def metal_convert(metal):
     #converts metalicity to bishops calc 
     ####need covert to better way
-    return 10** (metal -5)
+    nu.log10(Z+1.1111)+5
 
 def search(lib,point_min,point_max):  
     #finds closest age spectra and returns file name
