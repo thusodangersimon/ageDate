@@ -35,6 +35,7 @@ from multiprocessing import *
 from interp_func import *
 from spectra_func import *
 from scipy.optimize import nnls
+from scipy.optimize import fmin_l_bfgs_b as fmin_bound
 import time as Time
 
 ###spectral lib stuff####
@@ -214,17 +215,17 @@ def data_match_new(data,model,bins):
     
 
 def check(param,metal_unq, age_unq,bins): #checks if params are in bounds
-    age=nu.linspace(age_unq.min(),age_unq.max(),bins+1)
+    age=nu.log10(nu.linspace(10**age_unq.min(),10**age_unq.max(),bins+1))#linear spacing
     for j in xrange(bins):#check age and metalicity
-        '''if any([metal_unq[-1],age[j+1]]<param[j*3:j*3+2]) or any([metal_unq[0],age[j]]>
+        if any([metal_unq[-1],age[j+1]]<param[j*3:j*3+2]) or any([metal_unq[0],age[j]]>
                                                                  param[j*3:j*3+2]):
-            ''' 
-        if any([metal_unq[-1],age_unq[-1]]<param[j*3:j*3+2]) or any([metal_unq[0],age_unq[0]]>param[j*3:j*3+2]):
+            
+            '''if any([metal_unq[-1],age_unq[-1]]<param[j*3:j*3+2]) or any([metal_unq[0],age_unq[0]]>param[j*3:j*3+2]):'''
             return True
         #if any(nu.abs(nu.diff(param.take(range(1,bins*3,3))))<.3):
         #    return True
-        '''if not (0<param[j*3+2]): #and param[j*3+2]<1): #check normalizations
-            return True'''
+        if not (0<param[j*3+2]): #and param[j*3+2]<1): #check normalizations
+            return True
     return False
 
 def normalize(data,model):
@@ -311,6 +312,96 @@ def nn_ls_fit(data,max_bins=16,min_norm=10**-4,spect=spect):
     #check if any left
     return metal[nu.argsort(age)],age[nu.argsort(age)],N[N>min_norm][nu.argsort(age)]
 
+#####classes############# 
+class PMC_func:
+    #makes more like function, so input params and the chi is outputted
+    def __init__(self,data,bins,spect=spect):
+        data_match_all(data)
+        self.data=data
+        lib_vals=get_fitting_info(lib_path)
+        lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
+        metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
+        age_unq=nu.unique(lib_vals[0][:,1])
+        self.lib_vals=lib_vals
+        self.age_unq= age_unq
+        self.metal_unq,self.bins,self.spect=metal_unq,bins,spect
+        self.bounds()
+
+    def func(self,param):
+        if len(param)!=self.bins*3:
+            return nu.nan
+        if check(param,self.metal_unq, self.age_unq,self.bins): #make sure params are in correct range
+            for i in xrange(len(self.bounds)): #find which is out and fix
+                if self.bounds[i][0]>param[i]: #if below bounds
+                    param[i]=nu.copy(self.bounds[i][0])
+                if self.bounds[i][1]<param[i]: #if above bounds
+                    param[i]=nu.copy(self.bounds[i][1])
+
+        model=get_model_fit_opt(param,self.lib_vals,self.age_unq,self.metal_unq,self.bins)  
+    #model=data_match_new(data,model,bins)
+        index=xrange(2,self.bins*3,3)
+        model['wave']= model['wave']*.0
+        for ii in model.keys():
+            if ii!='wave':
+                model['wave']+=model[ii]*param[index[int(ii)]]
+        return nu.sum((self.data[:,1]-model['wave'])**2)
+
+    def func_N_norm(self,param):
+        #returns chi and N norm best fit params
+        if len(param)!=self.bins*3:
+            return nu.nan
+        model=get_model_fit_opt(param,self.lib_vals,self.age_unq,self.metal_unq,self.bins)  
+        N,model,chi=N_normalize(self.data, model,self.bins)
+    
+        return chi,N
+
+ 
+    def min_bound(self):
+        #outputs an array of minimum values for parameters
+        out=nu.zeros(self.bins*3)
+        bin=nu.log10(nu.linspace(10**self.age_unq.min(),10**self.age_unq.max(),self.bins+1))
+        bin_index=0
+        for k in range(self.bins*3):
+            if any(nu.array(range(0,self.bins*3,3))==k): #metal
+                out[k]=self.metal_unq[0]
+            elif any(nu.array(range(1,self.bins*3,3))==k): #age
+                out[k]=bin[bin_index]
+                bin_index+=1
+            elif any(nu.array(range(2,self.bins*3,3))==k): #norm
+                out[k]=0.0
+        return out
+
+    def max_bound(self):
+        #outputs an array of maximum values for parameters
+        out=nu.zeros(self.bins*3)
+        bin=nu.log10(nu.linspace(10**self.age_unq.min(),10**self.age_unq.max(),self.bins+1))
+        bin_index=1
+        for k in range(self.bins*3):
+            if any(nu.array(range(0,self.bins*3,3))==k): #metal
+                out[k]=self.metal_unq[-1]
+            elif any(nu.array(range(1,self.bins*3,3))==k): #age
+                out[k]=bin[bin_index]
+                bin_index+=1
+            elif any(nu.array(range(2,self.bins*3,3))==k): #norm
+                out[k]=nu.inf
+        return out
+
+    def bounds(self):
+        Min=self.min_bound()
+        Max=self.max_bound()
+        out=[]
+        for i in range(len(Min)):
+            out.append((Min[i],Max[i]))
+        self.bounds=nu.copy(out)
+        return out
+
+    def n_neg_lest(self,param):
+        #does bounded non linear fit
+        try:
+            out=fmin_bound(self.func,param, bounds = self.bounds,approx_grad=True)[0]
+        except IndexError:
+            out=param
+        return out
 
 if __name__=='__main__':
     import cProfile as pro
@@ -340,4 +431,3 @@ if __name__=='__main__':
     pro.runctx('N_normalize(data,model,bins)'
                , globals(),{'data':data,'model':model,'bins':bins}
                ,filename='agedata.Profile')
- 
