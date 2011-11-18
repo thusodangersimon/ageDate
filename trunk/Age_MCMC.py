@@ -62,7 +62,219 @@ def MCMC_multi(data,itter,bins,cpus=cpu_count()):
 
     return outparam[2:,:],outchi[1:]
     #return outparam,outchi,outsigma,outrate
+ 
+def MCMC_comunicate(data,bins,itter):
+    #acts a 1 chain but uses multiple feelers
+    #data[:,1]=data[:,1]*1000.  
+    fun=MC_func(data,bins)
+    fun.Mh_criteria=Mh_criteria
+    cpu=float(cpu_count())
+    non_N_index=nu.array([range(1,bins*3,3),range(0,bins*3,3)]).ravel()
+    #change random seed for random numbers for multiprocessing
+    #nu.random.seed(current_process().ident)
+    #initalize parmeters and chi squared
+    lib_vals=get_fitting_info(lib_path)
+    lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
+    metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
+    age_unq=nu.unique(lib_vals[0][:,1])
+
+    #param=nu.zeros([itter+1,bins*3])
+    param=[]
+    active_param=nu.zeros(bins*3)
     
+    bin=nu.log10(nu.linspace(10**age_unq.min(),10**age_unq.max(),bins+1))
+    bin_index=0
+    #start in random place
+    for k in xrange(bins*3):
+        if any(nu.array(range(0,bins*3,3))==k):#metalicity
+            active_param[k]=(nu.random.random()*metal_unq.ptp()+metal_unq[0])
+        else:#age and normilization
+            if any(nu.array(range(1,bins*3,3))==k): #age
+                #active_param[k]=nu.random.random() #random
+                #active_param[k]=nu.random.random()*age_unq.ptp()/float(bins)+bin[bin_index] #random in bin
+                active_param[k]=nu.mean([bin[bin_index],bin[1+bin_index]]) #mean position in bin
+                bin_index+=1
+                #active_param[k]=nu.random.random()*age_unq.ptp()+age_unq[0] #random place anywhere
+            else: #norm
+                active_param[k]=nu.random.random()*1000
+
+    chi=[]
+    chiappend=chi.append
+    sigma=nu.identity(bins*3)*nu.tile(
+                [0.5,age_unq.ptp()*nu.random.rand(),1.],bins)
+    #try leastquares fit
+    active_param=fun.n_neg_lest(active_param)
+    chiappend(0)
+    chi[-1],active_param[range(2,bins*3,3)]=fun.func_N_norm(active_param)
+    param.append(nu.copy(active_param))
+    
+class MC_func:
+    #compact MCMC function, can add new parts by calling in program
+    def __init__(self,data,bins,spect=spect):
+        #initalize bounds
+        data_match_all(data)
+        self.data=nu.copy(data)
+        self.data[:,1]=self.data[:,1]*1000.
+        lib_vals=get_fitting_info(lib_path)
+        lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
+        metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
+        age_unq=nu.unique(lib_vals[0][:,1])
+        self.lib_vals=lib_vals
+        self.age_unq= age_unq
+        self.metal_unq,self.bins,self.spect=metal_unq,bins,spect
+        self.bounds()
+        #create random seed
+        seed = open("/dev/random")
+        rand_int = 0
+        for i in seed.read(4):
+            rand_int <<= 8
+            rand_int += ord(i)
+        print rand_int
+        self.seed=rand_int
+        nu.random.seed(self.seed)
+        #accept and reject
+        self.Nreject=1
+        self.Naccept=1
+        self.iteration=1
+        #sigma for step
+        self.non_N_index=nu.array([range(1,bins*3,3),range(0,bins*3,3)]).ravel()
+        self.sigma=nu.identity(bins*3)*nu.tile(
+                [0.5,age_unq.ptp()*nu.random.rand(),1.],bins)
+
+    def func(self,param):
+        if len(param)!=self.bins*3:
+            return nu.nan
+        if check(param,self.metal_unq, self.age_unq,self.bins): #make sure params are in correct range
+            for i in xrange(len(self.bounds)): #find which is out and fix
+                if self.bounds[i][0]>param[i]: #if below bounds
+                    param[i]=nu.copy(self.bounds[i][0])
+                if self.bounds[i][1]<param[i]: #if above bounds
+                    param[i]=nu.copy(self.bounds[i][1])
+
+        model=get_model_fit_opt(param,self.lib_vals,self.age_unq,self.metal_unq,self.bins)  
+    #model=data_match_new(data,model,bins)
+        index=xrange(2,self.bins*3,3)
+        model['wave']= model['wave']*.0
+        for ii in model.keys():
+            if ii!='wave':
+                model['wave']+=model[ii]*param[index[int(ii)]]
+        return nu.sum((self.data[:,1]-model['wave'])**2)
+
+    def func_N_norm(self,param):
+        #returns chi and N norm best fit params
+        if len(param)!=self.bins*3:
+            return nu.nan
+        model=get_model_fit_opt(param,self.lib_vals,self.age_unq,self.metal_unq,self.bins)  
+        N,model,chi=N_normalize(self.data, model,self.bins)
+    
+        return chi,N
+
+ 
+    def min_bound(self):
+        #outputs an array of minimum values for parameters
+        out=nu.zeros(self.bins*3)
+        bin=nu.log10(nu.linspace(10**self.age_unq.min(),10**self.age_unq.max(),self.bins+1))
+        bin_index=0
+        for k in range(self.bins*3):
+            if any(nu.array(range(0,self.bins*3,3))==k): #metal
+                out[k]=self.metal_unq[0]
+            elif any(nu.array(range(1,self.bins*3,3))==k): #age
+                out[k]=bin[bin_index]
+                bin_index+=1
+            elif any(nu.array(range(2,self.bins*3,3))==k): #norm
+                out[k]=0.0
+        return out
+
+    def max_bound(self):
+        #outputs an array of maximum values for parameters
+        out=nu.zeros(self.bins*3)
+        bin=nu.log10(nu.linspace(10**self.age_unq.min(),10**self.age_unq.max(),self.bins+1))
+        bin_index=1
+        for k in range(self.bins*3):
+            if any(nu.array(range(0,self.bins*3,3))==k): #metal
+                out[k]=self.metal_unq[-1]
+            elif any(nu.array(range(1,self.bins*3,3))==k): #age
+                out[k]=bin[bin_index]
+                bin_index+=1
+            elif any(nu.array(range(2,self.bins*3,3))==k): #norm
+                out[k]=nu.inf
+        return out
+
+    def bounds(self):
+        #puts bounds into a easy reconizible format
+        Min=self.min_bound()
+        Max=self.max_bound()
+        out=[]
+        for i in range(len(Min)):
+            out.append((Min[i],Max[i]))
+        self.bounds=nu.copy(out)
+        return out
+
+    def n_neg_lest(self,param):
+        #does bounded non linear fit
+        try:
+            out=fmin_bound(self.func,param, bounds = self.bounds,approx_grad=True)[0]
+        except IndexError:
+            out=param
+        return out
+    
+    def Mh_criteria(self,chiold,para,nrand,seeds):
+        #does metropolis hastings critera works with PMC class
+    #initalize out params
+        out_param=[]
+        out_param.append(para)
+        for i in xrange(nrand):
+            chinew,active_param[range(2,self.bins*3,3)]=self.func_N_norm(out_param[-1])
+            chiold.append(chinew+0.)
+            a=nu.exp((chiold[-2]-chiold[-1])/2)
+            if not min([1,a])>nu.random.rand(): #acepted
+                out_param[-1]=nu.copy(out_param[-2])
+                chiold[-1]=nu.copy(chiold[-2])
+                self.Nreject+=1
+            else:
+                self.Naccept+=1
+            out_param.append(chain_gen_all(out_param[-1],self.metal_unq,self.age_unq,self.bins,self.self.sigma))
+            self.iteration+=1
+
+        return out_param,chiold
+
+    def Step(self,param,Type='cov'):
+        acc_rate=self.Naccept/(self.Naccept+self.Nreject)
+        if Type=='adapt': #change sigma with acceptance rate
+            if acc_rate>.50 and all(self.sigma.diagonal()>=10**-5): 
+               #too few aceptnce decrease sigma
+                self.sigma=self.sigma/1.05
+            elif acc_rate<.25 and all(self.sigma.diagonal()[self.non_N_index]<10): #not enough
+                self.sigma=sigma*1.05
+        elif Type=='cov': #use covarnence matrix
+            if self.iteration%1000==0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
+                self.sigma=Covarence_mat(param,self.iteration)
+        elif Type=='scale':
+            if acc_rate<0.001:
+            # reduce by 90 percent
+                self.sigma*= 0.1
+            elif acc_rate<0.05:
+                # reduce by 50 percent
+                self.sigma*= 0.5
+            elif acc_rate<0.2:
+                # reduce by ten percent
+                self.sigma*= 0.9
+            elif acc_rate>0.95:
+                # increase by factor of ten
+                self.sigma*= 10.0
+            elif acc_rate>0.75:
+                # increase by double
+                self.sigma*= 2.0
+            elif acc_rate>0.5:
+                # increase by ten percent
+                self.sigma*= 1.1
+            else:
+                pass
+  
+        self.Naccept,self.Nreject=1.,1.
+
+
+   
 def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     #does MCMC and reduices the false acceptance rate over a threshold
     #itter needs to be a array of normaly distrbuted numbers
@@ -71,7 +283,9 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     #part on every modual wanting to fit the spectra
     #controls input and expot of files for fitt
     data[:,1]=data[:,1]*1000.  
+    fun=PMC_func(data,bins)
     cpu=float(cpu_count())
+    non_N_index=nu.array([range(1,bins*3,3),range(0,bins*3,3)]).ravel()
     #change random seed for random numbers for multiprocessing
     nu.random.seed(current_process().ident)
     #initalize parmeters and chi squared
@@ -83,7 +297,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     param=nu.zeros([option.itter+1,len(parambest)])
     active_param=nu.zeros(len(parambest))
     
-    bin=nu.linspace(age_unq.min(),age_unq.max(),bins+1)
+    bin=nu.log10(nu.linspace(10**age_unq.min(),10**age_unq.max(),bins+1))
     bin_index=0
     #start in random place
     for k in xrange(len(parambest)):
@@ -93,22 +307,21 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
             if any(nu.array(range(1,len(parambest),3))==k): #age
                 #active_param[k]=nu.random.random() #random
                 #active_param[k]=nu.random.random()*age_unq.ptp()/float(bins)+bin[bin_index] #random in bin
-                #active_param[k]=nu.mean([bin[bin_index],bin[1+bin_index]]) #mean position in bin
-                #bin_index+=1
-                active_param[k]=nu.random.random()*age_unq.ptp()+age_unq[0] #random place anywhere
+                active_param[k]=nu.mean([bin[bin_index],bin[1+bin_index]]) #mean position in bin
+                bin_index+=1
+                #active_param[k]=nu.random.random()*age_unq.ptp()+age_unq[0] #random place anywhere
             else: #norm
                 active_param[k]=nu.random.random()*10000
 
-    param[0,:]=nu.copy(active_param)
-    parambest=nu.copy(active_param)
     chi=nu.zeros(option.itter+1)+nu.inf
     sigma=nu.identity(len(active_param))*nu.tile(
                 [0.5,age_unq.ptp()*nu.random.rand(),1.],bins)
+    #try leastquares fit
+    active_param=fun.n_neg_lest(active_param)
+    chi[0],active_param[range(2,bins*3,3)]=fun.func_N_norm(active_param)
+    param[0,:]=nu.copy(active_param)
+    #parambest=nu.copy(active_param)
 
-    model=get_model_fit_opt(active_param,lib_vals,age_unq,metal_unq,bins)  
-    N,model,chi[0]=N_normalize(data, model,bins)
-    active_param[range(2,bins*3,3)]=nu.copy(N)
-    chibest.value=chi[0]
     mybest=nu.copy(chi[0])
     for k in range(len(active_param)):
         parambest[k]=nu.copy(active_param[k])
@@ -118,19 +331,17 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     Nacept,Nreject,Nexchange_ratio,T_cuurent=1.0,1.0,1.0,0.
     acept_rate,out_sigma=[],[]
     j,T=1,279029.333013
-    T_start,T_stop=-0.34,-1.0
+    T_start,T_stop=0.34,-1.0
     while option.value and i.value<option.itter:
         if j%100==0:
             #print "hi, I'm %i at itter %i and chi %f" %(current_process().ident,j,chi[j-1])
             #print sigma.diagonal()
-            print Nacept/(Nacept+Nreject)*100.
+            print Nacept/(Nacept+Nreject)*100.,active_param
             sys.stdout.flush()
         active_param= chain_gen_all(active_param,metal_unq, age_unq,bins,sigma)
         #bin_index=0
       #calculate new model and chi
-        model=get_model_fit_opt(active_param,lib_vals,age_unq,metal_unq,bins)  
-        N,model,chi[j]=N_normalize(data, model,bins)
-        active_param[range(2,bins*3,3)]=nu.copy(N)
+        chi[j],active_param[range(2,bins*3,3)]=fun.func_N_norm(active_param)
         #decide to accept or not
         a=nu.exp((chi[j-1]-chi[j])/2)
         #metropolis hastings
@@ -160,14 +371,15 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
  
         if j<1000: #change sigma with acceptance rate
             #k=random.randint(0,len(sigma)-1)
-            if Nacept/(Nacept+Nreject)>.50 and all(sigma.diagonal()>=10**-3): 
+            if Nacept/(Nacept+Nreject)>.50 and all(sigma.diagonal()>=10**-5): 
                #too few aceptnce decrease sigma
                 sigma=sigma/1.05
-            elif Nacept/(Nacept+Nreject)<.25 and all(sigma.diagonal()<10): #not enough
+            elif Nacept/(Nacept+Nreject)<.25 and all(sigma.diagonal()[non_N_index]<10): #not enough
                 sigma=sigma*1.05
         else: #use covarnence matrix
-            if j%100==0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
+            if j%1000==0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
                 sigma=Covarence_mat(param,j)
+                active_param=fun.n_neg_lest(active_param)
         #change temperature
         if nu.min([1,nu.exp(-(chi[j-1]-chi[j])/(2.*SA(T_cuurent+1,option.itter/(cpu),T_start,T_stop))-(chi[j-1]+chi[j])/(2.*SA(T_cuurent,option.itter/(cpu),T_start,T_stop)))/T])>nu.random.rand():
             T_cuurent+=1
@@ -186,19 +398,19 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
                 T_start-=.1
                 T_stop-=.1
                 
-
-        if .001>nu.random.rand() and j>500: #every hundred itterations
-            a=nu.exp((mybest-chibest.value)/2.0)
-            if a>1: #accept change in param
-                #print j
-                chi[j]=nu.copy(chibest.value)
-                mybest=nu.copy(chibest.value)
-                print "swiched places. I'm %i" %current_process().ident
-                for k in range(len(active_param)): 
-                    param[j,k]=nu.copy(parambest[k])
-                    active_param[k]=nu.copy(parambest[k])
+        
+        #if .001>nu.random.rand() and j>500: #every hundred itterations
+        #    a=nu.exp((mybest-chibest.value)/2.0)
+        #    if a>1: #accept change in param
+        #        #print j
+        #        chi[j]=nu.copy(chibest.value)
+        #        mybest=nu.copy(chibest.value)
+        #        print "swiched places. I'm %i" %current_process().ident
+        #        for k in range(len(active_param)): 
+        #            param[j,k]=nu.copy(parambest[k])
+        #            active_param[k]=nu.copy(parambest[k])
                     
-                
+                       
         j+=1
         i.value=i.value+1
         acept_rate.append(nu.copy(Nacept/(Nacept+Nreject)))
