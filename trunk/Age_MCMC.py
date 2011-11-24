@@ -121,12 +121,15 @@ def MCMC_comunicate(data,bins,itter):
     while current_iter<itter:
         active_param=fun.New_chain(active_param,sigma,'norm')
         chi.append(0)
-        chi[-1],active_param=fun.Mh_criteria(chi[-2],active_param,param[-1])
+        chi[-1],active_param=fun.SA(chi[-2],active_param,param[-1])
         param.append(nu.copy(active_param))
         current_iter+=1
         #if my turn then control sigma
         if myturn[0]:
-            sigma=fun.Step(sigma,param,'adapt')
+            if current_iter>1000 and current_iter%100==0:
+                sigma=fun.Step(sigma,param,'cov')
+            elif current_iter<1000:
+                sigma=fun.Step(sigma,param,'adapt')
 
             #decide if should send to next processor
             if myturn[2]>itter: #send
@@ -166,7 +169,7 @@ class MC_func:
         #sigma for step
         self.non_N_index=nu.array([range(1,bins*3,3),range(0,bins*3,3)]).ravel()
         #temperature stuff
-        self.T,self.T_start,self.T_stop=37450725549.,1.8,.11
+        self.T,self.T_start,self.T_stop=9.905971092132212,1.8,.9
         self.Nexchange_ratio,self.T_cuurent=0.,0.
 
     def func(self,param):
@@ -292,12 +295,13 @@ class MC_func:
         #change temperature schedual
         '''if self.iteration%50==0:
             if self.Naccept/(self.Naccept+self.Nreject)>.50:
-                self.T_start+=.1
-                self.T_stop+=.1
+                if self.T_start>0:
+                    self.T_start-=.1
+                #self.T_stop+=.1
             elif self.Naccept/(self.Naccept+self.Nreject)<.25:
-                self.T_start-=.1
-                self.T_stop-=.1
-                '''      
+                self.T_start+=.1
+                #self.T_stop-=.1
+                '''       
         
         #if .001>nu.random.rand() and j>500: #every hundred itterations
         #    a=nu.exp((mybest-chibest.value)/2.0)
@@ -334,13 +338,17 @@ class MC_func:
         if Type=='adapt': #change sigma with acceptance rate
             if acc_rate>.50 and all(sigma.diagonal()[self.non_N_index]>=10**-5): 
                #too few aceptnce decrease sigma
-                sigma=sigma/1.05
-            elif acc_rate<.25 and all(sigma.diagonal()[self.non_N_index]<2.): #not enough
                 sigma=sigma*1.05
+            elif acc_rate<.25 and all(sigma.diagonal()[self.non_N_index]<2.): #not enough
+                sigma=sigma/1.05
         elif Type=='cov': #use covarnence matrix
-            if self.iteration%1000==0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
                 #take points that have changed only
-                sigma=Covarence_mat(nu.array(param)[nu.abs(nu.diff(a))>0,:],self.iteration)
+            temp=nu.array(param)
+            tsigma=Covarence_mat(temp[nu.abs(nu.diff(temp[:,0]))>0,:],temp.shape[0])
+            if nu.all(tsigma==0):
+                print 'chain not mixing'
+            else:
+                sigma=tsigma
         elif Type=='scale':
             if acc_rate<0.001:
             # reduce by 90 percent
