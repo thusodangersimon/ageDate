@@ -219,7 +219,7 @@ def create_spectra(bins,func='flat',lam_min=0,
 ####add a weighting function
 def flat(bins,age_lower,age_upper,lib,lib_path='/home/thuso/Phd/Spectra_lib/'):
     #makes a sfr that is constant over time
-    t=nu.linspace(age_lower,age_upper,num=bins+1)
+    t=nu.log10(nu.linspace(10**age_lower,10**age_upper,num=bins+1))
     specra_names=[]
     for i in range(len(t)-1):
         specra_names.append(search(lib,t[i],t[i+1]))
@@ -230,7 +230,7 @@ def flat(bins,age_lower,age_upper,lib,lib_path='/home/thuso/Phd/Spectra_lib/'):
     return outspec,specra_names,nu.ones(bins)
 
 def normal(bins,age_lower,age_upper,lib,lib_path):
-    bin=nu.linspace(age_lower,age_upper,bins+1)
+    bin=nu.log10(nu.linspace(10**age_lower,10**age_upper,num=bins+1))
     norm=[]
     specra_names=[]
     for i in range(len(bin)-1):
@@ -248,7 +248,7 @@ def normal(bins,age_lower,age_upper,lib,lib_path):
 def line(slope,bins,age_lower,age_upper,lib,lib_path):
     #makes a spectra with a line
     #will yell if any value is less than 0
-    bin=nu.linspace(age_lower,age_upper,bins+1)
+    bin=nu.log10(nu.linspace(10**age_lower,10**age_upper,num=bins+1))
     norm=[]
     specra_names=[]
     for i in range(len(bin)-1):
@@ -293,7 +293,7 @@ def info_for_lib(lib_path='/home/thuso/Phd/Code/Spectra_lib/'):
     spec_lib,info=load_spec_lib(lib_path)
     #create prob dist for each wavelength
     prob_dist={}
-    for i in range(len(spec_lib[:,0])):
+    for i in xrange(len(spec_lib[:,0])):
         temp=nu.zeros([nu.unique(spec_lib[i,1:]).shape[0]-1,2])
         temp[:,0]=nu.unique(spec_lib[i,1:])[:-1]
         temp[:,1]=nu.histogram(spec_lib[i,1:],nu.unique(spec_lib[i,1:]))[0]
