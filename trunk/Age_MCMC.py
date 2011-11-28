@@ -119,16 +119,22 @@ def MCMC_comunicate(data,bins,itter):
     #start MCMC
     #Naccept,Nrecjet=0,0
     while current_iter<itter:
+        #print "hi, I'm %i at itter %i and chi %f" %(current_process().ident,j,chi[j-1])
         active_param=fun.New_chain(active_param,sigma,'norm')
         chi.append(0)
-        chi[-1],active_param=fun.SA(chi[-2],active_param,param[-1])
+        if current_iter<1000:
+            chi[-1],active_param=fun.SA(chi[-2],active_param,param[-1])
+        else:
+            chi[-1],active_param=fun.Mh_criteria(chi[-2],active_param,param[-1])
         param.append(nu.copy(active_param))
         current_iter+=1
         #if my turn then control sigma
         if myturn[0]:
-            if current_iter>1000 and current_iter%100==0:
+            if current_iter>900 and current_iter%100==0:
+                print nu.min(chi),chi[-1]
                 sigma=fun.Step(sigma,param,'cov')
-            elif current_iter<1000:
+            elif current_iter<900:
+                print nu.min(chi),chi[-1]
                 sigma=fun.Step(sigma,param,'adapt')
 
             #decide if should send to next processor
@@ -136,6 +142,8 @@ def MCMC_comunicate(data,bins,itter):
                 break
             else:
                 myturn[2]+=1
+
+    return outprep(nu.array(param)),nu.array(chi)
 
 class MC_func:
     #compact MCMC function, can add new parts by calling in program
@@ -165,7 +173,7 @@ class MC_func:
         self.Nreject=1.
         self.Naccept=1.
         self.iteration=1.
-        self.iter_stop=iter_stop
+        self.iter_stop=iter_stop*.1
         #sigma for step
         self.non_N_index=nu.array([range(1,bins*3,3),range(0,bins*3,3)]).ravel()
         #temperature stuff
@@ -325,7 +333,8 @@ class MC_func:
             t=Time.time()
             while check(out,self.metal_unq,self.age_unq,self.bins):
                 out=multivariate_student(old_chain,sigma,2.3)
-                if Time.time()-t>.5:
+                if Time.time()-t>2.:
+                    print 'taking to long'
                     sigma=sigma/1.05
         else: 
             print 'that distribution is not ready yet'
@@ -334,19 +343,20 @@ class MC_func:
 
     def Step(self,sigma,param,Type='scale'):
         acc_rate=self.Naccept/(self.Naccept+self.Nreject+.0)
-        print acc_rate
+        #print acc_rate
         if Type=='adapt': #change sigma with acceptance rate
             if acc_rate>.50 and all(sigma.diagonal()[self.non_N_index]>=10**-5): 
                #too few aceptnce decrease sigma
-                sigma=sigma*1.05
-            elif acc_rate<.25 and all(sigma.diagonal()[self.non_N_index]<2.): #not enough
                 sigma=sigma/1.05
+            elif acc_rate<.25 and all(sigma.diagonal()[self.non_N_index]<2.): #not enough
+                sigma=sigma*1.05
         elif Type=='cov': #use covarnence matrix
                 #take points that have changed only
             temp=nu.array(param)
             tsigma=Covarence_mat(temp[nu.abs(nu.diff(temp[:,0]))>0,:],temp.shape[0])
             if nu.all(tsigma==0):
                 print 'chain not mixing'
+                sigma=sigma/1.05
             else:
                 sigma=tsigma
         elif Type=='scale':
