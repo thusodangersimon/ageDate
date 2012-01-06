@@ -67,7 +67,11 @@ def MCMC_multi(data,itter,bins,cpus=cpu_count()):
 def MCMC_comunicate(data,bins,itter):
     comm=MPI.COMM_WORLD
     size=comm.size                            
-    myid = comm.rank                                 
+    myid = comm.rank   
+    #comm tags
+    sig_to_trans_tag,trans_tag=0,1
+    #comm notices
+    prerecieve=False
     #acts a 1 chain but uses multiple feelers
     fun=MC_func(data,bins,itter)
     #change random seed for random numbers for multiprocessing
@@ -108,7 +112,7 @@ def MCMC_comunicate(data,bins,itter):
     chi[-1],active_param[range(2,bins*3,3)]=fun.func_N_norm(active_param)
     param.append(nu.copy(active_param))
     #set up shared varibles
-    current_iter,acpt_rate,chi_best,param_best=0,.5,nu.copy(chi[-1]),nu.copy(param[-1])
+    current_iter,acpt_rate,chi_best,param_best,turn_iter=0,.5,nu.copy(chi[-1]),nu.copy(param[-1]),500
     if myid==0:
         myturn=[True,1,0] #[if turn, rank of next person,number times i control stuff]
         
@@ -126,6 +130,11 @@ def MCMC_comunicate(data,bins,itter):
             chi[-1],active_param=fun.SA(chi[-2],active_param,param[-1])
         else:
             chi[-1],active_param=fun.Mh_criteria(chi[-2],active_param,param[-1])
+        #check for best fit
+        if chi[-1]<chi_best:
+            
+            chi_best=nu.copy(chi[-1])
+            param_best=nu.copy(active_param)
         param.append(nu.copy(active_param))
         current_iter+=1
         #if my turn then control sigma
@@ -138,10 +147,17 @@ def MCMC_comunicate(data,bins,itter):
                 sigma=fun.Step(sigma,param,'adapt')
 
             #decide if should send to next processor
-            if myturn[2]>itter: #send
+            if myturn[2]>turn_iter: #send
+                comm.isend([True,MPI.LOGICAL],dest=myturn[1],tag=sig_to_trans_tag)
+                #send last iterations, current sigma, accept rate, best fit and param
+                #acpt_rate=fun.Naccept/(fun.Naccept+fun.Nreject)
+                #comm.send((param[-turn_iter:],sigma,rate,
                 break
             else:
                 myturn[2]+=1
+                comm.Irecv([prerecieve,MPI.LOGICAL],source=MPI.ANY_SOURCE,tag=sig_to_trans_tag)
+                if prerecieve: #about te get update
+                    pass
 
     return outprep(nu.array(param)),nu.array(chi)
 
@@ -392,7 +408,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     print "Starting processor %i" %current_process().ident
     #part on every modual wanting to fit the spectra
     #controls input and expot of files for fitt
-    data[:,1]=data[:,1]  
+    data[:,1]=data[:,1]*1000  
     fun=PMC_func(data,bins)
     cpu=float(cpu_count())
     non_N_index=nu.array([range(1,bins*3,3),range(0,bins*3,3)]).ravel()
@@ -440,13 +456,13 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     #Nacept,Nreject=nu.ones(len(active_param)),nu.ones(len(active_param))
     Nacept,Nreject,Nexchange_ratio,T_cuurent=1.0,1.0,1.0,0.
     acept_rate,out_sigma=[],[]
-    j,T=1,279029.333013
-    T_start,T_stop=0.34,-1.0
+    j,T=1,9.
+    T_start,T_stop=1.8,0.9
     while option.value and i.value<option.itter:
-        if j%100==0:
+        if j%1000==0:
             #print "hi, I'm %i at itter %i and chi %f" %(current_process().ident,j,chi[j-1])
             #print sigma.diagonal()
-            print Nacept/(Nacept+Nreject)*100.,active_param
+            print SA(T_cuurent,option.itter/(cpu),T_start,T_stop),T_cuurent,chi[j-1]
             sys.stdout.flush()
         active_param= chain_gen_all(active_param,metal_unq, age_unq,bins,sigma)
         #bin_index=0
@@ -538,7 +554,10 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
 def SA(i,i_fin,T_start,T_stop):
     #temperature parameter for Simulated anneling (SA). 
     #reduices false acceptance rate if a<60% as a function on acceptance rate
-    return (T_stop-T_start)/float(.02*i_fin)*i+T_start
+    if i>.02*i_fin:
+        return 1.0
+    else:
+        return (T_stop-T_start)/float(.02*i_fin)*i+T_start
 
 
 def Covarence_mat(param,j):
