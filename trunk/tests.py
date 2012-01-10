@@ -48,11 +48,14 @@ def rjmcmc(data,itter=10**5,k_max=16):
     data[:,1]=data[:,1]*1000  
     #create fun for all number of bins
     fun,param,active_param,chi,sigma={},{},{},{},{}
+    Nacept,Nreject,acept_rate,out_sigma={},{},{},{}
     for i in range(1,k_max+1):
         fun[str(i)],param[str(i)]=PMC_func(data,i),[]
         active_param[str(i)],chi[str(i)]=nu.zeros(3*i),[nu.inf]
         sigma[str(i)]=nu.identity(3*i)*nu.tile(
             [0.5,age_unq.ptp()*nu.random.rand(),1.],i)
+        Nacept[str(i)],Nreject[str(i)]=1.,0.
+        acept_rate[str(i)],out_sigma[str(i)]=[.35],[]
     #bins to start with
     bins=1
     #create starting active params
@@ -80,14 +83,15 @@ def rjmcmc(data,itter=10**5,k_max=16):
 
     #start rjMCMC
     #Nacept,Nreject=nu.ones(len(active_param)),nu.ones(len(active_param))
-    Nacept,Nreject,Nexchange_ratio,T_cuurent=1.0,1.0,1.0,0.
-    acept_rate,out_sigma=[.35],[]
+    #Nacept,Nreject,Nexchange_ratio,T_cuurent=1.0,1.0,1.0,0.
+    T_cuurent,Nexchange_ratio=1.0,1.0
+    #acept_rate,out_sigma=[.35],[]
     j,T,j_timeleft=1,9.,nu.random.exponential(100)
     T_start,T_stop=3*10**5.,0.9
     birth_rate=.5
-    while j<itter:
+    while True:
         if j%100==0:
-            print "hi, I'm at itter %i, chi %f, acceptance %0.2f, SA %f" %(j,chi[str(bins)][-1],Nacept/(Nacept+Nreject),SA(T_cuurent,itter,T_start,T_stop))
+            print "hi, I'm at itter %i, chi %f, acceptance %0.2f, SA %f" %(len(param[str(bins)]),chi[str(bins)][-1],acept_rate[str(bins)][-1],SA(T_cuurent,itter,T_start,T_stop))
             #print sigma[str(bins)].diagonal()
             #print 'Acceptance %i reject %i' %(Nacept,Nreject)
             #print active_param[str(bins)][range(2,bins*3,3)]
@@ -102,7 +106,7 @@ def rjmcmc(data,itter=10**5,k_max=16):
         #metropolis hastings
         if a>nu.random.rand(): #acepted
             param[str(bins)].append(nu.copy(active_param[str(bins)]))
-            Nacept+=1
+            Nacept[str(bins)]+=1
             if not nu.isinf(min(chi[str(bins)])): #put temperature on order of chi calue
                 T_start=nu.round(min(chi[str(bins)]))
 
@@ -115,10 +119,27 @@ def rjmcmc(data,itter=10**5,k_max=16):
             param[str(bins)].append(nu.copy(param[str(bins)][-1]))
             active_param[str(bins)]=nu.copy(param[str(bins)][-1])
             chi[str(bins)][-1]=nu.copy(chi[str(bins)][-2])
-            Nreject+=1
- 
+            Nreject[str(bins)]+=1
+
+        #step stuff
+        if len(param[str(bins)])<800: #change sigma with acceptance rate
+            #k=random.randint(0,len(sigma)-1)
+            if  (acept_rate[str(bins)][-1]<.25 and 
+                                        all(sigma[str(bins)].diagonal()[nu.array([range(1,bins*3,3),range(0,bins*3,3)]).ravel()]<5.19)):
+               #too few aceptnce decrease sigma
+                sigma[str(bins)]=sigma[str(bins)]/1.05
+            elif acept_rate[str(bins)][-1]>.50 and all(sigma[str(bins)].diagonal()>=10**-5): #not enough
+                sigma[str(bins)]=sigma[str(bins)]*1.05
+        else: #use covarnence matrix
+            if j%100==0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
+                print 'Cov time'
+                sigma[str(bins)]=Covarence_mat(nu.array(param[str(bins)]),j)
+                #active_param=fun.n_neg_lest(active_param)
+        if nu.all(sigma['2'].diagonal()==0): #if step is 0 make small
+            for k in xrange(sigma[str(bins)].shape[0]):
+                sigma[str(bins)][k,k]=10.**-5
+
         #inter model step
-        
         #decide if birth or death
         if (birth_rate>nu.random.rand() and bins<k_max and j>j_timeleft ) or bins==1:
             #birth
@@ -147,15 +168,25 @@ def rjmcmc(data,itter=10**5,k_max=16):
             temp_bins=bins-1
             #criteria for this step
             critera=2.**temp_bins
-            #remove bins with 1-N/Ntot probablitiy
-            Ntot=nu.sum(active_param[str(bins)][range(2,bins*3,3)])
-            rand_index=rand_choice(active_param[str(bins)][range(2,bins*3,3)],active_param[str(bins)][range(2,bins*3,3)]/Ntot)
-            k=0
-            for ii in xrange(bins): #copy to lower dimestion
-                if not ii==rand_index:
-                    active_param[str(temp_bins)][3*k:3*k+3]=nu.copy(active_param[str(bins)][3*ii:3*ii+3])
-                    k+=1
-
+            if .5>nu.random.rand():
+                #remove bins with 1-N/Ntot probablitiy
+                Ntot=nu.sum(active_param[str(bins)][range(2,bins*3,3)])
+                rand_index=rand_choice(active_param[str(bins)][range(2,bins*3,3)],active_param[str(bins)][range(2,bins*3,3)]/Ntot)
+                k=0
+                for ii in xrange(bins): #copy to lower dimestion
+                    if not ii==rand_index:
+                        active_param[str(temp_bins)][3*k:3*k+3]=nu.copy(active_param[str(bins)]
+                                                                        [3*ii:3*ii+3])
+                        k+=1
+            else: #average 2 componets together for new values
+                rand_index=nu.random.permutation(bins)[:2] #2 random indeci
+                k=0
+                for ii in xrange(bins):
+                    if not any(ii==rand_index):
+                        active_param[str(temp_bins)][3*k:3*k+3]=nu.copy(active_param[str(bins)]
+                                                                        [3*ii:3*ii+3])
+                        k+=1
+                active_param[str(temp_bins)][3*k:3*k+3]=(active_param[str(bins)][3*rand_index[0]:3*rand_index[0]+3]+active_param[str(bins)] [3*rand_index[1]:3*rand_index[1]+3])/2.
         #calc chi of new model
         tchi,active_param[str(temp_bins)][range(2,temp_bins*3,3)]=fun[str(temp_bins)].func_N_norm(active_param[str(temp_bins)])
         #rjmcmc acceptance critera 
@@ -165,61 +196,51 @@ def rjmcmc(data,itter=10**5,k_max=16):
             bins=temp_bins+0
             chi[str(bins)].append(nu.copy(tchi))
             param[str(bins)].append(nu.copy(active_param[str(bins)]))
-            j,j_timeleft=0,nu.random.exponential(100)
-            Nacept,Nreject,Nexchange_ratio=1.,1.,1.
+            j,j_timeleft=0,nu.random.exponential(200)
+            #Nexchange_ratio=1.
             print "Changed number of bins to %i for better fit!" %bins
 
-        if len(param[str(bins)])<500: #change sigma with acceptance rate
-            #k=random.randint(0,len(sigma)-1)
-            if Nacept/(Nacept+Nreject)>.50 and all(sigma[str(bins)].diagonal()>=10**-5): 
-               #too few aceptnce decrease sigma
-                sigma[str(bins)]=sigma[str(bins)]/1.05
-            elif (Nacept/(Nacept+Nreject)<.25 and 
-                                        all(sigma[str(bins)].diagonal()[nu.array([range(1,bins*3,3),range(0,bins*3,3)]).ravel()]<10)): #not enough
-                sigma[str(bins)]=sigma[str(bins)]*1.05
-        else: #use covarnence matrix
-            if j%100==0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
-                print 'Cov time'
-                sigma[str(bins)]=Covarence_mat(nu.array(param[str(bins)]),j)
-                #active_param=fun.n_neg_lest(active_param)
         #change temperature
         if nu.min([1,nu.exp((chi[str(bins)][-2]-chi[str(bins)][-1])/(2.*SA(T_cuurent+1,itter,T_start,T_stop))-(chi[str(bins)][-2]+chi[str(bins)][-1])/(2.*SA(T_cuurent,itter,T_start,T_stop)))/T])>nu.random.rand():
-            if T_cuurent<=itter:
+            if T_cuurent<.02*itter:
                 T_cuurent+=1
-                print T_cuurent
-            else:
-                if j%10==0:
-                    print 'done with cooling'
+                #print T_cuurent,T
+            elif T_cuurent==.02*itter:
+                print 'done with cooling'
             Nexchange_ratio+=1   
         #make sure the change temp rate is aroudn 2%
-        if Nexchange_ratio/(Nacept+Nreject)>.02:
+        if Nexchange_ratio/(nu.sum(Nacept.values())+nu.sum(Nreject.values()))>.02:
             T=T*1.05
-        elif Nexchange_ratio/(Nacept+Nreject)<.005:
+        elif Nexchange_ratio/(nu.sum(Nacept.values())+nu.sum(Nreject.values()))<.005:
             T=T/1.05
         #change temperature schedual
         #keep on order with chi squared
         if j%20==0:
-            if Nacept/(Nacept+Nreject)>.5 and T_start<10**-5:
-                T_start/=1.5
+            if acept_rate[str(bins)][-1]>.5 and T_start<10**-5:
+                T_start/=2.
                 #T_stop+=.1
-            elif Nacept/(Nacept+Nreject)<.25 and T_start<3*10**5:
-                T_start*=1.5
+            elif acept_rate[str(bins)][-1]<.25 and T_start<3*10**5:
+                T_start*=2.
                 #T_stop-=.1
                                          
         j+=1
-        acept_rate.append(nu.copy(Nacept/(Nacept+Nreject)))
-        if len(param[str(bins)])>2000:
+        acept_rate[str(bins)].append(nu.copy(Nacept[str(bins)]/(Nacept[str(bins)]+Nreject[str(bins)])))
+        if len(param[str(bins)])>50000:
             break
-        #out_sigma.append(nu.copy(sigma))
+        out_sigma[str(bins)].append(nu.copy(sigma[str(bins)].diagonal()))
     #return once finished 
-    #param=outprep(param)
+    for i in param.keys():
+        chi[i]=nu.array(chi[i])
+        param[i]=nu.array(param[i])
+        acept_rate[i]=nu.array(acept_rate[i])
+        out_sigma[i]=nu.array(out_sigma[i])
     #for k in range(2,len(parambest),3):
     #    param[:,k]=param[:,k]/1000.
     data[:,1]=data[:,1]/1000.
     #q.put((param[option.burnin:,:],chi[option.burnin:]))
    # q.put((param,chi))
     #q.put((param,chi,out_sigma,acept_rate))
-    return param,chi,sigma,acept_rate
+    return param,chi,sigma,acept_rate,out_sigma
 
 def Check(param,metal_unq, age_unq,bins): #checks if params are in bounds no bins!!!
     #age=nu.log10(nu.linspace(10**age_unq.min(),10**age_unq.max(),bins+1))#linear spacing
@@ -252,20 +273,20 @@ def Chain_gen_all(means,metal_unq, age_unq,bins,sigma):
 
 
 def rand_choice(x,prob):
-    #chooses value from x with probabity of prob
+    #chooses value from x with probabity of prob**-1 so lower prob values are more likeliy
     #x must be monotonically increasing
     if not nu.sum(prob)==1: #make sure prob equals 1
         prob=prob/nu.sum(prob)
     #check is increasing
     u=nu.random.rand()
     if nu.all(x==nu.sort(x)): #if sorted easy
-        N=nu.cumsum(prob)
+        N=nu.cumsum(prob**-1/nu.sum(prob**-1))
         index=nu.array(range(len(x)))
         return index[nu.min(nu.abs(N-u))==nu.abs(N-u)][0]
     else:
         index=nu.argsort(x)
         temp_x=nu.sort(x)
-        N=nu.cumsum(prob[index])
+        N=nu.cumsum(prob[index]**-1/nu.sum(prob[index]**-1))
         return index[nu.min(nu.abs(N-u))==nu.abs(N-u)][0]
 
 def quick_cov_MCMC(x,y,params,func=[],constrants=[],sigma=0.8,itter=10**5,quiet=False):
