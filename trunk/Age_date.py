@@ -241,7 +241,7 @@ def N_normalize(data, model,bins):
     if bins==1:
         N=[normalize(data,model['0'])]
         return N, N[0]*model['0'],sum((data[:,1]-N[0]*model['0'])**2)
-    N,chi=nnls(nu.array(model.values()).T,data[:,1])
+    N,chi=nnls(nu.array(model.values()).T[:,nu.argsort(nu.int64(nu.array(model.keys())))],data[:,1])
     index=nu.nonzero(N==0)[0]
     N[index]+=10**-6
     index=nu.int64(model.keys())
