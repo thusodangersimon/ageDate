@@ -3,6 +3,7 @@
 
 from Age_date import *
 from mpi4py import MPI
+from scipy.cluster import vq as sci
 #import time as Time
 a=nu.seterr(all='ignore')
 
@@ -581,24 +582,43 @@ def RJ_multi(data,itter,k_max=16,cpus=cpu_count()):
            count+=1
     #post processing
     #decides which model is the best and which one has best chi sqared
+    bayes_fac={}
+    for i in temp:
+        for j in i[2].keys():
+            try:
+                bayes_fac[j]=nu.concatenate((bayes_fac[j],i[2][j]))
+            except KeyError:
+                bayes_fac[j]=i[2][j]
 
-    #figures out when burn in period is done
+    fac=[]
+    for i in bayes_fac.keys():
+        if bayes_fac[i].shape[0]>0:
+            bayes_fac[i][bayes_fac[i]>1]=1. #accept critera is min(1,alpha)
+            fac.append([int(i),nu.mean(bayes_fac[i])])
+            #remove 1st bin for now#############
+    fac=nu.array(fac)
+    fac=fac[nu.nonzero(fac[:,0]!=1)[0],:]
+    if all(fac[fac[:,1].argmax(),1]/fac[nu.arange(4)!=2,1]>3.):
+        print 'substantal best fit is with %i bins' %fac[fac[:,1].argmax(),0]
+        bins=str(int(ffac[fac[:,1].argmax(),0]))
+    elif all(fac[fac[:,1].argmax(),1]/fac[nu.arange(4)!=2,1]>1.):
+        print 'sort of best fit is with %i bins' %fac[fac[:,1].argmax(),0]
+        bins=str(int(fac[fac[:,1].argmax(),0]))
+    else:
+        print 'No model is the best choosing longest chain'
+        bins=''
 
-
+    #grab chains with best fit and chech to see if mixed properly
+    outparam,outchi,W=nu.zeros([2,3*int(bins)]),nu.array([nu.inf]),nu.zeros(int(bins)*3)
+    if nu.any(bins==nu.array(temp[0][0].keys())):
+        for i in temp:
+            W+=nu.var(i[0][bins][~nu.isinf(i[1][bins][1:]),:],axis=0)
+            outparam=nu.concatenate((outparam,i[0][bins][~nu.isinf(i[1][bins][1:]),:]),axis=0)
+            outchi=nu.concatenate((outchi,i[1][bins][~nu.isinf(i[1][bins])]))
+    outparam,outchi,W=outparam[2:,:],outchi[1:],W/cpus
+    B=nu.var(outparam,axis=0)/(cpus-1)
+    V=(outparam.shape[0]-1)/outparam.shape[0]*W+B
     
-    outparam,outchi=nu.zeros([2,3*bins]),nu.array([nu.inf])
-    for ii in temp:
-        outparam=nu.concatenate((outparam,ii[0][~nu.isinf(ii[1]),:]
-                                 ),axis=0)
-        outchi=nu.concatenate((outchi,ii[1][~nu.isinf(ii[1])]))
-        '''outsigma[str(count)]=ii[2]
-        outparam[str(count)]=ii[0][~nu.isinf(ii[1]),:]
-        outchi[str(count)]=ii[1][~nu.isinf(ii[1])]
-        outsigma[str(count)]=nu.array(ii[2])
-        outrate[str(count)]=nu.array(ii[3])'''
-        
-        count+=1
-
     return outparam[2:,:],outchi[1:]
 
 def rjmcmc(data,itter=10**5,k_max=16,option=True,rank=0,q_talk=None,q_final=None):
@@ -1070,6 +1090,14 @@ def autocorr(Y, k=1):
     """
     Computes the sample autocorrelation function coeffficient rho
     for given lag k
+def xcorr(x):
+  FFT based autocorrelation function, which is faster than numpy.correlate
+  # x is supposed to be an array of sequences, of shape (totalelements, length)
+  fftx = fft(x, n=(length*2-1), axis=1)
+  ret = ifft(fftx * np.conjugate(fftx), axis=1)
+  ret = fftshift(ret, axes=1)
+  return ret
+    
     """
     ybar = nu.mean(Y)
     N = nu.sum((Y[:-k]-ybar)* (Y[k:] -ybar))
