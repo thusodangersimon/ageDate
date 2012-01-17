@@ -567,11 +567,24 @@ def RJ_multi(data,itter,k_max=16,cpus=cpu_count()):
     for ii in range(cpus):
         work.append(Process(target=rjmcmc,args=(data,itter,k_max,option,ii,q_talk,q_final)))
         work[-1].start()
-    while i.value<itter:
-        print '%2.2f percent done' %(i.value/float(itter)*100)
-        sys.stdout.flush()
-        #print i.value
+    i=0
+    ''''Time.sleep(300)
+    while i<cpus-3: #wait 5 min after all complete cooling
+        if not q_final.empty():
+            out=q_final.get()
+            i+=1
+            print '%i out of %i done with cooling' %(i,cpus)
+        else:
+            Time.sleep(5)'''
+    t=Time.time()
+    while t+600>Time.time():
         Time.sleep(5)
+        print '%i seconds left' %(round(t+600-Time.time()))
+        sys.stdout.flush()
+    #print 'Starting 5 min wait'
+    #Time.sleep(300)
+    while q_final.qsize()>0:
+       a= q_final.get()
     option.value=False
     #wait for proceses to finish
     count=0
@@ -594,9 +607,10 @@ def RJ_multi(data,itter,k_max=16,cpus=cpu_count()):
     for i in bayes_fac.keys():
         if bayes_fac[i].shape[0]>0:
             bayes_fac[i][bayes_fac[i]>1]=1. #accept critera is min(1,alpha)
-            fac.append([int(i),nu.mean(bayes_fac[i])])
+            fac.append([int(i),nu.mean(bayes_fac[i]),len(bayes_fac[i])])
             #remove 1st bin for now#############
     fac=nu.array(fac)
+    '''
     fac=fac[nu.nonzero(fac[:,0]!=1)[0],:]
     if all(fac[fac[:,1].argmax(),1]/fac[nu.arange(4)!=2,1]>3.):
         print 'substantal best fit is with %i bins' %fac[fac[:,1].argmax(),0]
@@ -607,19 +621,22 @@ def RJ_multi(data,itter,k_max=16,cpus=cpu_count()):
     else:
         print 'No model is the best choosing longest chain'
         bins=''
-
+        '''
     #grab chains with best fit and chech to see if mixed properly
-    outparam,outchi,W=nu.zeros([2,3*int(bins)]),nu.array([nu.inf]),nu.zeros(int(bins)*3)
-    if nu.any(bins==nu.array(temp[0][0].keys())):
-        for i in temp:
-            W+=nu.var(i[0][bins][~nu.isinf(i[1][bins][1:]),:],axis=0)
-            outparam=nu.concatenate((outparam,i[0][bins][~nu.isinf(i[1][bins][1:]),:]),axis=0)
-            outchi=nu.concatenate((outchi,i[1][bins][~nu.isinf(i[1][bins])]))
-    outparam,outchi,W=outparam[2:,:],outchi[1:],W/cpus
-    B=nu.var(outparam,axis=0)/(cpus-1)
-    V=(outparam.shape[0]-1)/outparam.shape[0]*W+B
+    outparam,outchi={},{}
+    for i in fac[:,0]:
+        outparam[str(int(i))],outchi[str(int(i))]=nu.zeros([2,3*i]),nu.array([nu.inf])
+    for i in temp:
+        for j in fac[:,0]:
+            try:
+                outparam[str(int(j))]=nu.concatenate((outparam[str(int(j))],i[0][str(int(j))][~nu.isinf(i[1][str(int(j))][1:]),:]),axis=0)
+                outchi[str(int(j))]=nu.concatenate((outchi[str(int(j))],i[1][str(int(j))][~nu.isinf(i[1][str(int(j))])]))
+            except ValueError: #if empty skip
+                pass
+    for j in fac[:,0]:
+        outparam[str(int(j))],outchi[str(int(j))]=outparam[str(int(j))][2:,:],outchi[str(int(j))][1:]
     
-    return outparam[2:,:],outchi[1:]
+    return outparam,outchi,fac
 
 def rjmcmc(data,itter=10**5,k_max=16,option=True,rank=0,q_talk=None,q_final=None):
     #parallel worker program reverse jump mcmc program
@@ -679,20 +696,23 @@ def rjmcmc(data,itter=10**5,k_max=16,option=True,rank=0,q_talk=None,q_final=None
     birth_rate=.5
     while option.value:
         if j%500==0:
-            print "hi, I'm at itter %i, chi %f, for cpu %i" %(len(param[str(bins)]),chi[str(bins)][-1],rank)
+            print "hi, I'm at itter %i, chi %f from %s bins and for cpu %i" %(len(param[str(bins)]),chi[str(bins)][-1],bins,rank)
             #print sigma[str(bins)].diagonal()
             #print 'Acceptance %i reject %i' %(Nacept,Nreject)
             #print active_param[str(bins)][range(2,bins*3,3)]
         if q_talk.qsize()==0:
             active_param[str(bins)]= Chain_gen_all(active_param[str(bins)],metal_unq, age_unq,bins,sigma[str(bins)])
         else:
-            temp=q_talk.get()
-            mybest=[temp[1]+0,temp[0]+0]
-            if not bins==temp[0]: #only accept best move is bins are the same
-                q_talk.put(temp)
-                active_param[str(bins)]= Chain_gen_all(active_param[str(bins)],metal_unq, age_unq,bins,sigma[str(bins)])
-            else:
-                active_param[str(bins)]=temp[2]
+            try:
+                temp=q_talk.get(timeout=1)
+                mybest=[temp[1]+0,temp[0]+0]
+                if not bins==temp[0]: #only accept best move is bins are the same
+                    q_talk.put(temp)
+                    active_param[str(bins)]= Chain_gen_all(active_param[str(bins)],metal_unq, age_unq,bins,sigma[str(bins)])
+                else:
+                    active_param[str(bins)]=temp[2]+0
+            except:
+                pass
         #bin_index=0
         #calculate new model and chi
         chi[str(bins)].append(0.)
@@ -706,7 +726,6 @@ def rjmcmc(data,itter=10**5,k_max=16,option=True,rank=0,q_talk=None,q_final=None
             Nacept[str(bins)]+=1
             if not nu.isinf(min(chi[str(bins)])): #put temperature on order of chi calue
                 T_start=nu.round(min(chi[str(bins)]))
-
             #see if global best fit
             if chi[str(bins)][-1]< mybest[0]:
                 mybest=nu.copy([chi[str(bins)][-1],bins])
@@ -730,7 +749,7 @@ def rjmcmc(data,itter=10**5,k_max=16,option=True,rank=0,q_talk=None,q_final=None
                 sigma[str(bins)]=sigma[str(bins)]*1.05
        # else: #use covarnence matrix
             if j%100==0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
-                sigma[str(bins)]=Covarence_mat(nu.array(param[str(bins)]),j)
+                sigma[str(bins)]=Covarence_mat(nu.array(param[str(bins)]),len(param[str(bins)]))
                 #active_param=fun.n_neg_lest(active_param)
         if nu.all(sigma['2'].diagonal()==0): #if step is 0 make small
             for k in xrange(sigma[str(bins)].shape[0]):
@@ -807,8 +826,10 @@ def rjmcmc(data,itter=10**5,k_max=16,option=True,rank=0,q_talk=None,q_final=None
             if T_cuurent<.02*itter:
                 T_cuurent+=1
                 #print T_cuurent,T
-            elif T_cuurent==.02*itter:
+            elif T_cuurent==round(.02*itter):
                 print 'done with cooling'
+                q_final.put('done')
+                T_cuurent+=1
             Nexchange_ratio+=1   
         #make sure the change temp rate is aroudn 2%
         if Nexchange_ratio/(nu.sum(Nacept.values())+nu.sum(Nreject.values()))>.02:
@@ -924,11 +945,6 @@ def rand_choice(x,prob):
         temp_x=nu.sort(x)
         N=nu.cumsum(prob[index]**-1/nu.sum(prob[index]**-1))
         return index[nu.min(nu.abs(N-u))==nu.abs(N-u)][0]
-
-
-
-
-
 
 
 def SA(i,i_fin,T_start,T_stop):
@@ -1093,24 +1109,55 @@ def autocorr(Y, k=1):
 def xcorr(x):
   FFT based autocorrelation function, which is faster than numpy.correlate
   # x is supposed to be an array of sequences, of shape (totalelements, length)
-  fftx = fft(x, n=(length*2-1), axis=1)
-  ret = ifft(fftx * np.conjugate(fftx), axis=1)
-  ret = fftshift(ret, axes=1)
-  return ret
+  """
+    fftx = nu.fft.fft(Y, n=(len(Y)*2-1), axis=0)
+    ret = nu.fft.ifft(fftx * nu.conjugate(fftx), axis=0)
+    ret = nu.fft.fftshift(ret, axes=0)
+    return nu.real(ret)
     
     """
     ybar = nu.mean(Y)
-    N = nu.sum((Y[:-k]-ybar)* (Y[k:] -ybar))
+    if k!=0:
+        N = nu.sum((Y[:-k]-ybar)* (Y[k:] -ybar))
+    else:
+        N = nu.sum((Y-ybar)**2)
     return N/nu.var(Y)
-
+    """
 
 if __name__=='__main__':
-    data,info1,weight=mc.create_spectra(2,func='norm')
-    bins,itter=2,10**5
-    param,chi= MCMC_comunicate(data,bins,itter)
+    import cPickle as pik
+    age=nu.array([5.78,8.27,10.23])
+    metal=nu.array([.0131]*3)
 
+    Norm=nu.array([10,5,2.5])
+    data,info1,weight=own_array_spect(age,nu.log10(metal),Norm,lam_min=2000,lam_max=10**4)
+    param,chi,fac=RJ_multi(data,5*10**3)
+    pik.dump((param,chi,fac,data),open('10525.pik','w'),2)
 
+    Norm=nu.array([5,10,2.5])
+    data,info1,weight=own_array_spect(age,nu.log10(metal),Norm,lam_min=2000,lam_max=10**4)
+    param,chi,fac=RJ_multi(data,5*10**3)
+    pik.dump((param,chi,fac,data),open('51025.pik','w'),2)
 
+    Norm=nu.array([5,2.5,10])
+    data,info1,weight=own_array_spect(age,nu.log10(metal),Norm,lam_min=2000,lam_max=10**4)
+    param,chi,fac=RJ_multi(data,5*10**3)
+    pik.dump((param,chi,fac,data),open('52510.pik','w'),2)
+
+    Norm=nu.array([2.5,5,10])
+    data,info1,weight=own_array_spect(age,nu.log10(metal),Norm,lam_min=2000,lam_max=10**4)
+    param,chi,fac=RJ_multi(data,5*10**3)
+    pik.dump((param,chi,fac,data),open('25510.pik','w'),2)
+
+    Norm=nu.array([2.5,10,5])
+    data,info1,weight=own_array_spect(age,nu.log10(metal),Norm,lam_min=2000,lam_max=10**4)
+    param,chi,fac=RJ_multi(data,5*10**3)
+    pik.dump((param,chi,fac,data),open('25105.pik','w'),2)
+
+    Norm=nu.array([10,2.5,5])
+    data,info1,weight=own_array_spect(age,nu.log10(metal),Norm,lam_min=2000,lam_max=10**4)
+    param,chi,fac=RJ_multi(data,5*10**3)
+    pik.dump((param,chi,fac,data),open('10255.pik','w'),2)
 
     '''import cProfile as pro
     data,info,weight=create_spectra(2)
