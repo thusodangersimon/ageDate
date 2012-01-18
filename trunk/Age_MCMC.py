@@ -4,6 +4,7 @@
 from Age_date import *
 from mpi4py import MPI
 from scipy.cluster import vq as sci
+from scipy.stats import levene, f_oneway
 #import time as Time
 a=nu.seterr(all='ignore')
 
@@ -552,6 +553,52 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     #q.put((param,chi,out_sigma,acept_rate))
     #return param,chi,out_sigma,acept_rate
 
+def Convergence_tests(param,keys,n=1000):
+    #uses Levene's test to see if var between chains are the same if that is True
+    #uses f_oneway (ANOVA) to see if means are from same distrubution 
+    #if both are true then tells program to exit
+    #uses last n chains only
+    L_result={}
+    out=False
+    #turn into an array
+    for i in param:
+        for j in keys:
+            i[j]=nu.array(i[j])
+    for i in keys:
+        param[0][i]=nu.array(param[0][i])
+        L_result[i]=nu.zeros(param[0][i].shape[1])
+        for k in range(param[0][i].shape[1]):
+            samples='' 
+            for j in range(len(param)):
+                samples+='param['+str(j)+']["'+i+'"][-'+str(int(n))+':,'+str(k)+'],'
+            L_result[i][k]=eval('levene('+samples[:-1]+')')[1]
+        if nu.all(L_result[i]>.05): #if leven test is true
+            out=True
+            print "Levene's test is true for %s bins" %i
+        else:
+            print '%i out of %i parameters have same varance' %(sum( L_result[i]>.05),
+                                                                param[0][i].shape[1])
+
+    #do ANOVA to see if means are same
+    if out:
+        #try f_oneway test
+        A_result={}
+        out=False
+        for i in keys:
+            A_result[i]=nu.zeros(param[0][i].shape[1])
+            for k in range(param[0][i].shape[1]):
+                samples='' 
+                for j in range(len(param)):
+                    samples+='param['+str(j)+']["'+i+'"][-'+str(int(n))+':,'+str(k)+'],'
+                A_result[i][k]=eval('f_oneway('+samples[:-1]+')')[1]
+            if nu.all(A_result[i]>.05): #if leven test is true
+                print "ANOVA says chains have converged. Ending program"
+                return True
+            else:
+                print '%i out of %i parameters have same means' %(sum( A_result[i]>.05),
+                                                                    param[0][i].shape[1])
+    return False
+
 def RJ_multi(data,itter,k_max=16,cpus=cpu_count()):
     #does multiple chains for RJMCMC
     #shares info about chain every 300 itterations to other chains
@@ -567,23 +614,40 @@ def RJ_multi(data,itter,k_max=16,cpus=cpu_count()):
     for ii in range(cpus):
         work.append(Process(target=rjmcmc,args=(data,itter,k_max,option,ii,q_talk,q_final)))
         work[-1].start()
-    i=0
-    ''''Time.sleep(300)
-    while i<cpus-3: #wait 5 min after all complete cooling
-        if not q_final.empty():
-            out=q_final.get()
-            i+=1
-            print '%i out of %i done with cooling' %(i,cpus)
+
+    rank,size,conver_test=-nu.ones(cpus),nu.zeros(cpus),[]
+    while True: #wait 5 min after all complete cooling
+        if q_final.qsize()>=cpus:
+            print 'Starting convergence test'
+            for i in range(cpus):
+                rank[i],size[i],temp=q_final.get()
+                conver_test.append(temp)
+            #calculate W and B for convergence for all bins with len>1000
+            key_to_use=conver_test[0].keys()
+            for i in conver_test:
+                for j in key_to_use:
+                    if len(i[j])<1000:
+                        key_to_use.remove(j)
+            if key_to_use:
+                #do convergence calc
+                if Convergence_tests(conver_test,key_to_use):
+                    #convergence!
+                    #tidy up and end
+                    sys.stdout.flush()
+                    while q_final.qsize()>0:
+                        q_final.get()
+                    option.value=False
+                    break                
         else:
-            Time.sleep(5)'''
-    t=Time.time()
+            Time.sleep(5)
+    '''t=Time.time()
     while t+600>Time.time():
         Time.sleep(5)
         print '%i seconds left' %(round(t+600-Time.time()))
         sys.stdout.flush()
     #print 'Starting 5 min wait'
-    #Time.sleep(300)
-    while q_final.qsize()>0:
+    #Time.sleep(300)'''
+    while q_final.qsize()>0: #clear final queue
        a= q_final.get()
     option.value=False
     #wait for proceses to finish
@@ -633,12 +697,14 @@ def RJ_multi(data,itter,k_max=16,cpus=cpu_count()):
                 outchi[str(int(j))]=nu.concatenate((outchi[str(int(j))],i[1][str(int(j))][~nu.isinf(i[1][str(int(j))])]))
             except ValueError: #if empty skip
                 pass
-    for j in fac[:,0]:
+    for j in nu.int64(fac[:,0]): #post processing
         outparam[str(int(j))],outchi[str(int(j))]=outparam[str(int(j))][2:,:],outchi[str(int(j))][1:]
+        outparam[str(int(j))][:,range(0,3*j,3)]=10**outparam[str(int(j))][:,range(0,3*j,3)]
+        outparam[str(int(j))][:,range(2,3*j,3)]=outparam[str(int(j))][:,range(2,3*j,3)]/1000.
     
-    return outparam,outchi,fac
+    return outparam,outchi,fac[fac[:,0].argsort(),:]
 
-def rjmcmc(data,itter=10**5,k_max=16,option=True,rank=0,q_talk=None,q_final=None):
+def rjmcmc(data,itter=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=None):
     #parallel worker program reverse jump mcmc program
     nu.random.seed(current_process().pid)
     #initalize boundaries
@@ -697,6 +763,7 @@ def rjmcmc(data,itter=10**5,k_max=16,option=True,rank=0,q_talk=None,q_final=None
     while option.value:
         if j%500==0:
             print "hi, I'm at itter %i, chi %f from %s bins and for cpu %i" %(len(param[str(bins)]),chi[str(bins)][-1],bins,rank)
+            sys.stdout.flush()
             #print sigma[str(bins)].diagonal()
             #print 'Acceptance %i reject %i' %(Nacept,Nreject)
             #print active_param[str(bins)][range(2,bins*3,3)]
@@ -705,27 +772,39 @@ def rjmcmc(data,itter=10**5,k_max=16,option=True,rank=0,q_talk=None,q_final=None
         else:
             try:
                 temp=q_talk.get(timeout=1)
-                mybest=[temp[1]+0,temp[0]+0]
-                if not bins==temp[0]: #only accept best move is bins are the same
+                if mybest[0]>temp[1] and bins==temp[0]:
+                    mybest=[temp[1]+0,temp[0]+0]
+                    active_param[str(bins)]=temp[2]+0
+                elif  bins!=temp[0] and mybest[0]>temp[1]: #only accept best move is bins are the same
                     q_talk.put(temp)
+                    mybest=[temp[1]+0,temp[0]+0]
                     active_param[str(bins)]= Chain_gen_all(active_param[str(bins)],metal_unq, age_unq,bins,sigma[str(bins)])
                 else:
-                    active_param[str(bins)]=temp[2]+0
+                    active_param[str(bins)]= Chain_gen_all(active_param[str(bins)],metal_unq, age_unq,bins,sigma[str(bins)])
             except:
-                pass
+                active_param[str(bins)]= Chain_gen_all(active_param[str(bins)],metal_unq, age_unq,bins,sigma[str(bins)])
         #bin_index=0
         #calculate new model and chi
         chi[str(bins)].append(0.)
         chi[str(bins)][-1],active_param[str(bins)][range(2,bins*3,3)]=fun[str(bins)].func_N_norm(active_param[str(bins)])
+        #sort by age
+        if not nu.all(active_param[str(bins)][range(1,bins*3,3)]==
+                      nu.sort(active_param[str(bins)][range(1,bins*3,3)])):
+            index=nu.argsort(active_param[str(bins)][range(1,bins*3,3)])
+            temp_index=[] #create sorting indcci
+            for k in index:
+                for kk in range(3):
+                    temp_index.append(3*k+kk)
+            active_param[str(bins)]=active_param[str(bins)][temp_index]
+         
         #decide to accept or not
         a=nu.exp((chi[str(bins)][-2]-chi[str(bins)][-1])/SA(T_cuurent,itter,T_start,T_stop))
-        #print chi[str(bins)][-2]-chi[str(bins)][-1]
         #metropolis hastings
         if a>nu.random.rand(): #acepted
             param[str(bins)].append(nu.copy(active_param[str(bins)]))
             Nacept[str(bins)]+=1
             if not nu.isinf(min(chi[str(bins)])): #put temperature on order of chi calue
-                T_start=nu.round(min(chi[str(bins)]))
+                T_start=nu.round(min(chi[str(bins)]))+1.
             #see if global best fit
             if chi[str(bins)][-1]< mybest[0]:
                 mybest=nu.copy([chi[str(bins)][-1],bins])
@@ -816,6 +895,15 @@ def rjmcmc(data,itter=10**5,k_max=16,option=True,rank=0,q_talk=None,q_final=None
             #accept model change
                 bins=temp_bins+0
                 chi[str(bins)].append(nu.copy(tchi))
+                #sort by age so active_param[bins*i+1]<active_param[bins*(i+1)+1]
+                if not nu.all(active_param[str(bins)][range(1,bins*3,3)]==
+                          nu.sort(active_param[str(bins)][range(1,bins*3,3)])):
+                    index=nu.argsort(active_param[str(bins)][range(1,bins*3,3)])
+                    temp_index=[] #create sorting indcci
+                    for k in index:
+                        for kk in range(3):
+                            temp_index.append(3*k+kk)
+                    active_param[str(bins)]=active_param[str(bins)][temp_index]
                 param[str(bins)].append(nu.copy(active_param[str(bins)]))
                 j,j_timeleft=0,nu.random.exponential(200)
             #Nexchange_ratio=1.
@@ -828,7 +916,6 @@ def rjmcmc(data,itter=10**5,k_max=16,option=True,rank=0,q_talk=None,q_final=None
                 #print T_cuurent,T
             elif T_cuurent==round(.02*itter):
                 print 'done with cooling'
-                q_final.put('done')
                 T_cuurent+=1
             Nexchange_ratio+=1   
         #make sure the change temp rate is aroudn 2%
@@ -845,36 +932,11 @@ def rjmcmc(data,itter=10**5,k_max=16,option=True,rank=0,q_talk=None,q_final=None
             elif acept_rate[str(bins)][-1]<.25 and T_start<3*10**5:
                 T_start*=2.
                 #T_stop-=.1'''
-        ##############################parallel cominication
-        '''not working
-        if option.send_num.value+1==rank or option.cpu_tot-1-option.send_num.value==rank: #receiver
-            if q_talk.qsize()>0: #if item in queue add it to params
-                print 'reciving from %i, I am %i' %(option.send_num.value,rank)
-                Time.sleep(2)
-                while q_talk.qsize()>0:
-                    temp=q_talk.get(1)
-                    param[temp[1]].extend(temp[0])
-                if option.send_num.value>option.cpu_tot-1:
-                    option.send_num.value=0
-                else:
-                    option.send_num.value+=1
-        else:
-            if option.send_num.value>=option.cpu_tot:
-                option.send_num.value=0
-        if option.send_num.value==rank:
-            if is_send(Nacept,Nreject,N_all)>500: #sender
-            #send data
-                if option.send_num.value>option.cpu_tot-1:
-                    print 'sending sending from %i to 0' %rank
-                else:
-                    print 'sending sending from %i to %i' %(rank,option.send_num.value+1)
-                for i in Nacept.keys():
-                    index=int(Nacept[i]+Nreject[i]-N_all['accept'][i]-N_all['reject'][i])
-                    if index>0:
-                        #only send if something changed
-                        q_talk.put((param[i][-index:],i))
-                N_all={'accept':dict(Nacept),'reject':dict(Nreject)}
-                '''
+        ##############################convergece assment
+        size=dict_size(param)
+        if size%999==0 and size>6000:
+            q_final.put((rank,size,param))
+                
         ##############################house keeping
         j+=1
         acept_rate[str(bins)].append(nu.copy(Nacept[str(bins)]/(Nacept[str(bins)]+Nreject[str(bins)])))
@@ -908,6 +970,15 @@ def Check(param,metal_unq, age_unq,bins): #checks if params are in bounds no bin
         if not (0<param[j*3+2]): #and param[j*3+2]<1): #check normalizations
             return True
     return False
+
+
+def dict_size(dic):
+    #returns total number of elements in dict
+    size=0
+    for i in dic.keys():
+        size+=len(dic[i])
+
+    return size
 
 def Chain_gen_all(means,metal_unq, age_unq,bins,sigma):
     #creates new chain for MCMC, does log spacing for metalicity
