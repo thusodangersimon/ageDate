@@ -558,12 +558,13 @@ def Convergence_tests(param,keys,n=1000):
     #uses f_oneway (ANOVA) to see if means are from same distrubution 
     #if both are true then tells program to exit
     #uses last n chains only
-    L_result={}
-    out=False
-    #turn into an array
+
     for i in param:
         for j in keys:
             i[j]=nu.array(i[j])
+    '''L_result={}
+    out=False
+    #turn into an array
     for i in keys:
         param[0][i]=nu.array(param[0][i])
         L_result[i]=nu.zeros(param[0][i].shape[1])
@@ -577,7 +578,8 @@ def Convergence_tests(param,keys,n=1000):
             print "Levene's test is true for %s bins" %i
         else:
             print '%i out of %i parameters have same varance' %(sum( L_result[i]>.05),
-                                                                param[0][i].shape[1])
+                                                                param[0][i].shape[1])'''
+    out=True
 
     #do ANOVA to see if means are same
     if out:
@@ -602,6 +604,7 @@ def Convergence_tests(param,keys,n=1000):
 def RJ_multi(data,itter,k_max=16,cpus=cpu_count()):
     #does multiple chains for RJMCMC
     #shares info about chain every 300 itterations to other chains
+    import cPickle as pik
     option=Value('b',True)
     option.burnin=10**3
     option.itter=int(itter+option.burnin)
@@ -616,8 +619,9 @@ def RJ_multi(data,itter,k_max=16,cpus=cpu_count()):
         work[-1].start()
 
     rank,size,conver_test=-nu.ones(cpus),nu.zeros(cpus),[]
-    while True: #wait 5 min after all complete cooling
+    while True: 
         if q_final.qsize()>=cpus:
+            conver_test=[]
             print 'Starting convergence test'
             for i in range(cpus):
                 rank[i],size[i],temp=q_final.get()
@@ -630,6 +634,7 @@ def RJ_multi(data,itter,k_max=16,cpus=cpu_count()):
                         key_to_use.remove(j)
             if key_to_use:
                 #do convergence calc
+                #pik.dump((conver_test,key_to_use),open('conv_test.pik','w'),2)
                 if Convergence_tests(conver_test,key_to_use):
                     #convergence!
                     #tidy up and end
@@ -637,7 +642,21 @@ def RJ_multi(data,itter,k_max=16,cpus=cpu_count()):
                     while q_final.qsize()>0:
                         q_final.get()
                     option.value=False
-                    break                
+                    break         
+                else: #doesn't seem like convergence works use other methods to stop chain
+                    for j in key_to_use:
+                        temp=0
+                        for i in conver_test:
+                            temp+=len(i[j])
+                        if temp>10**5:
+                            sys.stdout.flush()
+                            while q_final.qsize()>0:
+                                q_final.get()
+                            option.value=False
+                            break   
+                    if temp>10**5:
+                        break
+
         else:
             Time.sleep(5)
     '''t=Time.time()
@@ -713,7 +732,7 @@ def rjmcmc(data,itter=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=No
     metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
     age_unq=nu.unique(lib_vals[0][:,1])
 
-    data[:,1]=data[:,1]*1000  
+    #data[:,1]=data[:,1]*1000  
     #create fun for all number of bins
     attempt=False
     fun,param,active_param,chi,sigma={},{},{},{},{}
@@ -730,7 +749,7 @@ def rjmcmc(data,itter=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=No
     #for parallel to know how many iterations have gone by
     N_all={'accept':dict(Nacept),'reject':dict(Nreject)}
     #bins to start with
-    bins=1
+    bins=16
     #create starting active params
     bin=nu.log10(nu.linspace(10**age_unq.min(),10**age_unq.max(),bins+1))
     bin_index=0
@@ -756,12 +775,12 @@ def rjmcmc(data,itter=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=No
 
     #start rjMCMC
     T_cuurent,Nexchange_ratio=1.0,1.0
-    #acept_rate,out_sigma=[.35],[]
+    size=0
     j,T,j_timeleft=1,9.,nu.random.exponential(100)
     T_start,T_stop=3*10**5.,0.9
     birth_rate=.5
     while option.value:
-        if j%500==0:
+        if size%500==0:
             print "hi, I'm at itter %i, chi %f from %s bins and for cpu %i" %(len(param[str(bins)]),chi[str(bins)][-1],bins,rank)
             sys.stdout.flush()
             #print sigma[str(bins)].diagonal()
@@ -775,6 +794,7 @@ def rjmcmc(data,itter=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=No
                 if mybest[0]>temp[1] and bins==temp[0]:
                     mybest=[temp[1]+0,temp[0]+0]
                     active_param[str(bins)]=temp[2]+0
+                    q_talk.put(temp)
                 elif  bins!=temp[0] and mybest[0]>temp[1]: #only accept best move is bins are the same
                     q_talk.put(temp)
                     mybest=[temp[1]+0,temp[0]+0]
@@ -948,7 +968,7 @@ def rjmcmc(data,itter=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=No
         acept_rate[i]=nu.array(acept_rate[i])
         out_sigma[i]=nu.array(out_sigma[i])
         bayes_fact[i]=nu.array(bayes_fact[i])
-    data[:,1]=data[:,1]/1000.
+    #data[:,1]=data[:,1]/1000.
     #q.put((param[option.burnin:,:],chi[option.burnin:]))
     q_final.put((param,chi,bayes_fact,out_sigma))
     #return param,chi,sigma,acept_rate,out_sigma
