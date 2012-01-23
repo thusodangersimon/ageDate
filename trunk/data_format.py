@@ -35,7 +35,7 @@ import numpy as nu
 import pyfits as fits
 
 
-def spect_read(infilefunction uly_spect_filefmt, hdr, FILE=file
+def spect_read(infile):
 # Analyse the header of a FITS file to guess what format it is
 # The routine is presently recognizing 3 spectral formats.
 # The aim is perform minimum tests in order to select the proper reading 
@@ -48,23 +48,14 @@ def spect_read(infilefunction uly_spect_filefmt, hdr, FILE=file
 #   3 : 1D or LSS-2D spectrum with a 'fair' WCS
 # If the variable hdr does not contain a FITS header, the header can 
 # be read from <file>
-
-if size(hdr,/TYPE) ne 7 or n_elements(hdr) le 1 then begin
-  fits_read, file, data, hdr, MESS=mess
-  if mess ne '' then begin
-      message, mess, /INFO
-      return, 0
-  endif
-endif
+    hdr=fits.open(infile)
 
 # Search if it is a SDSS-like format (ie. have ARRAYi)
-if sxpar(hdr, 'NAXIS') gt 1 then begin  
-    array = sxpar(hdr, 'ARRAY*', COUNT=cnt1)
-    naxis = sxpar(hdr, 'NAXIS*', COUNT=cnt2)
-    ns = sxpar(hdr, 'NAXIS'+strtrim(cnt2,2))
-    if cnt1 gt 0 and ns ge cnt1 then return, 1
-endif
-
+    if hdr[0].header['NAXIS']>1:  
+        array = hdr[0].header['ARRAY*']
+        naxis = hdr[0].header['NAXIS*']
+        out_spect=spect_read_sdss(hdr,array,naxis)
+'''
 # Search if it is a BINTABLE format 
 if strtrim(sxpar(hdr, 'XTENSION')) eq 'BINTABLE' then begin  
     return, 2
@@ -77,12 +68,13 @@ endif
 
 return, 0
 end
-
+'''
 #==============================================================================
 # reading routine for SDSS-style format (format=1)
-function uly_spect_read_sdss, data, h, ERR_SP=err_sp, SNR_SP=snr_sp, QUIET=quiet
+def spect_read_sdss(hdr,array,naxis, quiet=True):
 
-if not keyword_set(quiet) then print, 'SDSS style'
+    if not QUIET:
+        print 'SDSS style'
 
 # pb with sdss style: the definition of MASK in SDSS original data
 # is complex (this is a bit mask, 0 is good)
@@ -90,66 +82,63 @@ if not keyword_set(quiet) then print, 'SDSS style'
 # is good...
 
 # identify the subarrays that we will extract
-array = strtrim(sxpar(h, 'ARRAY*'), 2)
-n1 = where (array eq 'DATA'  or array eq 'SPECTRUM')
-n2 = where (array eq 'ERROR')
-n3 = where (array eq 'MASK')
-n4 = where (array eq 'WAVELEN')
+    n=-nu.ones(4,dtype=nu.int32)
+    for i in range(len(array)):
+        if array[i].value=='DATA' or array[i].value=='SPECTRUM':
+            n[0]=i
+        elif array[i].value=='ERROR':
+            n[1]=i
+        elif array[i].value=='MASK':
+            n[2]=i
+        elif array[i].value=='WAVELEN':
+            n[3]=i
 
-# analyse the WCS
-sampling = -1
-vacuum = 0     # Air or vacuum wavelengths
 
-if n4 lt 0 then begin
-#   check CTYPE
-    ctype = sxpar(h,'CTYPE1')
-    if strmid(ctype,0,4) eq 'WAVE' then vacuum = 1
-    if sxpar(h, 'VACUUM') eq 1 then vacuum = 1  # Used in SDSS
-
-    if strmid(ctype,0,4) eq 'WAVE' or strmid(ctype,0,4) eq 'AWAV' then begin
-        if strmid(ctype,5,3) eq 'WAV' then begin
+    if  hdr[0].header['CTYPE1'][:4]=='WAVE' or hdr[0].header['CTYPE1'][:4]=='AWAV':
+        if hdr[0].header['CTYPE1'][5:]== 'WAV':
             sampling = 0
-        endif else if strmid(ctype,5,3) eq 'LOG' then begin
+        elif hdr[0].header['CTYPE1'][5:]== 'LOG':
             sampling = 1
-        endif
-    endif
+    try:
+        step = hdr[0].header['CD1_1']
+    except KeyError:
+        step = hdr[0].header['CDELT1']
+    except:
+        print 'Cannot decode the WCS'
+        raise(KeyError)
+    
+    crpix = hdr[0].header['CRPIX1']
+    
+    start = hdr[0].header['CRVAL1'] - crpix*step
+    
 
-    step = double(string(sxpar(h,'CD1_1',COUNT=count)))
-    if count eq 0 then begin
-        step = double(string(sxpar(h,'CDELT1',COUNT=count)))
-    endif
-    if count eq 0 then message, 'Cannot decode the WCS'
-    crpix = double(string(sxpar(h,'CRPIX1',COUNT=count))) - 1d
-    if count eq 0 then crpix = 0d
-    start = double(string(sxpar(h,'CRVAL1', COUNT=count))) - crpix*step
-    if count eq 0 then message, 'Cannot decode the WCS'
-
-    if sampling lt 0 then begin
-        if start le 4 then begin
+    if sampling < 0:
+        if start < 4 then begin
             sampling = 1 
-            start *= alog(10d)
-            step *= alog(10d)
-            if not keyword_set(quiet) then $
-              print, 'Assume that the sampling is in log10'
-        endif else if start le 9 then begin
+            start = nu.log10(start)
+            step = nu.log10(step)
+            if not quiet :
+                print 'Assume that the sampling is in log10'
+        elif start < 9:
             sampling = 1
-            if not keyword_set(quiet) then $
-              print, 'Assume that the sampling is in ln'
-        endif else begin
+            if not quiet :
+                print 'Assume that the sampling is in ln'
+        else:
             sampling = 0
-            if not keyword_set(quiet) then $
-              print, 'Assume that the sampling is linear in wavelength'
-        endelse
-    endif
-    if vacuum eq 1 then begin
-        if not keyword_set(quiet) then $
-          print, 'Wavelength in VACUUM ... approximately converted'
-        if sampling eq 0 then begin 
-            start /= 1.00028d 
-            step /= 1.00028d 
-        endif else if sampling eq 1 then start -= 0.00028D
-    endif
-endif else sampling = 2
+            if not quiet :
+                print'Assume that the sampling is linear in wavelength'
+
+    if vacuum == 1:
+        if not quiet:
+            print 'Wavelength in VACUUM ... approximately converted'
+        if sampling == 0:
+            start /= 1.00028
+            step /= 1.00028
+        elif sampling == 1:
+             start -= 0.00028
+
+        else :
+            sampling = 2
 
 # reformat the data array
 ndim = size(data,/N_DIM)
