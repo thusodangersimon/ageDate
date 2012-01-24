@@ -71,126 +71,27 @@ end
 '''
 #==============================================================================
 # reading routine for SDSS-style format (format=1)
-def spect_read_sdss(hdr,array,naxis, quiet=True):
-
-    if not QUIET:
-        print 'SDSS style'
-
-# pb with sdss style: the definition of MASK in SDSS original data
-# is complex (this is a bit mask, 0 is good)
-# We would like to understand also a simpler mask made of 0 and 1s, 1
-# is good...
-
-# identify the subarrays that we will extract
-    n=-nu.ones(4,dtype=nu.int32)
-    for i in range(len(array)):
-        if array[i].value=='DATA' or array[i].value=='SPECTRUM':
-            n[0]=i
-        elif array[i].value=='ERROR':
-            n[1]=i
-        elif array[i].value=='MASK':
-            n[2]=i
-        elif array[i].value=='WAVELEN':
-            n[3]=i
-
-
-    if  hdr[0].header['CTYPE1'][:4]=='WAVE' or hdr[0].header['CTYPE1'][:4]=='AWAV':
-        if hdr[0].header['CTYPE1'][5:]== 'WAV':
-            sampling = 0
-        elif hdr[0].header['CTYPE1'][5:]== 'LOG':
-            sampling = 1
-    try:
-        step = hdr[0].header['CD1_1']
-    except KeyError:
-        step = hdr[0].header['CDELT1']
-    except:
-        print 'Cannot decode the WCS'
+def spect_read_sdss(sdss_name,option='flux'):
+    #reads from HDR1 and does redshift calibration to Z=0
+    #outputs data in coulum format [wave,flux,uncert (sigma)]
+    #option can be "best_fit" or "flux"
+    sdss=fits.open(sdss_name)[1]
+    out=nu.zeros([sdss.header['NAXIS2'],3])
+    out[:,0]=sdss.data.field('wavelength')/(1+float(sdss.header['Z'])) #redshift correction
+    option=option.lower()
+    if option=='best_fit' or option=='flux':
+        out[:,1]=sdss.data.field(option)
+    else:
+        print 'option must be "best_fit" or "flux"'
         raise(KeyError)
-    
-    crpix = hdr[0].header['CRPIX1']
-    
-    start = hdr[0].header['CRVAL1'] - crpix*step
-    
+    out[:,2]=nu.sqrt(1/sdss.data.field('inverse_variance'))
+    #use and mask and keep only mask==0 and remove any of out[:,2]!=inf
+    out=out[sdss.data.field('and_mask')==0,:]
+    out=out[~nu.isinf(out[:,2]),:]
+    return out
 
-    if sampling < 0:
-        if start < 4 then begin
-            sampling = 1 
-            start = nu.log10(start)
-            step = nu.log10(step)
-            if not quiet :
-                print 'Assume that the sampling is in log10'
-        elif start < 9:
-            sampling = 1
-            if not quiet :
-                print 'Assume that the sampling is in ln'
-        else:
-            sampling = 0
-            if not quiet :
-                print'Assume that the sampling is linear in wavelength'
 
-    if vacuum == 1:
-        if not quiet:
-            print 'Wavelength in VACUUM ... approximately converted'
-        if sampling == 0:
-            start /= 1.00028
-            step /= 1.00028
-        elif sampling == 1:
-             start -= 0.00028
-
-        else :
-            sampling = 2
-
-# reformat the data array
-ndim = size(data,/N_DIM)
-dim = size(data, /DIM)
-
-narray = dim[ndim-1]
-dim = dim[0:ndim-2]
-tot = 1
-for i=0, ndim-2 do tot *= dim[i]
-data = reform(data, tot, narray, /OVER)
-
-spect = uly_spect_alloc(START=start, STEP=step, SAMP=sampling, HEADER=h)
-
-# Remove some WCS keywords  (and ARRAY*) that may be outdated
-sxdelpar, *spect.hdr, ['VACUUM', 'CTYPE1', 'CRVAL1', 'CDELT1', 'CD1_1', 'DC-FLAG', 'WAT0_*', 'WAT1_*', 'WFITTYPE', 'ARRAY*']
-
-if n1 ge 0 then *spect.data = reform(data[*,n1], dim)
-if n2 ge 0 then *spect.err = reform(data[*,n2], dim)
-
-if n3 ge 0 then begin
-    m = where(finite(data[*,n3]) eq 1, cnt)
-    if cnt gt 0 then begin
-        m = where(data[*,n3] ne 0 and data[*,n3] ne 1, cnt)
-        if cnt gt 0 then begin
-            message, /INFO, $
-              'The mask is not made of 0 and 1s ... it is ignored' 
-            message, /INFO, '   (a standard mask has 0=bad, 1=good)' 
-        endif else $
-          *spect.goodpix = where(data[*,n3] gt 0) #goodpix is a 1D list
-    endif
-endif
-
-if n4 ge 0 then *spect.wavelen = reform(data[*,n4], dim)
-
-if n_elements(*spect.err) gt 0 then begin
-    if n_elements(*spect.goodpix) eq 0 then $
-      m = where(*spect.err le 0, cnt, COMP=g) $
-    else m = where((*spect.err)[*spect.goodpix] le 0, cnt, COMP=g)
-    if cnt gt 0 then begin
-        message, /INFO, 'Pixels with 0 or negative errors were masked'
-        if n_elements(*spect.goodpix) eq 0 then *spect.goodpix = g $
-        else *spect.goodpix = [*spect.goodpix, g]
-    endif
-endif
-
-dof_factor = double(string(sxpar(h, 'DOF_FACT', COUNT=count)))
-if count eq 1 then spect.dof_factor = dof_factor
-
-return, spect
-
-end
-
+"""
 #==============================================================================
 # reading routine for BINTABLE format (format=2)
 function uly_spect_read_tbl, data, h, ERR_SP=err_sp, SNR_SP=snr_sp, QUIET=quiet
@@ -606,3 +507,4 @@ return, spect
 end
 
 #== end =======================================================================
+"""
