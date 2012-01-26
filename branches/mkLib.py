@@ -164,8 +164,6 @@ def FSPS(inpath,outpath,lambda_file):
 def ulyss_fits(inpath,outpath):
     import pyfits as fits
     #take ssp lib froma fits file and turns into correct format   
-    if inpath[-1]!='/':
-        inpath=inpath+'/'
     if outpath[-1]!='/':
         outpath=outpath+'/'
 
@@ -190,10 +188,10 @@ def ulyss_fits(inpath,outpath):
     metal=10**metal
     
     #save 
-    temp=nu.zeros([wave.shape[0],2])
+    temp=-nu.ones([wave.shape[0],2])
     temp[:,0]=wave
     for i in range(len(age)):
         for j in range(len(metal)):
             outname='ssp_%1.4f_%1.6f.spec' %(metal[j],age[i])
-            temp[:,1]=files[0].data[j,i,!:]
+            temp[:,1]=files[0].data[j,i,1:]
             nu.savetxt(outpath+outname,temp)
