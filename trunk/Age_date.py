@@ -241,7 +241,12 @@ def N_normalize(data, model,bins):
     if bins==1:
         N=[normalize(data,model['0'])]
         return N, N[0]*model['0'],sum((data[:,1]-N[0]*model['0'])**2)
-    N,chi=nnls(nu.array(model.values()).T[:,nu.argsort(nu.int64(nu.array(model.keys())))],data[:,1])
+    try:
+        N,chi=nnls(nu.array(model.values()).T[:,nu.argsort(nu.int64(nu.array(model.keys())))],data[:,1])
+    except RuntimeError:
+        print "nnls error"
+        N=nu.zeros([len(model.keys())])
+        chi=nu.inf
     index=nu.nonzero(N==0)[0]
     N[index]+=10**-6
     index=nu.int64(model.keys())
@@ -311,6 +316,31 @@ def nn_ls_fit(data,max_bins=16,min_norm=10**-4,spect=spect):
     metal,age=nu.array(metal),nu.array(age)
     #check if any left
     return metal[nu.argsort(age)],age[nu.argsort(age)],N[N>min_norm][nu.argsort(age)]
+
+def rand_choice(x,prob):
+    #chooses value from x with probabity of prob**-1 so lower prob values are more likeliy
+    #x must be monotonically increasing
+    if not nu.sum(prob)==1: #make sure prob equals 1
+        prob=prob/nu.sum(prob)
+    #check is increasing
+    u=nu.random.rand()
+    if nu.all(x==nu.sort(x)): #if sorted easy
+        N=nu.cumsum(prob**-1/nu.sum(prob**-1))
+        index=nu.array(range(len(x)))
+        return index[nu.min(nu.abs(N-u))==nu.abs(N-u)][0]
+    else:
+        index=nu.argsort(x)
+        temp_x=nu.sort(x)
+        N=nu.cumsum(prob[index]**-1/nu.sum(prob[index]**-1))
+        return index[nu.min(nu.abs(N-u))==nu.abs(N-u)][0]
+
+def dict_size(dic):
+    #returns total number of elements in dict
+    size=0
+    for i in dic.keys():
+        size+=len(dic[i])
+
+    return size
 
 #####classes############# 
 class PMC_func:
@@ -402,6 +432,9 @@ class PMC_func:
         except IndexError:
             out=param
         return out
+
+
+
 
 if __name__=='__main__':
     import cProfile as pro
