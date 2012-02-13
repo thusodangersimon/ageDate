@@ -33,42 +33,8 @@ most code is taken from ULYSS will site later
 
 import numpy as nu
 import pyfits as fits
+import os
 
-
-def spect_read(infile):
-# Analyse the header of a FITS file to guess what format it is
-# The routine is presently recognizing 3 spectral formats.
-# The aim is perform minimum tests in order to select the proper reading 
-# algorithm. It does not warrant that the file is actually readable.
-#
-# The function returns:
-#   0 : The format is not recognized
-#   1 : SDSS-like format
-#   2 : Spectrum in columns of a BINTABLE
-#   3 : 1D or LSS-2D spectrum with a 'fair' WCS
-# If the variable hdr does not contain a FITS header, the header can 
-# be read from <file>
-    hdr=fits.open(infile)
-
-# Search if it is a SDSS-like format (ie. have ARRAYi)
-    if hdr[0].header['NAXIS']>1:  
-        array = hdr[0].header['ARRAY*']
-        naxis = hdr[0].header['NAXIS*']
-        out_spect=spect_read_sdss(hdr,array,naxis)
-'''
-# Search if it is a BINTABLE format 
-if strtrim(sxpar(hdr, 'XTENSION')) eq 'BINTABLE' then begin  
-    return, 2
-endif
-
-# Search if it can be a 1D or LSS spectrum in image array
-if sxpar(hdr, 'NAXIS') le 3 then begin  
-    return, 3
-endif
-
-return, 0
-end
-'''
 #==============================================================================
 # reading routine for SDSS-style format (format=1)
 def spect_read_sdss(sdss_name,option='flux'):
@@ -91,7 +57,19 @@ def spect_read_sdss(sdss_name,option='flux'):
     return out
 
 
+def stack(indir,delta_z=.04):
+
+    #takes dir of spectra and stacks them delta_z option not working, but spits out
+    #redshifted binned arrays
+    pass
+    #do redshift correction
+    #make sure wavelenghts are the same (if not interp?)
+    #co-add uncertaties
+    #add flux
+    
 """
+
+
 #==============================================================================
 # reading routine for BINTABLE format (format=2)
 function uly_spect_read_tbl, data, h, ERR_SP=err_sp, SNR_SP=snr_sp, QUIET=quiet
