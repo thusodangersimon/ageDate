@@ -35,21 +35,21 @@ a=nu.seterr(all='ignore')
 
 
 
-def RJ_multi(data,itter,k_max=16,cpus=cpu_count()):
+def RJ_multi(data,burnin,k_max=16,cpus=cpu_count()):
     #does multiple chains for RJMCMC
     #shares info about chain every 300 itterations to other chains
-    import cPickle as pik
+    #import cPickle as pik
     option=Value('b',True)
-    option.burnin=10**3
-    option.itter=int(itter+option.burnin)
-    option.send_num=Value('d',0) #tells who is sending and who is reciving new data
+    #option.burnin=burnin
+    #option.itter=int(itter+option.burnin)
+    #option.send_num=Value('d',0) #tells who is sending and who is reciving new data
     option.cpu_tot=cpus
 
     work=[]
     q_talk,q_final=Queue(),Queue()
     #start multiprocess mcmc
     for ii in range(cpus):
-        work.append(Process(target=rjmcmc,args=(data,itter,k_max,option,ii,q_talk,q_final)))
+        work.append(Process(target=rjmcmc,args=(data,burnin,k_max,option,ii,q_talk,q_final)))
         work[-1].start()
 
     rank,size,conver_test=-nu.ones(cpus),nu.zeros(cpus),[]
@@ -68,7 +68,6 @@ def RJ_multi(data,itter,k_max=16,cpus=cpu_count()):
                         key_to_use.remove(j)
             if key_to_use:
                 #do convergence calc
-                #pik.dump((conver_test,key_to_use),open('conv_test.pik','w'),2)
                 if Convergence_tests(conver_test,key_to_use):
                     #convergence!
                     #tidy up and end
@@ -101,15 +100,22 @@ def RJ_multi(data,itter,k_max=16,cpus=cpu_count()):
     #print 'Starting 5 min wait'
     #Time.sleep(300)'''
     while q_final.qsize()>0: #clear final queue
-       a= q_final.get()
+        try:
+            a= q_final.get(timeout=1)
+        except:
+            break
     option.value=False
     #wait for proceses to finish
     count=0
     temp=[]
     while count<cpus:
         if q_final.qsize()>0:
-           temp.append(q_final.get())
-           count+=1
+            try:
+                temp.append(q_final.get(timeout=1))
+                count+=1
+            except:
+                print len(temp)
+                break
     #post processing
     #decides which model is the best and which one has best chi sqared
     bayes_fac={}
@@ -153,7 +159,7 @@ def RJ_multi(data,itter,k_max=16,cpus=cpu_count()):
     for j in nu.int64(fac[:,0]): #post processing
         outparam[str(int(j))],outchi[str(int(j))]=outparam[str(int(j))][2:,:],outchi[str(int(j))][1:]
         outparam[str(int(j))][:,range(0,3*j,3)]=10**outparam[str(int(j))][:,range(0,3*j,3)]
-        outparam[str(int(j))][:,range(2,3*j,3)]=outparam[str(int(j))][:,range(2,3*j,3)]/1000.
+        outparam[str(int(j))][:,range(2,3*j,3)]=outparam[str(int(j))][:,range(2,3*j,3)]
     
     return outparam,outchi,fac[fac[:,0].argsort(),:]
 
@@ -185,7 +191,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
     #for parallel to know how many iterations have gone by
     #N_all={'accept':dict(Nacept),'reject':dict(Nreject)}
     #bins to start with
-    bins=nu.random.randint(0,k_max)
+    bins=nu.random.randint(1,k_max)
     #create starting active params
     bin=nu.log10(nu.linspace(10**age_unq.min(),10**age_unq.max(),bins+1))
     bin_index=0
@@ -367,7 +373,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
         if nu.min([1,nu.exp((chi[str(bins)][-2]-chi[str(bins)][-1])/(2.*SA(T_cuurent+1,burnin,T_start,T_stop))-(chi[str(bins)][-2]+chi[str(bins)][-1])/(2.*SA(T_cuurent,burnin,T_start,T_stop)))/T])>nu.random.rand():
             if T_cuurent<burnin:
                 T_cuurent+=1
-                #print T_cuurent,T
+                #print T_cuurent,rank
             elif T_cuurent==round(burnin):
                 print 'done with cooling'
                 T_cuurent+=1
@@ -443,7 +449,7 @@ def Chain_gen_all(means,metal_unq, age_unq,bins,sigma):
 def SA(i,i_fin,T_start,T_stop):
     #temperature parameter for Simulated anneling (SA). 
     #reduices false acceptance rate if a<60% as a function on acceptance rate
-    if i>i_fin:
+    if i>.02*i_fin:
         return 1.0
     else:
         return (T_stop-T_start)/float(.02*i_fin)*i+T_start
@@ -503,6 +509,31 @@ def Convergence_tests(param,keys,n=1000):
                                                                     param[0][i].shape[1])
     return False
 
+def plot_model(param,data,bins):
+    import pylab as lab
+    #takes parameters and returns spectra associated with it
+    lib_vals=get_fitting_info(lib_path)
+    lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0])
+    metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
+    age_unq=nu.unique(lib_vals[0][:,1])
+    #check to see if metalicity is in log range (sort of)
+    if any(param[range(0,bins*3,3)]>metal_unq.max() or param[range(0,bins*3,3)]<metal_unq.min()):
+        print 'taking log of metalicity'
+        param[range(0,bins*3,3)]=nu.log10(param[range(0,bins*3,3)])
+    model=get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins)  
+    #out= model['0']*.0
+    model=data_match_new(data,model,bins)
+    index=xrange(2,bins*3,3)
+    for ii in model.keys():
+        model[ii]=model[ii]*param[index[int(ii)]]
+    index=nu.int64(model.keys())
+    out=nu.sum(nu.array(model.values()).T,1)
+    lab.plot(data[:,0],out)
+    return nu.vstack((data[:,0],out)).T
+#return nu.vstack((model['wave'],out)).T
+
+
+
 #####classes############# 
 class RJMC_func:
     #makes more like function, so input params and the chi is outputted
@@ -537,7 +568,7 @@ class RJMC_func:
         if len(param)!=bins*3:
             return nu.nan
         model=get_model_fit_opt(param,self.lib_vals,self.age_unq,self.metal_unq,bins)  
-        N,model,chi=self.N_normalize(self.data, model,bins)
+        N,model,chi=self.N_normalize(model,bins)
     
         return chi,N
 
@@ -564,7 +595,7 @@ class RJMC_func:
             if self.data.shape[1]==2:
                 N,chi=nnls(nu.array(model.values()).T[:,nu.argsort(nu.int64(nu.array(model.keys())))],self.data[:,1])
             elif self.data.shape[1]==3:
-                N,chi=nnls(nu.array(model.values()).T[:,nu.argsort(nu.int64(nu.array(model.keys())))]/self.data[:,2],self.data[:,1]/self.data[:,2]) #from P Dosesquelles1, T M H Ha1, A Korichi1, F Le Blanc2 and C M Petrache 2009
+                N,chi=nnls(nu.array(model.values()).T[:,nu.argsort(nu.int64(nu.array(model.keys())))]/nu.tile(self.data[:,2],(bins,1)).T,self.data[:,1]/self.data[:,2]) #from P Dosesquelles1, T M H Ha1, A Korichi1, F Le Blanc2 and C M Petrache 2009
             else:
                 print 'wrong data shape'
                 raise(KeyError)
