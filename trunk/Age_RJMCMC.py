@@ -30,7 +30,7 @@
 
 from Age_date import *
 from scipy.cluster import vq as sci
-from scipy.stats import levene, f_oneway
+from scipy.stats import levene, f_oneway,kruskal
 a=nu.seterr(all='ignore')
 
 
@@ -77,6 +77,7 @@ def RJ_multi(data,burnin,k_max=16,cpus=cpu_count()):
                     option.value=False
                     break         
                 else: #doesn't seem like convergence works use other methods to stop chain
+                    continue
                     for j in key_to_use:
                         temp=0
                         for i in conver_test:
@@ -85,7 +86,7 @@ def RJ_multi(data,burnin,k_max=16,cpus=cpu_count()):
                             sys.stdout.flush()
                             while q_final.qsize()>0:
                                 q_final.get()
-                            option.value=False
+                            #option.value=False
                             break   
                     if temp>10**5:
                         break
@@ -470,44 +471,47 @@ def Convergence_tests(param,keys,n=1000):
     for i in param:
         for j in keys:
             i[j]=nu.array(i[j])
-    L_result={}
+    #try kustkal test
+    A_result={}
     out=False
-    #turn into an array
     for i in keys:
-        param[0][i]=nu.array(param[0][i])
-        L_result[i]=nu.zeros(param[0][i].shape[1])
+        A_result[i]=nu.zeros(param[0][i].shape[1])
         for k in range(param[0][i].shape[1]):
             samples='' 
             for j in range(len(param)):
                 samples+='param['+str(j)+']["'+i+'"][-'+str(int(n))+':,'+str(k)+'],'
-            L_result[i][k]=eval('levene('+samples[:-1]+')')[1]
-        if nu.all(L_result[i]>.05): #if leven test is true
+            A_result[i][k]=eval('kruskal('+samples[:-1]+')')[1]
+        if nu.all(A_result[i]>.05): #if kruskal test is true
             out=True
-            print "Levene's test is true for %s bins" %i
+            print "ANOVA says chains have converged. Ending program"
+            return True            
         else:
-            print '%i out of %i parameters have same varance' %(sum( L_result[i]>.05),
-                                                                param[0][i].shape[1])
+            print '%i out of %i parameters have same means' %(sum( A_result[i]>.05),
+                                                              param[0][i].shape[1])
+                                                             
     
 
     #do ANOVA to see if means are same
     if out:
-        #try f_oneway test
-        A_result={}
+        L_result={}
         out=False
+    #turn into an array
         for i in keys:
-            A_result[i]=nu.zeros(param[0][i].shape[1])
+            param[0][i]=nu.array(param[0][i])
+            L_result[i]=nu.zeros(param[0][i].shape[1])
             for k in range(param[0][i].shape[1]):
                 samples='' 
                 for j in range(len(param)):
                     samples+='param['+str(j)+']["'+i+'"][-'+str(int(n))+':,'+str(k)+'],'
-                A_result[i][k]=eval('f_oneway('+samples[:-1]+')')[1]
-            if nu.all(A_result[i]>.05): #if leven test is true
-                print "ANOVA says chains have converged. Ending program"
+                L_result[i][k]=eval('levene('+samples[:-1]+')')[1]
+            if nu.all(L_result[i]>.05): #if leven test is true
+                print "Levene's test is true for %s bins" %i
                 return True
             else:
-                print '%i out of %i parameters have same means' %(sum( A_result[i]>.05),
-                                                                    param[0][i].shape[1])
+                print '%i out of %i parameters have same varance' %(sum( L_result[i]>.05),
+                                                                param[0][i].shape[1])
     return False
+
 
 def plot_model(param,data,bins):
     import pylab as lab
