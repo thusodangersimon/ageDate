@@ -41,7 +41,7 @@ try:
 except:
     print 'some moduals may not work since no astLib installed'
 
-def from_file(inpath,outpath):
+def BC03(inpath,outpath):
     #makes exsisting spectra files into stadard using a file with the refeences
     
     if inpath[-1]!='/':
