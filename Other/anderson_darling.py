@@ -192,7 +192,7 @@ _b0s = np.array([0.675, 1.281, 1.645, 1.960, 2.326])
 _b1s = np.array([-0.245, 0.250, 0.678, 1.149, 1.822])
 _b2s = np.array([-0.105, -0.305, -0.362, -0.391, -0.396])
 
-def anderson_darling_k(samples):
+def anderson_darling_k(*args):
     """Apply the Anderson-Darling k-sample test.
 
     This test evaluates whether it is plausible that all the samples are drawn
@@ -204,7 +204,8 @@ def anderson_darling_k(samples):
     p-value is returned.
 
     """
-    samples = [np.array(sorted(s)) for s in samples]
+    assert len(args) >= 2,"Need at least 2 groups in anderson_darling_k test"
+    samples = [np.sort(s) for s in args]
     all = np.concatenate(samples+[[np.inf]])
 
     values = np.unique(all)
@@ -212,7 +213,7 @@ def anderson_darling_k(samples):
     fij = np.zeros((len(samples),L),dtype=np.int)
     H = 0
     for (i,s) in enumerate(samples):
-        c, be = np.histogram(s, bins=values, new=True)
+        c, be = np.histogram(s, bins=values)
 
         assert np.sum(c)==len(s)
 
@@ -230,9 +231,12 @@ def anderson_darling_k(samples):
 
     h = np.sum(1./np.arange(1,N))
 
-    i = np.arange(1,N,dtype=np.float)[:,np.newaxis]
-    j = np.arange(1,N,dtype=np.float)
-    g = np.sum(np.sum((i<j)/((N-i)*j)))
+    if N<1000:
+        i = np.arange(1,N,dtype=np.float)[:,np.newaxis]
+        j = np.arange(1,N,dtype=np.float)
+        g = np.sum((i<j)/((N-i)*j))
+    else:
+        g = np.pi**2/6 #asymtotic limit of above equation
 
     a = (4*g-6)*(k-1) + (10-6*g)*H
     b = (2*g-4)*k**2 + 8*h*k + (2*g-14*h-4)*H-8*h+4*g-6
