@@ -8,7 +8,7 @@ from scipy.stats import levene, f_oneway
 #import time as Time
 a=nu.seterr(all='ignore')
 
-def MCMC_multi(data,itter,bins,cpus=cpu_count()):
+def MCMC_multi(data,itter,bins,cpus=cpu_count(),burnin=5000):
     #more effecent version of multi core MCMC
     #uses cominication methods instead of creating and distroying processes
 
@@ -20,9 +20,10 @@ def MCMC_multi(data,itter,bins,cpus=cpu_count()):
     parambest=Array('d',nu.zeros([3*bins]))
 
     option=Value('b',True)
-    option.burnin=10**3
+    option.burnin=burnin
     option.itter=int(itter+option.burnin)
 
+    
 
     #sig_share=Array('d',nu.zeros([3*bins]))
     work=[]
@@ -403,7 +404,7 @@ class MC_func:
         return sigma
 
    
-def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
+def MCMC_SA(data,bins,i,chibest,parambest,option,q_talk,q=None):
     #does MCMC and reduices the false acceptance rate over a threshold
     #itter needs to be a array of normaly distrbuted numbers
     #so there are no problems with multiprocessing
@@ -434,8 +435,8 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
         else:#age and normilization
             if any(nu.array(range(1,len(parambest),3))==k): #age
                 #active_param[k]=nu.random.random() #random
-                #active_param[k]=nu.random.random()*age_unq.ptp()/float(bins)+bin[bin_index] #random in bin
-                active_param[k]=nu.mean([bin[bin_index],bin[1+bin_index]]) #mean position in bin
+                active_param[k]=nu.random.random()*age_unq.ptp()/float(bins)+bin[bin_index] #random in bin
+                #active_param[k]=nu.mean([bin[bin_index],bin[1+bin_index]]) #mean position in bin
                 bin_index+=1
                 #active_param[k]=nu.random.random()*age_unq.ptp()+age_unq[0] #random place anywhere
             else: #norm
@@ -459,23 +460,27 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     Nacept,Nreject,Nexchange_ratio,T_cuurent=1.0,1.0,1.0,0.
     acept_rate,out_sigma=[],[]
     j,T=1,9.
-    T_start,T_stop=1.8,0.9
+    T_start,T_stop=nu.copy(chi[0]),0.9
     while option.value and i.value<option.itter:
         if j%1000==0:
-            #print "hi, I'm %i at itter %i and chi %f" %(current_process().ident,j,chi[j-1])
+            print "hi, I'm %i at itter %i and chi %f" %(current_process().ident,j,chi[j-1])
             #print sigma.diagonal()
-            print SA(T_cuurent,option.itter/(cpu),T_start,T_stop),T_cuurent,chi[j-1]
+            #print SA(T_cuurent,option.itter/(cpu),T_start,T_stop),T_cuurent,chi[j-1]
             sys.stdout.flush()
         active_param= chain_gen_all(active_param,metal_unq, age_unq,bins,sigma)
         #bin_index=0
       #calculate new model and chi
         chi[j],active_param[range(2,bins*3,3)]=fun.func_N_norm(active_param)
         #decide to accept or not
-        a=nu.exp((chi[j-1]-chi[j])/2)
+        a=nu.exp((chi[j-1]-chi[j])/SA(T_cuurent,option.itter/(cpu),T_start,T_stop))
         #metropolis hastings
-        if a>=1: #acepted
+        if a>=nu.random.rand(): #acepted and false accept
             param[j,:]=nu.copy(active_param)
             Nacept+=1
+            if T_start>T_stop:
+                T_start=min(chi)
+            else:
+                T_start=T_stop+.0
             if chi[j]< mybest:
                 mybest=nu.copy(chi[j])
             if chi[j]<chibest.value:
@@ -484,18 +489,19 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
                 sys.stdout.flush()
                 
                 chibest.value=nu.copy(chi[j])
-                for k in range(len(active_param)):
+                for k in xrange(len(active_param)):
                     parambest[k]=nu.copy(active_param[k])
                 
-        else:
-            if nu.exp(nu.log(a)/SA(T_cuurent,option.itter/(cpu),T_start,T_stop))>nu.random.rand():#false accept
-                param[j,:]=nu.copy(active_param)
-                Nacept+=1
-            else:
-                param[j,:]=nu.copy( param[j-1,:])
-                active_param=nu.copy( param[j-1,:])
-                chi[j]=nu.copy(chi[j-1])
-                Nreject+=1
+        else: #reject
+            param[j,:]=nu.copy( param[j-1,:])
+            active_param=nu.copy( param[j-1,:])
+            chi[j]=nu.copy(chi[j-1])
+            Nreject+=1
+            #go to best fit if 10**3 off from best fit
+            if chi[j]/chibest.value>10**3:
+                chi[j]=nu.copy(chibest.value)
+                for k in xrange(len (parambest)):
+                    active_param[k]=nu.copy(parambest[k])
  
         if j<1000: #change sigma with acceptance rate
             #k=random.randint(0,len(sigma)-1)
@@ -505,7 +511,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
             elif Nacept/(Nacept+Nreject)<.25 and all(sigma.diagonal()[non_N_index]<10): #not enough
                 sigma=sigma*1.05
         else: #use covarnence matrix
-            if j%1000==0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
+            if j%500==0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
                 sigma=Covarence_mat(param,j)
                 active_param=fun.n_neg_lest(active_param)
         #change temperature
