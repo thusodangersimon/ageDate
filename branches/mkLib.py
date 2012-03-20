@@ -36,6 +36,7 @@ Gives standard names to files
 import os
 import numpy as nu
 import csv
+import pyfits as fits
 try:
     from astLib import astSED as sed_lib
 except:
@@ -91,6 +92,35 @@ def metal_non_inf_conver(Z):
     #if their are 0's in metalicty so no nan crop up
     return 
 
+def P09_all(inpath,outpath):
+    #looks in all dirs of main P09 dir and gets ssps
+    if inpath[-1]!='/':
+        inpath=inpath+'/'
+    if outpath[-1]!='/':
+        outpath=outpath+'/'
+    #check if a dir
+    files=os.listdir(inpath)
+    i=0
+    while i<len(files):
+        if os.path.isfile(inpath+files[i]):
+            files.pop(i)
+        else:
+            i+=1
+    #go into each file in files and extract the ssps
+    for i in files:
+        tochange=os.listdir(inpath+i)
+        i+='/'
+        try:
+            Z=float(i[4])*10**(-float(i[6]))
+        except ValueError: #non-standard dir probably not used to hold ssp
+            continue
+        temp_class=sed_lib.P09Model(inpath+i)
+        for j in temp_class.ages:
+            outname='ssp_%1.4f_%1.6f.spec' %(Z,nu.log10(j*10**9))
+            nu.savetxt(outpath+outname,nu.array(temp_class.getSED(j).asList())) #not normailized
+
+
+
 def P05(inpath,outpath):
     #does P05 ssp's
     
@@ -143,7 +173,7 @@ def Mar05(inpath,outpath,option='bhb'):
 def speed(inpath,outpath):
     pass
 
-def miles(inpath,outpath):
+def miles_fits(inpath,outpath):
     if inpath[-1]!='/':
         inpath=inpath+'/'
     if outpath[-1]!='/':
@@ -153,9 +183,37 @@ def miles(inpath,outpath):
     files=nu.array(os.listdir(inpath))
     for i in files:
         #load file
-        temp=nu.loadtxt(inpath+i)
-        outname='ssp_%1.4f_%1.6f.spec' %(metal_non_inf_conver(float(i[9:13])),nu.log10(float(i[14:])*10**9))
-        nu.savetxt(outpath+outname,temp)
+        temp=fits.open(inpath+i)
+        wave=nu.arange(temp[0].header['CRVAL1'],temp[0].header['CDELT1']*
+                temp[0].header['NAXIS1']+temp[0].header['CRVAL1'],temp[0].header['CDELT1']) #make wavelngth range
+        #get metalicty
+        for j in temp[0].header.get_comment():
+            if j.value.find('Age')>0:
+                break
+        try:    
+            metal=float(j.value[-6:-1])
+        except ValueError:
+            print i
+            raise
+        if metal==-2.32:
+            Z=0.0001
+        elif metal==-1.71:
+            Z=0.0004
+        elif metal==-1.31:
+            Z=0.0010
+        elif metal==-0.71:
+            Z=0.0040
+        elif metal==-0.40:
+            Z=0.0080
+        elif metal==0.00:
+            Z=0.0190
+        elif metal==0.22: #an error on the Miles website
+            Z=0.0300
+        else:
+            raise
+        
+        outname='ssp_%1.4f_%1.6f.spec' %(Z,nu.log10(float(i[-12:-5])*10**9))
+        nu.savetxt(outpath+outname,nu.vstack((wave,temp[0].data)).T)
 
 def FSPS(inpath,outpath,lambda_file):
     #should have a location to wavelength file as well as in and out path
