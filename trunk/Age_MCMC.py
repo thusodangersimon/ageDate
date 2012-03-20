@@ -21,7 +21,7 @@ def MCMC_multi(data,itter,bins,cpus=cpu_count(),burnin=5000):
 
     option=Value('b',True)
     option.burnin=burnin
-    option.itter=int(itter+option.burnin)
+    option.itter=int(itter+option.burnin*cpus)
 
     
 
@@ -33,8 +33,8 @@ def MCMC_multi(data,itter,bins,cpus=cpu_count(),burnin=5000):
         work.append(Process(target=MCMC_SA,args=(data,bins,i,chibest
                                                      ,parambest,option,q)))
         work[-1].start()
-    while i.value<itter:
-        print '%2.2f percent done' %(i.value/float(itter)*100)
+    while i.value<option.itter:
+        print '%2.2f percent done' %(i.value/float(option.itter)*100)
         sys.stdout.flush()
         #print i.value
         Time.sleep(5)
@@ -404,7 +404,7 @@ class MC_func:
         return sigma
 
    
-def MCMC_SA(data,bins,i,chibest,parambest,option,q_talk,q=None):
+def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     #does MCMC and reduices the false acceptance rate over a threshold
     #itter needs to be a array of normaly distrbuted numbers
     #so there are no problems with multiprocessing
@@ -469,10 +469,10 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q_talk,q=None):
             sys.stdout.flush()
         active_param= chain_gen_all(active_param,metal_unq, age_unq,bins,sigma)
         #bin_index=0
-      #calculate new model and chi
+        #calculate new model and chi
         chi[j],active_param[range(2,bins*3,3)]=fun.func_N_norm(active_param)
         #decide to accept or not
-        a=nu.exp((chi[j-1]-chi[j])/SA(T_cuurent,option.itter/(cpu),T_start,T_stop))
+        a=nu.exp((chi[j-1]-chi[j])/SA(T_cuurent,option.burnin,T_start,T_stop))
         #metropolis hastings
         if a>=nu.random.rand(): #acepted and false accept
             param[j,:]=nu.copy(active_param)
@@ -497,16 +497,11 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q_talk,q=None):
             active_param=nu.copy( param[j-1,:])
             chi[j]=nu.copy(chi[j-1])
             Nreject+=1
-            #go to best fit if 10**3 off from best fit
-            if chi[j]/chibest.value>10**3:
-                chi[j]=nu.copy(chibest.value)
-                for k in xrange(len (parambest)):
-                    active_param[k]=nu.copy(parambest[k])
  
         if j<1000: #change sigma with acceptance rate
             #k=random.randint(0,len(sigma)-1)
             if Nacept/(Nacept+Nreject)>.50 and all(sigma.diagonal()>=10**-5): 
-               #too few aceptnce decrease sigma
+                #too few aceptnce decrease sigma
                 sigma=sigma/1.05
             elif Nacept/(Nacept+Nreject)<.25 and all(sigma.diagonal()[non_N_index]<10): #not enough
                 sigma=sigma*1.05
@@ -515,8 +510,11 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q_talk,q=None):
                 sigma=Covarence_mat(param,j)
                 active_param=fun.n_neg_lest(active_param)
         #change temperature
-        if nu.min([1,nu.exp(-(chi[j-1]-chi[j])/(2.*SA(T_cuurent+1,option.itter/(cpu),T_start,T_stop))-(chi[j-1]+chi[j])/(2.*SA(T_cuurent,option.itter/(cpu),T_start,T_stop)))/T])>nu.random.rand():
-            T_cuurent+=1
+        if nu.min([1,nu.exp(-(chi[j-1]-chi[j])/(2.*SA(T_cuurent+1,option.burnin,T_start,T_stop))-(chi[j-1]+chi[j])/(2.*SA(T_cuurent,option.burnin,T_start,T_stop)))/T])>nu.random.rand():
+            if j>option.burnin and T_cuurent!=option.burnin:
+                T_cuurent=option.burnin
+            else:
+                T_cuurent+=1
             Nexchange_ratio+=1   
         #make sure the change temp rate is aroudn 2%
         if Nexchange_ratio/(Nacept+Nreject)>.02:
@@ -524,25 +522,25 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q_talk,q=None):
         elif Nexchange_ratio/(Nacept+Nreject)<.005:
             T=T/1.05
         #change temperature schedual
-        if j%50==0:
+        '''if j%50==0:
             if Nacept/(Nacept+Nreject)>.50:
                 T_start+=.1
                 T_stop+=.1
             elif Nacept/(Nacept+Nreject)<.25:
                 T_start-=.1
                 T_stop-=.1
-                
+                '''       
         
-        #if .001>nu.random.rand() and j>500: #every hundred itterations
-        #    a=nu.exp((mybest-chibest.value)/2.0)
-        #    if a>1: #accept change in param
-        #        #print j
-        #        chi[j]=nu.copy(chibest.value)
-        #        mybest=nu.copy(chibest.value)
-        #        print "swiched places. I'm %i" %current_process().ident
-        #        for k in range(len(active_param)): 
-        #            param[j,k]=nu.copy(parambest[k])
-        #            active_param[k]=nu.copy(parambest[k])
+        if .001>nu.random.rand() and j>option.burnin: #every hundred itterations
+            a=nu.exp((mybest-chibest.value)/2.0)
+            if a>1: #accept change in param
+                #print j
+                chi[j]=nu.copy(chibest.value)
+                mybest=nu.copy(chibest.value)
+                #print "swiched places. I'm %i" %current_process().ident
+                for k in range(len(active_param)): 
+                    param[j,k]=nu.copy(parambest[k])
+                    active_param[k]=nu.copy(parambest[k])
                     
                        
         j+=1
