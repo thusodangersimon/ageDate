@@ -30,7 +30,8 @@
 
 from Age_date import *
 from scipy.cluster import vq as sci
-from scipy.stats import levene, f_oneway,kruskal
+#from scipy.stats import levene, f_oneway,kruskal
+from anderson_darling import anderson_darling_k as ad_k
 a=nu.seterr(all='ignore')
 
 
@@ -56,11 +57,14 @@ def RJ_multi(data,burnin,k_max=16,cpus=cpu_count()):
     while True: 
         if q_final.qsize()>=cpus:
             conver_test=[]
-            print 'Starting convergence test'
             for i in range(cpus):
                 rank[i],size[i],temp=q_final.get()
                 conver_test.append(temp)
-            #calculate W and B for convergence for all bins with len>1000
+            #make sure recived chains are from different processes
+            if not all(nu.sort(rank)==range(cpus)):
+                pass#continue
+            else:
+                print 'Starting convergence test'
             key_to_use=conver_test[0].keys()
             for i in conver_test:
                 for j in key_to_use:
@@ -77,12 +81,12 @@ def RJ_multi(data,burnin,k_max=16,cpus=cpu_count()):
                     option.value=False
                     break         
                 else: #doesn't seem like convergence works use other methods to stop chain
-                    continue
+                    #continue
                     for j in key_to_use:
                         temp=0
                         for i in conver_test:
                             temp+=len(i[j])
-                        if temp>10**5:
+                        if temp>5*10**5:
                             sys.stdout.flush()
                             while q_final.qsize()>0:
                                 q_final.get()
@@ -93,13 +97,6 @@ def RJ_multi(data,burnin,k_max=16,cpus=cpu_count()):
 
         else:
             Time.sleep(5)
-    '''t=Time.time()
-    while t+600>Time.time():
-        Time.sleep(5)
-        print '%i seconds left' %(round(t+600-Time.time()))
-        sys.stdout.flush()
-    #print 'Starting 5 min wait'
-    #Time.sleep(300)'''
     while q_final.qsize()>0: #clear final queue
         try:
             a= q_final.get(timeout=1)
@@ -130,7 +127,7 @@ def RJ_multi(data,burnin,k_max=16,cpus=cpu_count()):
     fac=[]
     for i in bayes_fac.keys():
         if bayes_fac[i].shape[0]>0:
-            #bayes_fac[i][bayes_fac[i]>1]=1. #accept critera is min(1,alpha)
+            bayes_fac[i][bayes_fac[i]>1]=1. #accept critera is min(1,alpha)
             fac.append([int(i),nu.mean(nu.nan_to_num(bayes_fac[i])),len(bayes_fac[i])])
             #remove 1st bin for now#############
     fac=nu.array(fac)
@@ -471,7 +468,20 @@ def Convergence_tests(param,keys,n=1000):
     for i in param:
         for j in keys:
             i[j]=nu.array(i[j])
-    #try kustkal test
+    ad_k
+    D_result={}
+    for i in keys:
+        for k in range(param[0][i].shape[1]):
+            samples='' 
+            for j in range(len(param)):
+                samples+='param['+str(j)+']["'+i+'"][-'+str(int(n))+':,'+str(k)+'],'
+        D_result[i]=eval('ad_k('+samples[:-1]+')')[-1]>.05
+    if any(D_result.values()):
+        print 'A-D test says they are the same'
+        return True
+    else:
+        return False
+    '''#try kustkal test
     A_result={}
     out=False
     for i in keys:
@@ -488,14 +498,11 @@ def Convergence_tests(param,keys,n=1000):
         else:
             print '%i out of %i parameters have same means' %(sum( A_result[i]>.05),
                                                               param[0][i].shape[1])
-                                                             
-    
-
     #do ANOVA to see if means are same
     if out:
         L_result={}
         out=False
-    #turn into an array
+        #turn into an array
         for i in keys:
             param[0][i]=nu.array(param[0][i])
             L_result[i]=nu.zeros(param[0][i].shape[1])
@@ -509,8 +516,8 @@ def Convergence_tests(param,keys,n=1000):
                 return True
             else:
                 print '%i out of %i parameters have same varance' %(sum( L_result[i]>.05),
-                                                                param[0][i].shape[1])
-    return False
+                                                                param[0][i].shape[1])'''
+    #return False
 
 
 def plot_model(param,data,bins):
@@ -535,8 +542,7 @@ def plot_model(param,data,bins):
     lab.plot(data[:,0],out)
     return nu.vstack((data[:,0],out)).T
 #return nu.vstack((model['wave'],out)).T
-
-
+ 
 
 #####classes############# 
 class RJMC_func:
