@@ -177,6 +177,13 @@ def data_match_all(data):
             model['wave']=nu.copy(spect[:,i])
         else:
             model[str(i-1)]=nu.copy(spect[:,i])
+    #see if spectral lib is square ie has all combo's of age and metals
+    lib_vals=get_fitting_info(lib_path)
+    metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
+    age_unq=nu.unique(lib_vals[0][:,1])
+    if not lib_vals[0].shape[0]==metal_unq.shape[0]*age_unq[0]:
+        print 'Warrning: Not every combination of age and metalicty avalible in library'
+        print 'May cause problems with fitting'
 
     model=data_match_new(data,model,spect[0,:].shape[0]-1)
     out=nu.zeros([model['0'].shape[0],len(model.keys())+1])
