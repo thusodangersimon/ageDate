@@ -36,6 +36,7 @@ from interp_func import *
 from spectra_func import *
 from scipy.optimize import nnls
 from scipy.optimize import fmin_l_bfgs_b as fmin_bound
+from scipy.special import expi
 import time as Time
 
 ###spectral lib stuff####
@@ -298,8 +299,12 @@ def nn_ls_fit(data,max_bins=16,min_norm=10**-4,spect=spect):
     model=data_match_new(data,model,spect[0,:].shape[0]-1)
     index=nu.int64(model.keys())
     
-    #nnls fit
-    N,chi=nnls(nu.array(model.values()).T,data[:,1])
+    #nnls fit handles uncertanty now 
+    if data.shape[1]==2:
+        N,chi=nnls(nu.array(model.values()).T[:,nu.argsort(nu.int64(nu.array(model.keys())))],data[:,1])
+    elif data.shape[1]==3:
+        N,chi=nnls(nu.array(model.values()).T[:,nu.argsort(nu.int64(nu.array(model.keys())))]/nu.tile(data[:,2],(bins,1)).T,data[:,1]/data[:,2])
+    #N,chi=nnls(nu.array(model.values()).T,data[:,1])
     N=N[index.argsort()]
     
     #check if above max number of binns
@@ -348,6 +353,28 @@ def dict_size(dic):
         size+=len(dic[i])
 
     return size
+
+def dust(param,model,tau_ism,tau_bc):
+    #does 2 componet dust calibration model following charlot and fall 2000
+    t_bc=7.4771212547196626 #log10(.03*10**9)
+    bins=int(param.shape[0]/3.)
+    if model['wave'].mean()>9000 or model['wave'].mean()<3000:
+        print 'Warring: dust calculations may be wrong'
+    for i in range(bins):
+        if param[i+1]<=t_bc: #choose which combo of dust models to use
+            #fdust*fbc
+            model[str(i)]=f_dust(tau_ism)*f_dust(tau_bc)*model[str(i)]
+        else:
+            #fdust
+            model[str(i)]=f_dust(tau_ism)*model[str(i)]
+    return model
+
+def f_dust(tau):
+    #dust extinction functin
+    if tau<.03: #this is only valid when mean of obs wavelength is close to 5500 angstroms
+        return 1/(2.*tau)*(1+(tau-1)*nu.exp(-tau)-tau**2*expi(tau))
+    else:
+        return nu.exp(-tau)
 
 #####classes############# 
 class PMC_func:
