@@ -501,7 +501,7 @@ def plot_model(param,data,bins):
     metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
     age_unq=nu.unique(lib_vals[0][:,1])
     #check to see if metalicity is in log range (sort of)
-    if any(param[range(0,bins*3,3)]>metal_unq.max() or param[range(0,bins*3,3)]<metal_unq.min()):
+    if any(param[range(0,bins*3,3)]>metal_unq.max()) or any(param[range(0,bins*3,3)]<metal_unq.min()):
         print 'taking log of metalicity'
         param[range(0,bins*3,3)]=nu.log10(param[range(0,bins*3,3)])
     model=get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins)  
