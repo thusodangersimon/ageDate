@@ -35,8 +35,9 @@ from multiprocessing import *
 from interp_func import *
 from spectra_func import *
 from scipy.optimize import nnls
+from scipy.optimize.minpack import leastsq
 from scipy.optimize import fmin_l_bfgs_b as fmin_bound
-from scipy.special import expi
+from scipy.special import exp1 
 import time as Time
 
 ###spectral lib stuff####
@@ -238,28 +239,42 @@ def check(param,metal_unq, age_unq,bins): #checks if params are in bounds
 
 def normalize(data,model):
     #normalizes the model spectra so it is closest to the data
-    return sum(data[:,1]*model)/sum(model**2)
-
-def N_normalize(data, model,bins):
-    #takes the norm for combined data and does a minimization for best fits value
+    if data.shape[1]==2:
+        return nu.sum(data[:,1]*model)/nu.sum(model**2)
+    elif data.shape[1]==3:
+        return nu.sum(data[:,1]*model/data[:,2]**2)/nu.sum((model/data[:,2])**2)
+    else:
+        print 'wrong data shape'
+        raise(KeyError)
     
-    #match data axis with model
+def N_normalize(data,model,bins):
+        #takes the norm for combined data and does a minimization for best fits value
+    
+        #match data axis with model
     model=data_match_new(data,model,bins)
     #do non-negitave least squares fit
     if bins==1:
         N=[normalize(data,model['0'])]
-        return N, N[0]*model['0'],sum((data[:,1]-N[0]*model['0'])**2)
+        return N, N[0]*model['0'],nu.sum((data[:,1]-N[0]*model['0'])**2)
     try:
-        N,chi=nnls(nu.array(model.values()).T[:,nu.argsort(nu.int64(nu.array(model.keys())))],data[:,1])
+        if data.shape[1]==2:
+            N,chi=nnls(nu.array(model.values()).T[:,nu.argsort(nu.int64(nu.array(model.keys())))],data[:,1])
+        elif data.shape[1]==3:
+            N,chi=nnls(nu.array(model.values()).T[:,nu.argsort(nu.int64(nu.array(model.keys())))]/nu.tile(data[:,2],(bins,1)).T,data[:,1]/data[:,2]) #from P Dosesquelles1, T M H Ha1, A Korichi1, F Le Blanc2 and C M Petrache 2009
+        else:
+            print 'wrong data shape'
+            raise(KeyError)
+
     except RuntimeError:
         print "nnls error"
         N=nu.zeros([len(model.keys())])
         chi=nu.inf
+
     index=nu.nonzero(N==0)[0]
     N[index]+=10**-6
     index=nu.int64(model.keys())
     return N,nu.sum(nu.array(model.values()).T*N[index],1),chi**2
-
+    
 def chain_gen_all(means,metal_unq, age_unq,bins,sigma):
     #creates new chain for MCMC, does log spacing for metalicity
     #lin spacing for everything else, runs check on values also
@@ -273,9 +288,14 @@ def chain_gen_all(means,metal_unq, age_unq,bins,sigma):
                 print "I'm %i and I'm stuck" %current_process().ident
                 print means,sigma
                 raise
-    #N=sum(means.take(range(2,bins*3,3)))
-    #for i in range(2,bins*3,3):#normalize normalization to 1
-    #    means[i]=means[i]/N
+
+    return out
+
+def chain_gen_dust(means,sigma):
+    #creates new chain for MCMC, for dust componet
+    out=nu.random.multivariate_normal(means,sigma)
+    while (out[0]<0 or out[1]<0) or (out[0]>5. or out[1]>5.):
+        out=nu.random.multivariate_normal(means,sigma)
 
     return out
 
@@ -303,7 +323,7 @@ def nn_ls_fit(data,max_bins=16,min_norm=10**-4,spect=spect):
     if data.shape[1]==2:
         N,chi=nnls(nu.array(model.values()).T[:,nu.argsort(nu.int64(nu.array(model.keys())))],data[:,1])
     elif data.shape[1]==3:
-        N,chi=nnls(nu.array(model.values()).T[:,nu.argsort(nu.int64(nu.array(model.keys())))]/nu.tile(data[:,2],(bins,1)).T,data[:,1]/data[:,2])
+        N,chi=nnls(nu.array(model.values()).T[:,nu.argsort(nu.int64(nu.array(model.keys())))]/nu.tile(data[:,2],(bins,1)).T,data[:,1]/data[:,2]) #from P Dosesquelles1, T M H Ha1, A Korichi1, F Le Blanc2 and C M Petrache 2009
     #N,chi=nnls(nu.array(model.values()).T,data[:,1])
     N=N[index.argsort()]
     
@@ -354,27 +374,32 @@ def dict_size(dic):
 
     return size
 
-def dust(param,model,tau_ism,tau_bc):
+def dust(param,model):
     #does 2 componet dust calibration model following charlot and fall 2000
     t_bc=7.4771212547196626 #log10(.03*10**9)
-    bins=int(param.shape[0]/3.)
+    if param[-2:].sum()<=0. or param[-2]<0:
+        return model
+    bins=int((param.shape[0]-2)/3.)
     if model['wave'].mean()>9000 or model['wave'].mean()<3000:
         print 'Warring: dust calculations may be wrong'
     for i in range(bins):
         if param[i+1]<=t_bc: #choose which combo of dust models to use
             #fdust*fbc
-            model[str(i)]=f_dust(tau_ism)*f_dust(tau_bc)*model[str(i)]
+            if param[-1]<0:
+                return model
+            model[str(i)]=f_dust(param[-2]*(model['wave']/5500.)**(-.7))*f_dust(param[-1]*(model['wave']/5500.)**(-.7))*model[str(i)]
         else:
             #fdust
-            model[str(i)]=f_dust(tau_ism)*model[str(i)]
+            model[str(i)]=f_dust(param[-2]*(model['wave']/5500.)**(-.7))*model[str(i)]
     return model
 
-def f_dust(tau):
+def f_dust(tau): #need to make work when tau is an array
     #dust extinction functin
-    if tau<.03: #this is only valid when mean of obs wavelength is close to 5500 angstroms
-        return 1/(2.*tau)*(1+(tau-1)*nu.exp(-tau)-tau**2*expi(tau))
-    else:
-        return nu.exp(-tau)
+    out=tau*0
+    out[tau<=1]=1/(2.*tau[tau<=1])*(1+(tau[tau<=1]-1)*nu.exp(-tau[tau<=1])-tau[tau<=1]**2*exp1(tau[tau<=1]))
+    out[tau>1]=nu.exp(-tau[tau>1])
+        
+    return out
 
 #####classes############# 
 class PMC_func:
@@ -410,11 +435,12 @@ class PMC_func:
                 model['wave']+=model[ii]*param[index[int(ii)]]
         return nu.sum((self.data[:,1]-model['wave'])**2)
 
-    def func_N_norm(self,param):
+    def func_N_norm(self,param,dust_param):
         #returns chi and N norm best fit params
         if len(param)!=self.bins*3:
             return nu.nan
         model=get_model_fit_opt(param,self.lib_vals,self.age_unq,self.metal_unq,self.bins)  
+        model=dust(nu.hstack((param,dust_param)),model) #dust
         N,model,chi=N_normalize(self.data, model,self.bins)
     
         return chi,N
@@ -466,6 +492,30 @@ class PMC_func:
         except IndexError:
             out=param
         return out
+
+def plot_model(param,data,bins):
+    import pylab as lab
+    #takes parameters and returns spectra associated with it
+    lib_vals=get_fitting_info(lib_path)
+    lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0])
+    metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
+    age_unq=nu.unique(lib_vals[0][:,1])
+    #check to see if metalicity is in log range (sort of)
+    if any(param[range(0,bins*3,3)]>metal_unq.max() or param[range(0,bins*3,3)]<metal_unq.min()):
+        print 'taking log of metalicity'
+        param[range(0,bins*3,3)]=nu.log10(param[range(0,bins*3,3)])
+    model=get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins)  
+    model=dust(param,model) 
+    model=data_match_new(data,model,bins)
+    index=xrange(2,bins*3,3)
+    for ii in model.keys():
+        model[ii]=model[ii]*param[index[int(ii)]]
+    index=nu.int64(model.keys())
+    out=nu.sum(nu.array(model.values()).T,1)
+    lab.plot(data[:,0],out,label='Model')
+    lab.plot(data[:,0],data[:,1],label='Data')
+    lab.legend()
+    return nu.vstack((data[:,0],out)).T
 
 
 
