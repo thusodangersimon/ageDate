@@ -17,7 +17,7 @@ def MCMC_multi(data,itter,bins,cpus=cpu_count(),burnin=5000):
 
     i=Value('i', 0)
 
-    parambest=Array('d',nu.zeros([3*bins]))
+    parambest=Array('d',nu.zeros([3*bins+2]))
 
     option=Value('b',True)
     option.burnin=burnin
@@ -51,7 +51,7 @@ def MCMC_multi(data,itter,bins,cpus=cpu_count(),burnin=5000):
     #outsigma={}
     #outrate,outparam,outchi={},{},{}
 
-    outparam,outchi=nu.zeros([2,3*bins]),nu.array([nu.inf])
+    outparam,outchi=nu.zeros([2,3*bins+2]),nu.array([nu.inf])
     for ii in temp:
         outparam=nu.concatenate((outparam,ii[0][~nu.isinf(ii[1]),:]
                                  ),axis=0)
@@ -104,7 +104,8 @@ def MCMC_comunicate(data,bins,itter):
                 #active_param[k]=nu.random.random()*age_unq.ptp()+age_unq[0] #random place anywhere
             else: #norm
                 active_param[k]=nu.random.random()*1000
-
+    #dust
+    active_param[-2:]=nu.random(2)*5.
     chi=[]
     #chiappend=chi.append
     sigma=nu.identity(bins*3)*nu.tile(
@@ -163,246 +164,6 @@ def MCMC_comunicate(data,bins,itter):
                     pass
 
     return outprep(nu.array(param)),nu.array(chi)
-
-class MC_func:
-    #compact MCMC function, can add new parts by calling in program
-    def __init__(self,data,bins,iter_stop,spect=spect):
-        #initalize bounds
-        data_match_all(data)
-        self.data=nu.copy(data)
-        self.data[:,1]=self.data[:,1]*1000
-        lib_vals=get_fitting_info(lib_path)
-        lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
-        metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
-        age_unq=nu.unique(lib_vals[0][:,1])
-        self.lib_vals=lib_vals
-        self.age_unq= age_unq
-        self.metal_unq,self.bins,self.spect=metal_unq,bins,spect
-        self.bounds()
-        #create random seed
-        seed = open("/dev/random")
-        rand_int = 0
-        for i in seed.read(4):
-            rand_int <<= 8
-            rand_int += ord(i)
-        print rand_int
-        self.seed=rand_int
-        nu.random.seed(self.seed)
-        #accept and reject
-        self.Nreject=1.
-        self.Naccept=1.
-        self.iteration=1.
-        self.iter_stop=iter_stop*.1
-        #sigma for step
-        self.non_N_index=nu.array([range(1,bins*3,3),range(0,bins*3,3)]).ravel()
-        #temperature stuff
-        self.T,self.T_start,self.T_stop=9.905971092132212,1.8,.9
-        self.Nexchange_ratio,self.T_cuurent=0.,0.
-
-    def func(self,param): #changes param vlaues if not in range
-        if len(param)!=self.bins*3:
-            return nu.nan
-        if check(param,self.metal_unq, self.age_unq,self.bins): #make sure params are in correct range
-            for i in xrange(len(self.bounds)): #find which is out and fix
-                if self.bounds[i][0]>param[i]: #if below bounds
-                    param[i]=nu.copy(self.bounds[i][0])
-                if self.bounds[i][1]<param[i]: #if above bounds
-                    param[i]=nu.copy(self.bounds[i][1])
-
-        model=get_model_fit_opt(param,self.lib_vals,self.age_unq,self.metal_unq,self.bins)  
-    #model=data_match_new(data,model,bins)
-        index=xrange(2,self.bins*3,3)
-        model['wave']= model['wave']*.0
-        for ii in model.keys():
-            if ii!='wave':
-                model['wave']+=model[ii]*param[index[int(ii)]]
-        return nu.sum((self.data[:,1]-model['wave'])**2)
-
-    def func_N_norm(self,param):
-        #returns chi and N norm best fit params
-        if len(param)!=self.bins*3:
-            return nu.nan
-        model=get_model_fit_opt(param,self.lib_vals,self.age_unq,self.metal_unq,self.bins)  
-        N,model,chi=N_normalize(self.data, model,self.bins)
-    
-        return chi,N
- 
-    def min_bound(self):
-        #outputs an array of minimum values for parameters
-        out=nu.zeros(self.bins*3)
-        bin=nu.log10(nu.linspace(10**self.age_unq.min(),10**self.age_unq.max(),self.bins+1))
-        bin_index=0
-        for k in range(self.bins*3):
-            if any(nu.array(range(0,self.bins*3,3))==k): #metal
-                out[k]=self.metal_unq[0]
-            elif any(nu.array(range(1,self.bins*3,3))==k): #age
-                out[k]=bin[bin_index]
-                bin_index+=1
-            elif any(nu.array(range(2,self.bins*3,3))==k): #norm
-                out[k]=0.0
-        return out
-
-    def max_bound(self):
-        #outputs an array of maximum values for parameters
-        out=nu.zeros(self.bins*3)
-        bin=nu.log10(nu.linspace(10**self.age_unq.min(),10**self.age_unq.max(),self.bins+1))
-        bin_index=1
-        for k in range(self.bins*3):
-            if any(nu.array(range(0,self.bins*3,3))==k): #metal
-                out[k]=self.metal_unq[-1]
-            elif any(nu.array(range(1,self.bins*3,3))==k): #age
-                out[k]=bin[bin_index]
-                bin_index+=1
-            elif any(nu.array(range(2,self.bins*3,3))==k): #norm
-                out[k]=nu.inf
-        return out
-
-    def bounds(self):
-        #puts bounds into a easy reconizible format
-        Min=self.min_bound()
-        Max=self.max_bound()
-        out=[]
-        for i in range(len(Min)):
-            out.append((Min[i],Max[i]))
-        self.bounds=nu.copy(out)
-        return out
-
-    def n_neg_lest(self,param):
-        #does bounded non linear fit
-        try:
-            out=fmin_bound(self.func,param, bounds = self.bounds,approx_grad=True)[0]
-        except IndexError:
-            out=param
-        return out
-    
-    def Mh_criteria(self,chiold,param_new,param_old):
-        #does metropolis hastings critera works with PMC class
-        chinew,param_new[range(2,self.bins*3,3)]=self.func_N_norm(param_new)
-        a=nu.exp((chiold-chinew)*100)
-        if min([1,a])>nu.random.rand(): #accepted
-            #out_param[-1]=nu.copy(out_param[-2])
-            #chiold[-1]=nu.copy(chiold[-2])
-            self.Naccept+=1
-        else:
-            self.Nreject+=1
-            chinew=nu.copy(chiold)
-            param_new=nu.copy(param_old)
-        self.iteration+=1
-
-        return chinew,param_new
-
-    def SA(self,chiold,param_new,param_old):
-        #does simulated anniling
-        self.iteration+=1.
-        chinew,param_new[range(2,self.bins*3,3)]=self.func_N_norm(param_new)
-        a=nu.exp((chiold-chinew)/2)
-        if a>=1: #acepted
-            #param[j,:]=nu.copy(active_param)
-            self.Naccept+=1.
-        else:
-            if nu.exp(nu.log(a)/SA(self.T_cuurent,self.iter_stop,self.T_start,self.T_stop))>nu.random.rand():#false accept
-                #param[j,:]=nu.copy(active_param)
-               self.Naccept+=1.
-               print 'false accept',chiold,chinew,SA(self.T_cuurent,self.iter_stop,self.T_start,self.T_stop)
-            else:
-                chinew=nu.copy(chiold)
-                param_new=nu.copy(param_old)
-                self.Nreject+=1
-         #change temperature
-        if nu.min([1,nu.exp(nu.log(a)*(1./SA(self.T_cuurent+1,self.iter_stop,self.T_start,self.T_stop))-1/SA(self.T_cuurent,self.iter_stop,self.T_start,self.T_stop))/self.T])>nu.random.rand():
-            self.T_cuurent+=1
-            self.Nexchange_ratio+=1.  
-        #if self.Naccept/(self.Naccept+self.Nreject)>.6:
-        #    self.T_cuurent+=1
-        #make sure the change temp rate is aroudn 2%
-        if self.Nexchange_ratio/(self.Naccept+self.Nreject)>.02:
-            self.T=self.T*1.05
-        elif self.Nexchange_ratio/(self.Naccept+self.Nreject)<.005:
-            self.T=self.T/1.05
-        #change temperature schedual
-        '''if self.iteration%50==0:
-            if self.Naccept/(self.Naccept+self.Nreject)>.50:
-                if self.T_start>0:
-                    self.T_start-=.1
-                #self.T_stop+=.1
-            elif self.Naccept/(self.Naccept+self.Nreject)<.25:
-                self.T_start+=.1
-                #self.T_stop-=.1
-                '''       
-        
-        #if .001>nu.random.rand() and j>500: #every hundred itterations
-        #    a=nu.exp((mybest-chibest.value)/2.0)
-        #    if a>1: #accept change in param
-        #        #print j
-        #        chi[j]=nu.copy(chibest.value)
-        #        mybest=nu.copy(chibest.value)
-        #        print "swiched places. I'm %i" %current_process().ident
-        #        for k in range(len(active_param)): 
-        #            param[j,k]=nu.copy(parambest[k])
-        #            active_param[k]=nu.copy(parambest[k])
-        return chinew,param_new
-
-    def New_chain(self,old_chain,sigma,Type='norm'):
-        #selecs new chain
-        if Type=='norm':
-            out=chain_gen_all(old_chain,self.metal_unq,self.age_unq,self.bins,sigma)
-
-        elif Type=='stnt':
-            out=multivariate_student(old_chain,sigma,2.3)
-            t=Time.time()
-            while check(out,self.metal_unq,self.age_unq,self.bins):
-                out=multivariate_student(old_chain,sigma,2.3)
-                if Time.time()-t>2.:
-                    print 'taking to long'
-                    sigma=sigma/1.05
-        else: 
-            print 'that distribution is not ready yet'
-            raise
-        return out
-
-    def Step(self,sigma,param,Type='scale'):
-        acc_rate=self.Naccept/(self.Naccept+self.Nreject+.0)
-        #print acc_rate
-        if Type=='adapt': #change sigma with acceptance rate
-            if acc_rate>.50 and all(sigma.diagonal()[self.non_N_index]>=10**-5): 
-               #too few aceptnce decrease sigma
-                sigma=sigma/1.05
-            elif acc_rate<.25 and all(sigma.diagonal()[self.non_N_index]<2.): #not enough
-                sigma=sigma*1.05
-        elif Type=='cov': #use covarnence matrix
-                #take points that have changed only
-            temp=nu.array(param)
-            tsigma=Covarence_mat(temp[nu.abs(nu.diff(temp[:,0]))>0,:],temp.shape[0])
-            if nu.all(tsigma==0):
-                print 'chain not mixing'
-                sigma=sigma/1.05
-            else:
-                sigma=tsigma
-        elif Type=='scale':
-            if acc_rate<0.001:
-            # reduce by 90 percent
-                sigma= sigma*0.1
-            elif acc_rate<0.05:
-                # reduce by 50 percent
-                sigma=sigma* 0.5
-            elif acc_rate<0.2:
-                # reduce by ten percent
-                sigma= sigma*0.9
-            elif acc_rate>0.95:
-                # increase by factor of ten
-                sigma=sigma* 10.0
-            elif acc_rate>0.75:
-                # increase by double
-                sigma= sigma*2.0
-            elif acc_rate>0.5:
-                # increase by ten percent
-                sigma= sigma*1.1
-            else:
-                pass
-  
-        #self.Naccept,self.Nreject=1.,1.
-        return sigma
-
    
 def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     #does MCMC and reduices the false acceptance rate over a threshold
@@ -424,16 +185,17 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     age_unq=nu.unique(lib_vals[0][:,1])
 
     param=nu.zeros([option.itter+1,len(parambest)])
-    active_param=nu.zeros(len(parambest))
-    
+    active_param=nu.zeros(len(parambest)-2)
+    active_dust=nu.random.rand(2)*5.
+
     bin=nu.log10(nu.linspace(10**age_unq.min(),10**age_unq.max(),bins+1))
     bin_index=0
     #start in random place
-    for k in xrange(len(parambest)):
-        if any(nu.array(range(0,len(parambest),3))==k):#metalicity
+    for k in xrange(len(active_param)):
+        if any(nu.array(range(0,len(active_param),3))==k):#metalicity
             active_param[k]=(nu.random.random()*metal_unq.ptp()+metal_unq[0])
         else:#age and normilization
-            if any(nu.array(range(1,len(parambest),3))==k): #age
+            if any(nu.array(range(1,len(active_param),3))==k): #age
                 #active_param[k]=nu.random.random() #random
                 active_param[k]=nu.random.random()*age_unq.ptp()/float(bins)+bin[bin_index] #random in bin
                 #active_param[k]=nu.mean([bin[bin_index],bin[1+bin_index]]) #mean position in bin
@@ -445,15 +207,16 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     chi=nu.zeros(option.itter+1)+nu.inf
     sigma=nu.identity(len(active_param))*nu.tile(
                 [0.5,age_unq.ptp()*nu.random.rand(),1.],bins)
+    sigma_dust=nu.identity(2)*nu.random.rand()*2
     #try leastquares fit
     active_param=fun.n_neg_lest(active_param)
-    chi[0],active_param[range(2,bins*3,3)]=fun.func_N_norm(active_param)
-    param[0,:]=nu.copy(active_param)
+    chi[0],active_param[range(2,bins*3,3)]=fun.func_N_norm(active_param,active_dust)
+    param[0,:]=nu.copy(nu.hstack((active_param ,active_dust)))
     #parambest=nu.copy(active_param)
 
     mybest=nu.copy(chi[0])
-    for k in range(len(active_param)):
-        parambest[k]=nu.copy(active_param[k])
+    for k in range(len(param[0,:])):
+        parambest[k]=nu.copy(param[0,k])
     #stuff just for age_date
     #start MCMC
     #Nacept,Nreject=nu.ones(len(active_param)),nu.ones(len(active_param))
@@ -468,14 +231,15 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
             #print SA(T_cuurent,option.itter/(cpu),T_start,T_stop),T_cuurent,chi[j-1]
             sys.stdout.flush()
         active_param= chain_gen_all(active_param,metal_unq, age_unq,bins,sigma)
+        active_dust=chain_gen_dust(active_dust,sigma_dust)
         #bin_index=0
         #calculate new model and chi
-        chi[j],active_param[range(2,bins*3,3)]=fun.func_N_norm(active_param)
+        chi[j],active_param[range(2,bins*3,3)]=fun.func_N_norm(active_param,active_dust)
         #decide to accept or not
         a=nu.exp((chi[j-1]-chi[j])/SA(T_cuurent,option.burnin,T_start,T_stop))
         #metropolis hastings
         if a>=nu.random.rand(): #acepted and false accept
-            param[j,:]=nu.copy(active_param)
+            param[j,:]=nu.copy(nu.hstack((active_param ,active_dust)))
             Nacept+=1
             if T_start>T_stop:
                 T_start=min(chi)
@@ -489,12 +253,13 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
                 sys.stdout.flush()
                 
                 chibest.value=nu.copy(chi[j])
-                for k in xrange(len(active_param)):
-                    parambest[k]=nu.copy(active_param[k])
+                for k in xrange(len(param[j,:])):
+                    parambest[k]=nu.copy(param[j,k])
                 
         else: #reject
             param[j,:]=nu.copy( param[j-1,:])
-            active_param=nu.copy( param[j-1,:])
+            active_param=nu.copy( param[j-1,:-2])
+            active_dust=nu.copy( param[j-1,-2:])
             chi[j]=nu.copy(chi[j-1])
             Nreject+=1
  
@@ -502,13 +267,21 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
             #k=random.randint(0,len(sigma)-1)
             if Nacept/(Nacept+Nreject)>.50 and all(sigma.diagonal()>=10**-5): 
                 #too few aceptnce decrease sigma
-                sigma=sigma/1.05
+                sigma/=1.05
+                sigma_dust/=1.05
             elif Nacept/(Nacept+Nreject)<.25 and all(sigma.diagonal()[non_N_index]<10): #not enough
-                sigma=sigma*1.05
+                sigma*=1.05
+                sigma_dust*=1.05
         else: #use covarnence matrix
             if j%500==0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
-                sigma=Covarence_mat(param,j)
-                active_param=fun.n_neg_lest(active_param)
+                sigma=Covarence_mat(param[:,:-2],j)
+                #check if bellow 10**-5
+                #if any(sigma.diagonal()<10**-5):
+                #    for k in range(sigma.shape[0]):
+                #       if sigma[k,k]<10**-5:
+                #           sigma[k,k]=10**-5
+                sigma_dust==Covarence_mat(param[:,-2:],j)
+                #active_param=fun.n_neg_lest(active_param)
         #change temperature
         if nu.min([1,nu.exp(-(chi[j-1]-chi[j])/(2.*SA(T_cuurent+1,option.burnin,T_start,T_stop))-(chi[j-1]+chi[j])/(2.*SA(T_cuurent,option.burnin,T_start,T_stop)))/T])>nu.random.rand():
             if j>option.burnin and T_cuurent!=option.burnin:
@@ -577,13 +350,13 @@ def Covarence_mat(param,j):
 
 def outprep(param):
     #changes metals from log to normal
-    for i in range(0,param.shape[1],3):
+    for i in range(0,param.shape[1]-2,3):
         param[:,i]=10**param[:,i]
         param[:,i+2]=param[:,i+2]/1000.
         
     return param
 
-def MCMC_vanila(data,bins,i,chibest,parambest,option,q=None):
+def MCMC_vanila(data,bins,i,chibest,parambest,option,q=None): #depricated
     #does MCMC parameter estimation with a floating step size till 10k iterations
     #itter needs to be a array of normaly distrbuted numbers
     #so there are no problems with multiprocessing
