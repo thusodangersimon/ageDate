@@ -128,6 +128,76 @@ def own_array_spect(age,metal=None,norm=None,Norm_max=5,lam_min=0,lam_max=nu.inf
 
     return out,info_out,norm
 
+def dust_iterp_spec(bins,func='flat', lam_min=0,
+                   lam_max=nu.inf,slope=None,lib_path='/home/thuso/Phd/Spectra_lib/'):
+    ##does everything from create_spectra but values not only from libary
+    #also adds dust absorption returns specrtra,info in ssp lib fmt, weight, dust(tau_ism,tau_BC)
+    from Age_date import get_model_fit_opt,dust
+    lib_vals=get_fitting_info(lib_path)
+    lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0])
+    metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
+    age_unq=nu.unique(lib_vals[0][:,1])
+    if metal_unq.size*age_unq.size==lib_vals[0].shape[0]: #if not lib not square
+        square=True
+    else:
+        square=False
+        from Age_RJMCMC import Check
+    #generate random parameters
+    while True:
+        age=nu.random.rand(bins)*age_unq.ptp()+age_unq.min()
+        metal=nu.random.rand(bins)*metal_unq.ptp()+metal_unq.min()
+        age.sort()
+        #generate normilization according to function
+        if func=='flat':
+            norm=nu.ones(bins)
+        elif func=='slope':
+            norm=slope*age
+        elif func=='norm':
+            norm=5*nu.exp(-(age-8.5)**2/(2))
+        elif func=='expo':
+            pass
+        elif func=='sinc':
+            pass
+        elif func=='stnt':
+            #double peak
+            norm=5*(1+((age-8.5)/.05)**2/.4)**(-(.4+1)/2)+(1+((age-5.5)/.05)**2/.4)**(-(.4+1)/2)
+        if bins==1:
+            norm[0]=1.
+        #turn params into standard format
+        param=nu.zeros(len(age)*3)
+        index=0
+        for i in range(0,len(age)*3,3):
+            param[i:i+3]=[metal[index],age[index],norm[index]]
+            index+=1
+        #if square then check to see if params in boundaries
+        if square:
+            break
+        else:
+            if not Check(param,metal_unq, age_unq,bins):
+                break
+    #get spectra
+    model=get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins)
+    #add dust
+    param=nu.hstack((param,nu.random.rand(2)*5.))
+    model=dust(param,model)
+    #get specified wavelenght range
+    index=nu.nonzero(nu.logical_and(model['wave']>=lam_min,model['wave']<=lam_max))[0]
+    #combine and apply wavelength range
+    out=nu.zeros([len(index),2])
+    for i in model.keys():
+        if i=='wave':
+            out[:,0]=model[i][index]
+            continue
+        out[:,1]+=model[i][index]*param.take(xrange(2,len(param),3))[int(i)]
+    #turn age and metal into spect format
+    info_out=[]
+    for i in xrange(len(age)):
+        info_out.append('ssp_%1.4f_%1.6f.spec' %(10**metal[i],age[i]))
+
+    #specrtra,info in ssp lib fmt, weight, dust(tau_ism,tau_BC)
+    return out,info_out,norm,param[-2:]
+
+
 def interp_create_spectra(bins,func='flat', lam_min=0,
                    lam_max=nu.inf,slope=None,lib_path='/home/thuso/Phd/Spectra_lib/'):
     #does everything from create_spectra but values not only from libary
@@ -138,32 +208,44 @@ def interp_create_spectra(bins,func='flat', lam_min=0,
     lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0])
     metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
     age_unq=nu.unique(lib_vals[0][:,1])
+    if metal_unq.size*age_unq.size==lib_vals[0].shape[0]: #if not lib not square
+        square=True
+    else:
+        square=False
+        from Age_RJMCMC import Check
     #generate random parameters
-    age=nu.random.rand(bins)*age_unq.ptp()+age_unq.min()
-    metal=nu.random.rand(bins)*metal_unq.ptp()+metal_unq.min()
-    age.sort()
-    #generate normilization according to function
-    if func=='flat':
-        norm=nu.ones(bins)
-    elif func=='slope':
-        norm=slope*age
-    elif func=='norm':
-        norm=5*nu.exp(-(age-8.5)**2/(2))
-    elif func=='expo':
-        pass
-    elif func=='sinc':
-        pass
-    elif func=='stnt':
-        #double peak
-        norm=5*(1+((age-8.5)/.05)**2/.4)**(-(.4+1)/2)+(1+((age-5.5)/.05)**2/.4)**(-(.4+1)/2)
-    if bins==1:
-        norm[0]=1.
-    #turn params into standard format
-    param=nu.zeros(len(age)*3)
-    index=0
-    for i in range(0,len(age)*3,3):
-        param[i:i+3]=[metal[index],age[index],norm[index]]
-        index+=1
+    while True:
+        age=nu.random.rand(bins)*age_unq.ptp()+age_unq.min()
+        metal=nu.random.rand(bins)*metal_unq.ptp()+metal_unq.min()
+        age.sort()
+        #generate normilization according to function
+        if func=='flat':
+            norm=nu.ones(bins)
+        elif func=='slope':
+            norm=slope*age
+        elif func=='norm':
+            norm=5*nu.exp(-(age-8.5)**2/(2))
+        elif func=='expo':
+            pass
+        elif func=='sinc':
+            pass
+        elif func=='stnt':
+            #double peak
+            norm=5*(1+((age-8.5)/.05)**2/.4)**(-(.4+1)/2)+(1+((age-5.5)/.05)**2/.4)**(-(.4+1)/2)
+        if bins==1:
+            norm[0]=1.
+        #turn params into standard format
+        param=nu.zeros(len(age)*3)
+        index=0
+        for i in range(0,len(age)*3,3):
+            param[i:i+3]=[metal[index],age[index],norm[index]]
+            index+=1
+        #if square then check to see if params in boundaries
+        if square:
+            break
+        else:
+            if not Check(param,metal_unq, age_unq,bins):
+                break
     #get spectra
     model=get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins)
     #get specified wavelenght range
