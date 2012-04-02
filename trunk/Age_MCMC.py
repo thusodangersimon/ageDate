@@ -172,8 +172,8 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     print "Starting processor %i" %current_process().ident
     #part on every modual wanting to fit the spectra
     #controls input and expot of files for fitt
-    data[:,1]=data[:,1]*1000  
-    fun=PMC_func(data,bins)
+    #data[:,1]=data[:,1]*1000  
+    fun=MC_func(data,bins)
     cpu=float(cpu_count())
     non_N_index=nu.array([range(1,bins*3,3),range(0,bins*3,3)]).ravel()
     #change random seed for random numbers for multiprocessing
