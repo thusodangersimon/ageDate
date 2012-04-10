@@ -46,6 +46,24 @@ lib_path='/home/thuso/Phd/Spectra_lib/'
 spect,info= load_spec_lib(lib_path)  
 
 
+
+def random_permute(seed):
+    #does random sequences to produice a random seed for parallel programs
+    ##middle squared method
+    seed=str(seed**2)
+    while len(seed)<7:
+        seed=str(int(seed)**2)
+    #do more randomization
+    ##multiply with carry
+    a,b,c=int(seed[-1]),2**32,int(seed[-3])
+    j=nu.random.random_integers(4,len(seed))
+    for i in range(int(seed[-j:-j+3])):
+        seed=(a*int(seed)+c)%b
+        c=(a*seed+c)/b
+        seed=str(seed)
+    return int(seed)
+
+               
 def find_az_box(param,age_unq,metal_unq):
     #find closest metal
     line=None
@@ -224,7 +242,8 @@ def data_match_new(data,model,bins):
     
 
 def check(param,metal_unq, age_unq,bins): #checks if params are in bounds
-    age=nu.log10(nu.linspace(10**age_unq.min(),10**age_unq.max(),bins+1))#linear spacing
+    #age=nu.log10(nu.linspace(10**age_unq.min(),10**age_unq.max(),bins+1))#linear spacing
+    age=nu.linspace(age_unq.min(),age_unq.max(),bins+1) #log spacing
     for j in xrange(bins):#check age and metalicity
         if any([metal_unq[-1],age[j+1]]<param[j*3:j*3+2]) or any([metal_unq[0],age[j]]>
                                                                  param[j*3:j*3+2]):
@@ -380,8 +399,6 @@ def dust(param,model):
     if param[-2:].sum()<=0. or param[-2]<0:
         return model
     bins=int((param.shape[0]-2)/3.)
-    if model['wave'].mean()>9000 or model['wave'].mean()<3000:
-        print 'Warring: dust calculations may be wrong'
     for i in range(bins):
         if param[i+1]<=t_bc: #choose which combo of dust models to use
             #fdust*fbc
@@ -396,39 +413,51 @@ def dust(param,model):
 def f_dust(tau): #need to make work when tau is an array
     #dust extinction functin
     out=tau*0
+    if nu.all(out==tau): #if all zeros
+        return tau*0+1.
+    if nu.any(tau<0): #if has negitive tau
+        return tau*0+nu.inf
     out[tau<=1]=1/(2.*tau[tau<=1])*(1+(tau[tau<=1]-1)*nu.exp(-tau[tau<=1])-tau[tau<=1]**2*exp1(tau[tau<=1]))
     out[tau>1]=nu.exp(-tau[tau>1])
-        
+
     return out
 
 #####classes############# 
-class PMC_func:
+class MC_func:
     #makes more like function, so input params and the chi is outputted
-    def __init__(self,data,bins,spect=spect):
+    def __init__(self,data,spect=spect):
         data_match_all(data)
-        self.data=data
+        #normalized so area under curve is 1 to keep chi values resonalble
+        self.norms=self.area_under_curve(data)*10**-5 #need to turn off
+        self.data=nu.copy(data)
+        self.data[:,1]=self.data[:,1]/self.norms
         lib_vals=get_fitting_info(lib_path)
         lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
         metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
         age_unq=nu.unique(lib_vals[0][:,1])
         self.lib_vals=lib_vals
         self.age_unq= age_unq
-        self.metal_unq,self.bins,self.spect=metal_unq,bins,spect
-        self.bounds()
+        self.metal_unq,self.spect=metal_unq,spect
+        #self.bounds()
+        
+    def area_under_curve(self,data):
+        #gives area under curve of the data spectra
+        return nu.trapz(data[:,1],data[:,0])
 
     def func(self,param):
-        if len(param)!=self.bins*3:
+        bins=param.shape[0]/3
+        if len(param)!=bins*3:
             return nu.nan
-        if check(param,self.metal_unq, self.age_unq,self.bins): #make sure params are in correct range
+        if check(param,self.metal_unq, self.age_unq,bins): #make sure params are in correct range
             for i in xrange(len(self.bounds)): #find which is out and fix
                 if self.bounds[i][0]>param[i]: #if below bounds
                     param[i]=nu.copy(self.bounds[i][0])
                 if self.bounds[i][1]<param[i]: #if above bounds
                     param[i]=nu.copy(self.bounds[i][1])
 
-        model=get_model_fit_opt(param,self.lib_vals,self.age_unq,self.metal_unq,self.bins)  
+        model=get_model_fit_opt(param,self.lib_vals,self.age_unq,self.metal_unq,bins)  
     #model=data_match_new(data,model,bins)
-        index=xrange(2,self.bins*3,3)
+        index=xrange(2,bins*3,3)
         model['wave']= model['wave']*.0
         for ii in model.keys():
             if ii!='wave':
@@ -437,48 +466,49 @@ class PMC_func:
 
     def func_N_norm(self,param,dust_param):
         #returns chi and N norm best fit params
-        if len(param)!=self.bins*3:
+        bins=param.shape[0]/3
+        if len(param)!=bins*3:
             return nu.nan
-        model=get_model_fit_opt(param,self.lib_vals,self.age_unq,self.metal_unq,self.bins)  
+        model=get_model_fit_opt(param,self.lib_vals,self.age_unq,self.metal_unq,bins)  
         model=dust(nu.hstack((param,dust_param)),model) #dust
-        N,model,chi=N_normalize(self.data, model,self.bins)
+        N,model,chi=N_normalize(self.data, model,bins)
     
         return chi,N
 
  
-    def min_bound(self):
+    def min_bound(self,bins):
         #outputs an array of minimum values for parameters
-        out=nu.zeros(self.bins*3)
-        bin=nu.log10(nu.linspace(10**self.age_unq.min(),10**self.age_unq.max(),self.bins+1))
+        out=nu.zeros(bins*3)
+        bin=nu.log10(nu.linspace(10**self.age_unq.min(),10**self.age_unq.max(),bins+1))
         bin_index=0
-        for k in range(self.bins*3):
-            if any(nu.array(range(0,self.bins*3,3))==k): #metal
+        for k in range(bins*3):
+            if any(nu.array(range(0,bins*3,3))==k): #metal
                 out[k]=self.metal_unq[0]
-            elif any(nu.array(range(1,self.bins*3,3))==k): #age
+            elif any(nu.array(range(1,bins*3,3))==k): #age
                 out[k]=bin[bin_index]
                 bin_index+=1
-            elif any(nu.array(range(2,self.bins*3,3))==k): #norm
+            elif any(nu.array(range(2,bins*3,3))==k): #norm
                 out[k]=0.0
         return out
 
-    def max_bound(self):
+    def max_bound(self,bins):
         #outputs an array of maximum values for parameters
-        out=nu.zeros(self.bins*3)
-        bin=nu.log10(nu.linspace(10**self.age_unq.min(),10**self.age_unq.max(),self.bins+1))
+        out=nu.zeros(bins*3)
+        bin=nu.log10(nu.linspace(10**self.age_unq.min(),10**self.age_unq.max(),bins+1))
         bin_index=1
-        for k in range(self.bins*3):
-            if any(nu.array(range(0,self.bins*3,3))==k): #metal
+        for k in range(bins*3):
+            if any(nu.array(range(0,bins*3,3))==k): #metal
                 out[k]=self.metal_unq[-1]
-            elif any(nu.array(range(1,self.bins*3,3))==k): #age
+            elif any(nu.array(range(1,bins*3,3))==k): #age
                 out[k]=bin[bin_index]
                 bin_index+=1
-            elif any(nu.array(range(2,self.bins*3,3))==k): #norm
+            elif any(nu.array(range(2,bins*3,3))==k): #norm
                 out[k]=nu.inf
         return out
 
-    def bounds(self):
-        Min=self.min_bound()
-        Max=self.max_bound()
+    def bounds(self,bins):
+        Min=self.min_bound(bins)
+        Max=self.max_bound(bins)
         out=[]
         for i in range(len(Min)):
             out.append((Min[i],Max[i]))
@@ -487,8 +517,9 @@ class PMC_func:
 
     def n_neg_lest(self,param):
         #does bounded non linear fit
+        bins=len(param)/3
         try:
-            out=fmin_bound(self.func,param, bounds = self.bounds,approx_grad=True)[0]
+            out=fmin_bound(self.func,param, bounds = self.bounds(bins),approx_grad=True)[0]
         except IndexError:
             out=param
         return out
