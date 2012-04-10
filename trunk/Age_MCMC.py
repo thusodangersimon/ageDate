@@ -172,7 +172,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     print "Starting processor %i" %current_process().ident
     #part on every modual wanting to fit the spectra
     #controls input and expot of files for fitt
-    #data[:,1]=data[:,1]*1000  
+    nu.random.seed(random_permute(current_process().ident))
     fun=MC_func(data,bins)
     cpu=float(cpu_count())
     non_N_index=nu.array([range(1,bins*3,3),range(0,bins*3,3)]).ravel()
@@ -188,7 +188,8 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
     active_param=nu.zeros(len(parambest)-2)
     active_dust=nu.random.rand(2)*5.
 
-    bin=nu.log10(nu.linspace(10**age_unq.min(),10**age_unq.max(),bins+1))
+    #bin=nu.log10(nu.linspace(10**age_unq.min(),10**age_unq.max(),bins+1)) #lin space
+    bin=nu.linspace(age_unq.min(),age_unq.max(),bins+1) #log space
     bin_index=0
     #start in random place
     for k in xrange(len(active_param)):
@@ -197,8 +198,8 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
         else:#age and normilization
             if any(nu.array(range(1,len(active_param),3))==k): #age
                 #active_param[k]=nu.random.random() #random
-                active_param[k]=nu.random.random()*age_unq.ptp()/float(bins)+bin[bin_index] #random in bin
-                #active_param[k]=nu.mean([bin[bin_index],bin[1+bin_index]]) #mean position in bin
+                #active_param[k]=nu.random.random()*age_unq.ptp()/float(bins)+bin[bin_index] #random in bin
+                active_param[k]=nu.mean([bin[bin_index],bin[1+bin_index]]) #mean position in bin
                 bin_index+=1
                 #active_param[k]=nu.random.random()*age_unq.ptp()+age_unq[0] #random place anywhere
             else: #norm
@@ -209,7 +210,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
                 [0.5,age_unq.ptp()*nu.random.rand(),1.],bins)
     sigma_dust=nu.identity(2)*nu.random.rand()*2
     #try leastquares fit
-    active_param=fun.n_neg_lest(active_param)
+    #active_param=fun.n_neg_lest(active_param)
     chi[0],active_param[range(2,bins*3,3)]=fun.func_N_norm(active_param,active_dust)
     param[0,:]=nu.copy(nu.hstack((active_param ,active_dust)))
     #parambest=nu.copy(active_param)
@@ -321,10 +322,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
         acept_rate.append(nu.copy(Nacept/(Nacept+Nreject)))
         out_sigma.append(nu.copy(sigma))
     #return once finished 
-    param=outprep(param)
-    #for k in range(2,len(parambest),3):
-    #    param[:,k]=param[:,k]/1000.
-    data[:,1]=data[:,1]/1000.
+    param=outprep(param,fun)
     q.put((param[option.burnin:,:],chi[option.burnin:]))
    # q.put((param,chi))
     #q.put((param,chi,out_sigma,acept_rate))
@@ -348,11 +346,12 @@ def Covarence_mat(param,j):
     else:
         return nu.cov(param[j-2000:j,:].T)
 
-def outprep(param):
+def outprep(param,func):
     #changes metals from log to normal
+    bins=(param.shape[1]-2)/3
     for i in range(0,param.shape[1]-2,3):
         param[:,i]=10**param[:,i]
-        param[:,i+2]=param[:,i+2]/1000.
+        param[:,i+2]*=func.norms
         
     return param
 
