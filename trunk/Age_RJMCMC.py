@@ -73,6 +73,9 @@ def RJ_multi(data,burnin,k_max=16,cpus=cpu_count()):
             if key_to_use:
                 #do convergence calc
                 if Convergence_tests(conver_test,key_to_use):
+                    #make sure not all from same chain
+                    if nu.unique(rank)<3:
+                        continue
                     #convergence!
                     #tidy up and end
                     sys.stdout.flush()
@@ -86,14 +89,12 @@ def RJ_multi(data,burnin,k_max=16,cpus=cpu_count()):
                         temp=0
                         for i in conver_test:
                             temp+=len(i[j])
-                        if temp>5*10**5:
+                        if temp>5*10**6:
                             sys.stdout.flush()
                             while q_final.qsize()>0:
                                 q_final.get()
-                            #option.value=False
+                            option.value=False
                             break   
-                    if temp>10**5:
-                        break
 
         else:
             Time.sleep(5)
@@ -131,22 +132,10 @@ def RJ_multi(data,burnin,k_max=16,cpus=cpu_count()):
             fac.append([int(i),nu.mean(nu.nan_to_num(bayes_fac[i])),len(bayes_fac[i])])
             #remove 1st bin for now#############
     fac=nu.array(fac)
-    '''
-    fac=fac[nu.nonzero(fac[:,0]!=1)[0],:]
-    if all(fac[fac[:,1].argmax(),1]/fac[nu.arange(4)!=2,1]>3.):
-        print 'substantal best fit is with %i bins' %fac[fac[:,1].argmax(),0]
-        bins=str(int(ffac[fac[:,1].argmax(),0]))
-    elif all(fac[fac[:,1].argmax(),1]/fac[nu.arange(4)!=2,1]>1.):
-        print 'sort of best fit is with %i bins' %fac[fac[:,1].argmax(),0]
-        bins=str(int(fac[fac[:,1].argmax(),0]))
-    else:
-        print 'No model is the best choosing longest chain'
-        bins=''
-        '''
     #grab chains with best fit and chech to see if mixed properly
     outparam,outchi={},{}
     for i in fac[:,0]:
-        outparam[str(int(i))],outchi[str(int(i))]=nu.zeros([2,3*i]),nu.array([nu.inf])
+        outparam[str(int(i))],outchi[str(int(i))]=nu.zeros([2,3*i+2]),nu.array([nu.inf])
     for i in temp:
         for j in fac[:,0]:
             try:
@@ -156,40 +145,39 @@ def RJ_multi(data,burnin,k_max=16,cpus=cpu_count()):
                 pass
     for j in nu.int64(fac[:,0]): #post processing
         outparam[str(int(j))],outchi[str(int(j))]=outparam[str(int(j))][2:,:],outchi[str(int(j))][1:]
-        outparam[str(int(j))][:,range(0,3*j,3)]=10**outparam[str(int(j))][:,range(0,3*j,3)]
-        outparam[str(int(j))][:,range(2,3*j,3)]=outparam[str(int(j))][:,range(2,3*j,3)]
+        #outparam[str(int(j))][:,range(0,3*j,3)]=10**outparam[str(int(j))][:,range(0,3*j,3)]
+        #outparam[str(int(j))][:,range(2,3*j,3)]=outparam[str(int(j))][:,range(2,3*j,3)]
     
     return outparam,outchi,fac[fac[:,0].argsort(),:]
 
 
 def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=None):
     #parallel worker program reverse jump mcmc program
-    nu.random.seed(current_process().pid)
+    nu.random.seed(random_permute(current_process().pid))
     #initalize boundaries
     lib_vals=get_fitting_info(lib_path)
     lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
     metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
     age_unq=nu.unique(lib_vals[0][:,1])
-
-    #data[:,1]=data[:,1]*1000  
     #create fun for all number of bins
     attempt=False
     fun,param,active_param,chi,sigma={},{},{},{},{}
     Nacept,Nreject,acept_rate,out_sigma={},{},{},{}
+    active_dust,sigma_dust=nu.random.rand(2)*4.,nu.identity(2)*nu.random.rand()*2
     bayes_fact={} #to calculate bayes factor
-    fun=RJMC_func(data)
+    fun=MC_func(data)
     for i in range(1,k_max+1):
         param[str(i)]=[]
         active_param[str(i)],chi[str(i)]=nu.zeros(3*i),[nu.inf]
         sigma[str(i)]=nu.identity(3*i)*nu.tile(
             [0.5,age_unq.ptp()*nu.random.rand(),1.],i)
+        #active_dust[str(i)]=nu.random.rand(2)*5.
+        #sigma_dust[str(i)]=nu.identity(2)*nu.random.rand()*2
         Nacept[str(i)],Nreject[str(i)]=1.,0.
         acept_rate[str(i)],out_sigma[str(i)]=[.35],[]
         bayes_fact[str(i)]=[]
-    #for parallel to know how many iterations have gone by
-    #N_all={'accept':dict(Nacept),'reject':dict(Nreject)}
     #bins to start with
-    bins=nu.random.randint(1,k_max)
+    bins=16 # nu.random.randint(1,k_max)
     #create starting active params
     bin=nu.log10(nu.linspace(10**age_unq.min(),10**age_unq.max(),bins+1))
     bin_index=0
@@ -206,12 +194,12 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
     #try leastquares fit
     chi[str(bins)].append(0.)
     #active_param[str(bins)]=fun[str(bins)].n_neg_lest(active_param[str(bins)])
-    chi[str(bins)][-1],active_param[str(bins)][range(2,bins*3,3)]=fun.func_N_norm(active_param[str(bins)],bins)
-    param[str(bins)].append(nu.copy(active_param[str(bins)]))
+    chi[str(bins)][-1],active_param[str(bins)][range(2,bins*3,3)]=fun.func_N_norm(active_param[str(bins)],active_dust)
+    param[str(bins)].append(nu.copy(nu.hstack((active_param[str(bins)],active_dust))))
     #parambest=nu.copy(active_param)
 
     mybest=nu.copy([chi[str(bins)][0],bins])
-    parambest=nu.copy(active_param[str(bins)])
+    parambest=nu.copy(nu.hstack((active_param[str(bins)],active_dust)))
 
     #start rjMCMC
     T_cuurent,Nexchange_ratio=1.0,1.0
@@ -219,7 +207,8 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
     j,T,j_timeleft=1,9.,nu.random.exponential(100)
     T_start,T_stop=3*10**5.,0.9
     birth_rate=.5
-    while option.value:
+    
+    for iiii in range(5000): #while option.value:
         if size%500==0:
             print "hi, I'm at itter %i, chi %f from %s bins and for cpu %i" %(len(param[str(bins)]),chi[str(bins)][-1],bins,rank)
             sys.stdout.flush()
@@ -228,25 +217,30 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             #print active_param[str(bins)][range(2,bins*3,3)]
         if q_talk.qsize()==0:
             active_param[str(bins)]= Chain_gen_all(active_param[str(bins)],metal_unq, age_unq,bins,sigma[str(bins)])
+            active_dust=chain_gen_dust(active_dust,sigma_dust)
         else:
             try:
                 temp=q_talk.get(timeout=1)
                 if mybest[0]>temp[1] and bins==temp[0]:
                     mybest=[temp[1]+0,temp[0]+0]
                     active_param[str(bins)]=temp[2]+0
+                    active_dust=temp[3]+0
                     q_talk.put(temp)
                 elif  bins!=temp[0] and mybest[0]>temp[1]: #only accept best move is bins are the same
                     q_talk.put(temp)
                     mybest=[temp[1]+0,temp[0]+0]
                     active_param[str(bins)]= Chain_gen_all(active_param[str(bins)],metal_unq, age_unq,bins,sigma[str(bins)])
+                    active_dust=chain_gen_dust(active_dust,sigma_dust)
                 else:
                     active_param[str(bins)]= Chain_gen_all(active_param[str(bins)],metal_unq, age_unq,bins,sigma[str(bins)])
+                    active_dust=chain_gen_dust(active_dust,sigma_dust)
             except:
                 active_param[str(bins)]= Chain_gen_all(active_param[str(bins)],metal_unq, age_unq,bins,sigma[str(bins)])
+                active_dust=chain_gen_dust(active_dust,sigma_dust)
         #bin_index=0
         #calculate new model and chi
         chi[str(bins)].append(0.)
-        chi[str(bins)][-1],active_param[str(bins)][range(2,bins*3,3)]=fun.func_N_norm(active_param[str(bins)],bins)
+        chi[str(bins)][-1],active_param[str(bins)][range(2,bins*3,3)]=fun.func_N_norm(active_param[str(bins)],active_dust)
         #sort by age
         if not nu.all(active_param[str(bins)][range(1,bins*3,3)]==
                       nu.sort(active_param[str(bins)][range(1,bins*3,3)])):
@@ -261,20 +255,21 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
         a=nu.exp((chi[str(bins)][-2]-chi[str(bins)][-1])/SA(T_cuurent,burnin,T_start,T_stop))
         #metropolis hastings
         if a>nu.random.rand(): #acepted
-            param[str(bins)].append(nu.copy(active_param[str(bins)]))
+            param[str(bins)].append(nu.copy(nu.hstack((active_param[str(bins)],active_dust))))
             Nacept[str(bins)]+=1
             if not nu.isinf(min(chi[str(bins)])): #put temperature on order of chi calue
                 T_start=nu.round(min(chi[str(bins)]))+1.
             #see if global best fit
             if chi[str(bins)][-1]< mybest[0]:
                 mybest=nu.copy([chi[str(bins)][-1],bins])
-                parambest=nu.copy(active_param[str(bins)]) 
-                print '%i has best fit with chi of %2.2f and %i bins' %(rank,mybest[0],mybest[1])
+                parambest=nu.copy(nu.hstack((active_param[str(bins)],active_dust))) 
+                print '%i has best fit with chi of %2.2f and %i bins, %i steps left' %(rank,mybest[0],mybest[1],j_timeleft-j)
                 #send to other params
-                q_talk.put((bins,chi[str(bins)][-1],active_param[str(bins)]))
+                q_talk.put((bins,chi[str(bins)][-1],active_param[str(bins)],active_dust))
         else:
             param[str(bins)].append(nu.copy(param[str(bins)][-1]))
-            active_param[str(bins)]=nu.copy(param[str(bins)][-1])
+            active_param[str(bins)]=nu.copy(param[str(bins)][-1][:-2])
+            active_dust=nu.copy(param[str(bins)][-1][-2:])
             chi[str(bins)][-1]=nu.copy(chi[str(bins)][-2])
             Nreject[str(bins)]+=1
 
@@ -284,18 +279,22 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
                                         all(sigma[str(bins)].diagonal()[nu.array([range(1,bins*3,3),range(0,bins*3,3)]).ravel()]<5.19)):
                #too few aceptnce decrease sigma
                 sigma[str(bins)]=sigma[str(bins)]/1.05
+                sigma_dust/=1.05
             elif acept_rate[str(bins)][-1]>.40 and all(sigma[str(bins)].diagonal()>=10**-5): #not enough
                 sigma[str(bins)]=sigma[str(bins)]*1.05
+                sigma_dust*=1.05
             # else: #use covarnence matrix
             if j%100==0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
-                sigma[str(bins)]=Covarence_mat(nu.array(param[str(bins)]),len(param[str(bins)]))
+                sigma[str(bins)]=Covarence_mat(nu.array(param[str(bins)])[:,:-2],len(param[str(bins)]))
+                
+                sigma_dust=Covarence_mat(nu.array(param[str(bins)])[:,-2:],len(param[str(bins)]))
                 #active_param=fun.n_neg_lest(active_param)
-        if nu.all(sigma['2'].diagonal()==0): #if step is 0 make small
-            for k in xrange(sigma[str(bins)].shape[0]):
-                sigma[str(bins)][k,k]=10.**-5
+        #if nu.all(sigma[str(bins)].diagonal()==0): #if step is 0 make small
+        #    for k in xrange(sigma[str(bins)].shape[0]):
+        #        sigma[str(bins)][k,k]=10.**-5
 
         #############################decide if birth or death
-        if (birth_rate>nu.random.rand() and bins<k_max and j>j_timeleft ) or bins==1:
+        if (birth_rate>nu.random.rand() and bins<k_max and j>j_timeleft ) or (j>j_timeleft and bins==1):
             #birth
             attempt=True #so program knows to attempt a new model
             rand_step,rand_index=nu.random.rand(3)*[metal_unq.ptp(), age_unq.ptp(),1.],nu.random.randint(bins)
@@ -320,7 +319,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
                     active_param[str(temp_bins)][rand_index*3:rand_index*3+3]=active_param[str(bins)][rand_index*3:rand_index*3+3]-rand_step
             else: #draw new values randomly from param space
                 active_param[str(temp_bins)][-3:]=nu.random.rand(3)*nu.array([metal_unq.ptp(),age_unq.ptp(),5.])+nu.array([metal_unq.min(),age_unq.min(),0])
-        else:
+        elif j>j_timeleft and bins>1:
             #death
             attempt=True #so program knows to attempt a new model
             temp_bins=bins-1
@@ -348,11 +347,12 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
         #calc chi of new model
         if attempt:
             attempt=False
-            tchi,active_param[str(temp_bins)][range(2,temp_bins*3,3)]=fun.func_N_norm(active_param[str(temp_bins)],temp_bins)
+            tchi,active_param[str(temp_bins)][range(2,temp_bins*3,3)]=fun.func_N_norm(active_param[str(temp_bins)],active_dust)
             bayes_fact[str(bins)].append(nu.exp((chi[str(bins)][-1]-tchi)/2.)*birth_rate*critera) #save acceptance critera for later
             #rjmcmc acceptance critera ##############
             if bayes_fact[str(bins)][-1]>nu.random.rand():
-            #accept model change
+                print '%i has changed from %i to %i' %(rank,bins,temp_bins)
+                #accept model change
                 bins=temp_bins+0
                 chi[str(bins)].append(nu.copy(tchi))
                 #sort by age so active_param[bins*i+1]<active_param[bins*(i+1)+1]
@@ -364,7 +364,9 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
                         for kk in range(3):
                             temp_index.append(3*k+kk)
                     active_param[str(bins)]=active_param[str(bins)][temp_index]
-                param[str(bins)].append(nu.copy(active_param[str(bins)]))
+                param[str(bins)].append(nu.copy((nu.hstack((active_param[str(bins)],active_dust)))))
+                j,j_timeleft=0,nu.random.exponential(200)
+            if T_cuurent>=burnin:
                 j,j_timeleft=0,nu.random.exponential(200)
 
         #########################################change temperature
@@ -392,7 +394,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
                 #T_stop-=.1'''
         ##############################convergece assment
         size=dict_size(param)
-        if size%999==0 and size>6000:
+        if size%999==0 and size>30000:
             q_final.put((rank,size,param))
                 
         ##############################house keeping
@@ -403,10 +405,15 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
     for i in param.keys():
         chi[i]=nu.array(chi[i])
         param[i]=nu.array(param[i])
+        ###correct metalicity and norm 
+        try:
+            param[i][:,range(0,3*int(i),3)]=10**param[i][:,range(0,3*int(i),3)] #metalicity conversion
+            param[i][:,range(2,3*int(i),3)]=param[i][:,range(2,3*int(i),3)]*fun.norms #norm conversion
+        except ValueError:
+            pass
         acept_rate[i]=nu.array(acept_rate[i])
         out_sigma[i]=nu.array(out_sigma[i])
         bayes_fact[i]=nu.array(bayes_fact[i])
-    #data[:,1]=data[:,1]/1000.
     q_final.put((param,chi,bayes_fact,out_sigma))
     #return param,chi,sigma,acept_rate,out_sigma
 
@@ -417,16 +424,29 @@ def is_send(N1,N2,N_prev):
         val_N+=N1[i]+N2[i]-N_prev['accept'][i]-N_prev['reject'][i]
     return val_N
 
-def Check(param,metal_unq, age_unq,bins): #checks if params are in bounds no bins!!!
-    #age=nu.log10(nu.linspace(10**age_unq.min(),10**age_unq.max(),bins+1))#linear spacing
+def Check(param,metal_unq, age_unq,bins,lib_vals=get_fitting_info(lib_path)): #checks if params are in bounds no bins!!!
+    lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0])
     for j in xrange(bins):#check age and metalicity
         if any([metal_unq[-1],age_unq[-1]]<param[j*3:j*3+2]) or any([metal_unq[0],age_unq[0]]>param[j*3:j*3+2]):
             return True
-        #if any(nu.abs(nu.diff(param.take(range(1,bins*3,3))))<.3):
-        #    return True
-        if not (0<param[j*3+2]): #and param[j*3+2]<1): #check normalizations
+        else:
+            metal,age,line=find_az_box(param[j*3:j*3+2],age_unq,metal_unq)
+            if len(metal)!=4:
+                metal=metal*2
+            if len(age)!=4:
+                age=age*2
+            metal.sort();age.sort()
+            for i in range(4):
+                index=nu.nonzero(nu.logical_and(lib_vals[0][:,1]==age[i],
+                                                lib_vals[0][:,0]==10**metal[i]))[0] 
+                if not index:
+                    return True
+                    
+        if not (0<param[j*3+2]):  #check normalizations
+            #print 'here',j
             return True
     return False
+
 
 def Chain_gen_all(means,metal_unq, age_unq,bins,sigma):
     #creates new chain for MCMC, does log spacing for metalicity
@@ -435,12 +455,27 @@ def Chain_gen_all(means,metal_unq, age_unq,bins,sigma):
     t=Time.time()
     while Check(out,metal_unq, age_unq,bins):
         out=nu.random.multivariate_normal(means,sigma)
-        if Time.time()-t>.5:
+        if Time.time()-t>.1:
             sigma=sigma/1.05
-            if Time.time()-t>2.:
-                print "I'm %i and I'm stuck" %current_process().ident
-                print means,sigma
-                #raise
+            if Time.time()-t>.5:
+                #change them one at a time till find the problem param
+                for i in xrange(len(means)):
+                    out[i]=nu.random.randn()*sigma[i,i]+means[i]
+                    if i==0 or i%3==0: #metal
+                        if out[i]<metal_unq.min() :
+                            out[i]=metal_unq.min()
+                        elif out[i]>metal_unq.max(): 
+                            out[i]=metal_unq.max()
+                    elif i==1 or (i-1)%3==0: #age
+                        if out[i]<age_unq.min() :
+                            out[i]=age_unq.min()
+                        elif out[i]>age_unq.max(): 
+                            out[i]=age_unq.max()
+
+                    elif i==2 or (i-2)%3==0: #norm
+                        if out[i]<0:
+                            out[i]=0
+                    
 
     return out
 
@@ -518,104 +553,18 @@ def Convergence_tests(param,keys,n=1000):
                 print '%i out of %i parameters have same varance' %(sum( L_result[i]>.05),
                                                                 param[0][i].shape[1])'''
     #return False
-
-
-def plot_model(param,data,bins):
-    import pylab as lab
-    #takes parameters and returns spectra associated with it
-    lib_vals=get_fitting_info(lib_path)
-    lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0])
-    metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
-    age_unq=nu.unique(lib_vals[0][:,1])
-    #check to see if metalicity is in log range (sort of)
-    if any(param[range(0,bins*3,3)]>metal_unq.max() or param[range(0,bins*3,3)]<metal_unq.min()):
-        print 'taking log of metalicity'
-        param[range(0,bins*3,3)]=nu.log10(param[range(0,bins*3,3)])
-    model=get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins)  
-    #out= model['0']*.0
-    model=data_match_new(data,model,bins)
-    index=xrange(2,bins*3,3)
-    for ii in model.keys():
-        model[ii]=model[ii]*param[index[int(ii)]]
-    index=nu.int64(model.keys())
-    out=nu.sum(nu.array(model.values()).T,1)
-    lab.plot(data[:,0],out)
-    return nu.vstack((data[:,0],out)).T
-#return nu.vstack((model['wave'],out)).T
  
+if __name__=='__main__':
 
-#####classes############# 
-class RJMC_func:
-    #makes more like function, so input params and the chi is outputted
-    def __init__(self,data,spect=spect):
-        data_match_all(data)
-        self.data=data
-        lib_vals=get_fitting_info(lib_path)
-        lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
-        metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
-        age_unq=nu.unique(lib_vals[0][:,1])
-        self.lib_vals=lib_vals
-        self.age_unq= age_unq
-        self.metal_unq,self.spect=metal_unq,spect
-        #self.bins=bins
-
-    def func(self,param,bins):
-        if len(param)!=bins*3:
-            return nu.nan
-        model=get_model_fit_opt(param,self.lib_vals,self.age_unq,self.metal_unq,bins)  
-        
-        model=data_match_new(data,model,bins)
-        out= model['0']*.0
-        index=xrange(2,bins*3,3)
-        
-        for ii in model.keys():
-            if ii!='wave':
-                out+=model[ii]*param[index[int(ii)]]
-        return nu.sum((self.data[:,1]-out)**2)
-
-    def func_N_norm(self,param,bins):
-        #returns chi and N norm best fit params
-        if len(param)!=bins*3:
-            return nu.nan
-        model=get_model_fit_opt(param,self.lib_vals,self.age_unq,self.metal_unq,bins)  
-        N,model,chi=self.N_normalize(model,bins)
-    
-        return chi,N
-
-    def normalize(self,model):
-        #normalizes the model spectra so it is closest to the data
-        if self.data.shape[1]==2:
-            return nu.sum(self.data[:,1]*model)/nu.sum(model**2)
-        elif self.data.shape[1]==3:
-            return nu.sum(self.data[:,1]*model/data[:,2]**2)/nu.sum((model/self.data[:,2])**2)
-        else:
-            print 'wrong data shape'
-            raise(KeyError)
-
-    def N_normalize(self,model,bins):
-        #takes the norm for combined data and does a minimization for best fits value
-    
-        #match data axis with model
-        model=data_match_new(self.data,model,bins)
-    #do non-negitave least squares fit
-        if bins==1:
-            N=[normalize(self.data,model['0'])]
-            return N, N[0]*model['0'],nu.sum((self.data[:,1]-N[0]*model['0'])**2)
-        try:
-            if self.data.shape[1]==2:
-                N,chi=nnls(nu.array(model.values()).T[:,nu.argsort(nu.int64(nu.array(model.keys())))],self.data[:,1])
-            elif self.data.shape[1]==3:
-                N,chi=nnls(nu.array(model.values()).T[:,nu.argsort(nu.int64(nu.array(model.keys())))]/nu.tile(self.data[:,2],(bins,1)).T,self.data[:,1]/self.data[:,2]) #from P Dosesquelles1, T M H Ha1, A Korichi1, F Le Blanc2 and C M Petrache 2009
-            else:
-                print 'wrong data shape'
-                raise(KeyError)
-
-        except RuntimeError:
-            print "nnls error"
-            N=nu.zeros([len(model.keys())])
-            chi=nu.inf
-
-        index=nu.nonzero(N==0)[0]
-        N[index]+=10**-6
-        index=nu.int64(model.keys())
-        return N,nu.sum(nu.array(model.values()).T*N[index],1),chi**2
+    #profiling
+    import cProfile as pro
+    data,info1,weight,dust=dust_iterp_spec(3,'norm',2000,10000)
+    burnin,k_max,cpus=50,16,1
+    option=Value('b',True)
+    rank=1
+    q_talk,q_final=Queue(),Queue()
+    pro.runctx('rjmcmc(data,burnin,k_max,option,rank,q_talk,q_final)'
+               , globals(),{'data':data,'burnin':burnin,'k_max':k_max,
+                            'rank':1,'q_talk':q_talk,'q_final':q_final
+                            ,'option':option}
+               ,filename='agedata.Profile')
