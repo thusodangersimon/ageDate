@@ -34,6 +34,21 @@ most code is taken from ULYSS will site later
 import numpy as nu
 import pyfits as fits
 import os
+from scipy.stats import signaltonoise as stn
+
+def Salt_fits(name):
+    #takes 1-d spectra and returns [wavelenght,flux,uncertanty]
+    #uncertanty is calculated fron scipy.stats.signaltonoise program
+    #signal to noise is calculated by numpy.mean(data)/numpy.std(data)
+    spectra=fits.open(name)
+    #wavelength create
+    start,step=spectra[0].header['CRVAL1'],spectra[0].header['CDELT1']
+    length=len(spectra[0].data)
+    out=nu.zeros([length,3])
+    out[:,0]=nu.arange(start,start+step*(length-1),step)
+    out[:,1]=spectra[0].data
+    out[:,2]+=nu.std(out[:,1])
+    return out
 
 #==============================================================================
 # reading routine for SDSS-style format (format=1)
