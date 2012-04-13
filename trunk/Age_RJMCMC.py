@@ -39,13 +39,11 @@ a=nu.seterr(all='ignore')
 def RJ_multi(data,burnin,k_max=16,cpus=cpu_count()):
     #does multiple chains for RJMCMC
     #shares info about chain every 300 itterations to other chains
-    #import cPickle as pik
     option=Value('b',True)
-    #option.burnin=burnin
-    #option.itter=int(itter+option.burnin)
-    #option.send_num=Value('d',0) #tells who is sending and who is reciving new data
     option.cpu_tot=cpus
-
+    #interpolate spectra so it matches the data
+    global spect
+    spect=data_match_all(data)
     work=[]
     q_talk,q_final=Queue(),Queue()
     #start multiprocess mcmc
@@ -177,7 +175,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
         acept_rate[str(i)],out_sigma[str(i)]=[.35],[]
         bayes_fact[str(i)]=[]
     #bins to start with
-    bins=16 # nu.random.randint(1,k_max)
+    bins=nu.random.randint(1,k_max)
     #create starting active params
     bin=nu.log10(nu.linspace(10**age_unq.min(),10**age_unq.max(),bins+1))
     bin_index=0
@@ -208,7 +206,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
     T_start,T_stop=3*10**5.,0.9
     birth_rate=.5
     
-    for iiii in range(5000): #while option.value:
+    while option.value:
         if size%500==0:
             print "hi, I'm at itter %i, chi %f from %s bins and for cpu %i" %(len(param[str(bins)]),chi[str(bins)][-1],bins,rank)
             sys.stdout.flush()
@@ -430,6 +428,8 @@ def Check(param,metal_unq, age_unq,bins,lib_vals=get_fitting_info(lib_path)): #c
         if any([metal_unq[-1],age_unq[-1]]<param[j*3:j*3+2]) or any([metal_unq[0],age_unq[0]]>param[j*3:j*3+2]):
             return True
         else:
+            pass
+        '''
             metal,age,line=find_az_box(param[j*3:j*3+2],age_unq,metal_unq)
             if len(metal)!=4:
                 metal=metal*2
@@ -441,7 +441,7 @@ def Check(param,metal_unq, age_unq,bins,lib_vals=get_fitting_info(lib_path)): #c
                                                 lib_vals[0][:,0]==10**metal[i]))[0] 
                 if not index:
                     return True
-                    
+                    '''            
         if not (0<param[j*3+2]):  #check normalizations
             #print 'here',j
             return True
@@ -456,7 +456,7 @@ def Chain_gen_all(means,metal_unq, age_unq,bins,sigma):
     while Check(out,metal_unq, age_unq,bins):
         out=nu.random.multivariate_normal(means,sigma)
         if Time.time()-t>.1:
-            sigma=sigma/1.05
+            sigma/=1.05
             if Time.time()-t>.5:
                 #change them one at a time till find the problem param
                 for i in xrange(len(means)):
