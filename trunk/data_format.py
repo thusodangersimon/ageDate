@@ -45,7 +45,7 @@ def Salt_fits(name):
     start,step=spectra[0].header['CRVAL1'],spectra[0].header['CDELT1']
     length=len(spectra[0].data)
     out=nu.zeros([length,3])
-    out[:,0]=nu.arange(start,start+step*(length-1),step)
+    out[:,0]=start+nu.arange(length)*step
     out[:,1]=spectra[0].data
     out[:,2]+=nu.std(out[:,1])
     return out
@@ -72,15 +72,36 @@ def spect_read_sdss(sdss_name,option='flux'):
     return out
 
 
-def stack(indir,delta_z=.04):
+def stack(indir,sp='1d'):
+    #does stacking of spectra,
+    #sp is type of spectra are being used '1d' and 'ssds'
+    if indir[-1]!='/':
+        indir+='/'
+    if sp=='1d':
+        fun=Salt_fits
+    elif sp=='ssds':
+        fun=spect_read_sdss
+    else:
+        print 'That option does not exsist, try "1d" or "ssds"'
+        raise
+    files=os.listdir(indir)
+    temp_data={}
+    length=[]
+    wave=nu.array([])
+    for i in files:
+        temp_data[i]=fun(indir+i)
+        length.append(len(temp_data[i][:,0]))
+        wave=nu.append(wave,temp_data[i][:,0])
+    #bin wavelengths
+    out=nu.zeros([max(length),3])
+    out[:,0]=nu.histogram(wave,bins=max(length))[1][:-1]
+    for i in temp_data.keys(): #slopy
+        out[:,1]+=nu.interp(out[:,0],temp_data[i][:,0],temp_data[i][:,1])
+        out[:,2]+=nu.interp(out[:,0],temp_data[i][:,0],temp_data[i][:,2])**2
 
-    #takes dir of spectra and stacks them delta_z option not working, but spits out
-    #redshifted binned arrays
-    pass
-    #do redshift correction
-    #make sure wavelenghts are the same (if not interp?)
-    #co-add uncertaties
-    #add flux
+    out[:,1]/=len(temp_data.keys())
+    out[:,2]=nu.sqrt(out[:,2]/len(temp_data.keys())**2)
+
     
 """
 
