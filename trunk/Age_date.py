@@ -302,7 +302,7 @@ def chain_gen_all(means,metal_unq, age_unq,bins,sigma):
             if Time.time()-t>2.:
                 print "I'm %i and I'm stuck" %current_process().ident
                 print means,sigma
-                raise
+                #raise
 
     return out
 
@@ -424,10 +424,11 @@ def f_dust(tau): #need to make work when tau is an array
 #####classes############# 
 class MC_func:
     #makes more like function, so input params and the chi is outputted
-    def __init__(self,data):
+    def __init__(self,data,bins=None):
         #global spect
         self.spect=data_match_all(data)
-        #spect=self.spect
+        if bins:
+            self.bins=bins
         #normalized so area under curve is 1 to keep chi values resonalble
         self.norms=self.area_under_curve(data)*10**-5 #need to turn off
         self.data=nu.copy(data)
