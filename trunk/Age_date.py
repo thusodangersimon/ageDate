@@ -43,8 +43,11 @@ import time as Time
 ###spectral lib stuff####
 global lib_path,spect
 lib_path='/home/thuso/Phd/Spectra_lib/'
-spect,info= load_spec_lib(lib_path)  
-
+try:
+    spect,info= load_spec_lib(lib_path)  
+except OSError :
+    lib_path=raw_input('location to spectra libray? eg. /home/thuso/Phd/Spectra_lib/')
+    spect,info= load_spec_lib(lib_path)
 
 
 def random_permute(seed):
@@ -67,64 +70,36 @@ def random_permute(seed):
 def find_az_box(param,age_unq,metal_unq):
     #find closest metal
     line=None
-    dist=(param[0]-metal_unq)**2
-    #test to see if smaller or larger
-    metal=[metal_unq[nu.argsort(dist)][0]]*2
-    try:
-        if metal_unq[nu.argsort(dist)][0]>param[0]:
-            for i in xrange(2):
-                metal.append(metal_unq[metal_unq<metal[0]][-1])
-        elif any(dist==0):
-            line='metal'
-        else:
-            for i in xrange(2):
-                metal.append(metal_unq[metal_unq>metal[0]][0])
-    except IndexError: #if on a line
+    #check metal
+    metal=[]
+    if nu.any(metal_unq==param[0]):
+        #on metal line 
         line='metal'
-    #find closest age 
-        
-    try:
-        dist=(param[1]-age_unq)**2
-        age=[age_unq[nu.argsort(dist)][0]]*2
-        if age_unq[nu.argsort(dist)][0]>param[1]:
-            for i in xrange(2):
-                age.append(age_unq[age_unq<age[0]][-1])
-        elif any(dist==0):
-            if not line:
-                line='age'
-            else:
-                line='both'
-            return metal,age,line
-        else:
-            for i in xrange(2):
-                age.append(age_unq[age_unq>age[0]][0])
-    except IndexError:
-        if not line:
-            line='age'
-        else:
-            line='both'
-            
-    return metal,age,line
-
-def binary_search(array,points):
-    #does binary search for closest points returns 2 closest points
-    #array.sort()
-    start=int(len(array)/2.)
-    if array[start]>points: #go down
-        i=-nu.array(range(start))
-        option='greater'
+        metal.append(metal_unq[metal_unq==param[0]][0])
     else:
-        i=xrange(start)
-        option='less'
-    for j in i:
-        if option=='greater' and array[start+j]<points:
-            out= (array[start+j],array[start+j+1])
-            break
-        elif option=='less' and array[start+j]>points:
-            out= (array[start+j],array[start+j-1])
-            break 
-
-    return out
+        index=nu.searchsorted(metal_unq,param[0])
+        if index<=0 or index>=len(metal_unq): #out of bounds
+            print 'metalicity param is out of bounds'
+            raise
+        metal.append(metal_unq[index])
+        metal.append(metal_unq[index-1])
+    metal*=2
+    age=[]
+    if nu.any(age_unq==param[1]): #check if on age line
+        if line=='metal': #on metal line and age line
+            line='both'
+        else: #only on age line
+            line='age'
+        age.append(age_unq[age_unq==param[1]][0])
+    else: #not on age line
+        index=nu.searchsorted(age_unq,param[1])
+        if index<=0 or index>=len(age_unq): #out of bounds
+            print 'age param is out of bounds'
+            raise
+        age.append(age_unq[index])
+        age.append(age_unq[index-1])
+    age*=2
+    return metal,age,line
 
 def get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins):
     #does dirty work to make spectra models
@@ -144,10 +119,15 @@ def get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins):
             for i in 10**metal:
                 index=nu.nonzero(nu.logical_and(lib_vals[0][:,0]==i,
                                             lib_vals[0][:,1]==age))[0]
-                #closest.append(read_spec(lib_vals[1][index][0]))
-                closest.append(spect[:,index[0]+1])
-
-            out[str(ii)]=linear_interpolation(10**metal,closest,10**temp_param[0])
+                if not index: #if not in lib_vals return dummy array
+                    out[str(ii)]=spect[:,0]+nu.inf
+                    interp=False
+                    break
+                else:
+                    closest.append(spect[:,index[0]+1])
+                    interp=True
+            if interp:
+                out[str(ii)]=linear_interpolation(10**metal,closest,10**temp_param[0])
         elif line=='metal': #run 1 d interp along age only
             age=nu.array([age[0],age[-1]])
             age.sort()
@@ -157,15 +137,24 @@ def get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins):
             for i in age:
                 index=nu.nonzero(nu.logical_and(lib_vals[0][:,1]==i,
                                             lib_vals[0][:,0]==10**metal))[0]
-                #closest.append(read_spec(lib_vals[1][index][0]))
-                closest.append(spect[:,index[0]+1])
-            
-            out[str(ii)]=linear_interpolation(age,closest,temp_param[1])
+                
+                if not index: #if not in lib_vals return dummy array
+                    out[str(ii)]=spect[:,0]+nu.inf
+                    interp=False
+                    break
+                else:
+                    closest.append(spect[:,index[0]+1])
+                    interp=True
+            if interp:
+                out[str(ii)]=linear_interpolation(age,closest,temp_param[1])
 
         elif line=='both': #on a lib spectra
             index=nu.nonzero(nu.logical_and(lib_vals[0][:,0]==10**temp_param[0],
                                             lib_vals[0][:,1]==temp_param[1]))[0]
-            out[str(ii)]=nu.copy(spect[:,index[0]+1])
+            if not index: #if not in lib_vals return dummy array
+                out[str(ii)]=spect[:,0]+nu.inf
+            else:
+                out[str(ii)]=nu.copy(spect[:,index[0]+1])
         #run 2 d interp
         else:
             metal.sort()
@@ -176,11 +165,15 @@ def get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins):
                 #print metal[i],age[i]
                 index=nu.nonzero(nu.logical_and(lib_vals[0][:,1]==age[i],
                                             lib_vals[0][:,0]==10**metal[i]))[0]
-                #closest.append(read_spec(lib_vals[1][index][0]))
-                closest.append(spect[:,index[0]+1])
-
-        #interp
-            out[str(ii)]=bilinear_interpolation(10**metal,age,closest,
+                if not index: #if not in lib_vals return dummy array
+                    out[str(ii)]=spect[:,0]+nu.inf
+                    interp=False
+                    break
+                else:
+                    closest.append(spect[:,index[0]+1])
+                    interp=True
+            if interp:
+                out[str(ii)]=bilinear_interpolation(10**metal,age,closest,
                                                       10**temp_param[0],temp_param[1])
     #give wavelength axis
     out['wave']=nu.copy(spect[:,0])
@@ -201,9 +194,6 @@ def data_match_all(data):
     lib_vals=get_fitting_info(lib_path)
     metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
     age_unq=nu.unique(lib_vals[0][:,1])
-    if not lib_vals[0].shape[0]==metal_unq.shape[0]*age_unq[0]:
-        print 'Warrning: Not every combination of age and metalicty avalible in library'
-        print 'May cause problems with fitting'
 
     model=data_match_new(data,model,spect[0,:].shape[0]-1)
     out=nu.zeros([model['0'].shape[0],len(model.keys())+1])
@@ -211,6 +201,7 @@ def data_match_all(data):
     for i in model.keys():
         out[:,int(i)+1]=model[i]
     spect=nu.copy(out)
+    return spect
 
 def data_match_new(data,model,bins):
     #makes sure data and model have same wavelength range and points but with a dictionary
@@ -267,14 +258,17 @@ def normalize(data,model):
         raise(KeyError)
     
 def N_normalize(data,model,bins):
-        #takes the norm for combined data and does a minimization for best fits value
+    #takes the norm for combined data and does a minimization for best fits value
     
-        #match data axis with model
-    model=data_match_new(data,model,bins)
+    #match data axis with model already done by program
+    #model=data_match_new(data,model,bins)
+    #need to remove 'wave' key since no data_match_new
+    if model.has_key('wave'):
+        model.pop('wave')
     #do non-negitave least squares fit
     if bins==1:
         N=[normalize(data,model['0'])]
-        return N, N[0]*model['0'],nu.sum((data[:,1]-N[0]*model['0'])**2)
+        return N,nu.sum((data[:,1]-N[0]*model['0'])**2)
     try:
         if data.shape[1]==2:
             N,chi=nnls(nu.array(model.values()).T[:,nu.argsort(nu.int64(nu.array(model.keys())))],data[:,1])
@@ -288,11 +282,13 @@ def N_normalize(data,model,bins):
         print "nnls error"
         N=nu.zeros([len(model.keys())])
         chi=nu.inf
-
-    index=nu.nonzero(N==0)[0]
-    N[index]+=10**-6
-    index=nu.int64(model.keys())
-    return N,nu.sum(nu.array(model.values()).T*N[index],1),chi**2
+    except ValueError:
+        N=nu.zeros([len(model.keys())])
+        chi=nu.inf
+    #index=nu.nonzero(N==0)[0]
+    N[N==0]+=10**-6
+    #index=nu.int64(model.keys())
+    return N,chi**2
     
 def chain_gen_all(means,metal_unq, age_unq,bins,sigma):
     #creates new chain for MCMC, does log spacing for metalicity
@@ -396,28 +392,31 @@ def dict_size(dic):
 def dust(param,model):
     #does 2 componet dust calibration model following charlot and fall 2000
     t_bc=7.4771212547196626 #log10(.03*10**9)
-    if param[-2:].sum()<=0. or param[-2]<0:
+    if nu.any(param[-2:]<=0):
         return model
-    bins=int((param.shape[0]-2)/3.)
-    for i in range(bins):
+    bins=(param.shape[0]-2)/3
+    tau_lam=(model['wave']/5500.)**(-.7)
+    T_ism=f_dust(param[-2]*tau_lam)
+    T_bc=f_dust(param[-1]*tau_lam)
+    for i in xrange(bins): #for i in range(bins)
         if param[i+1]<=t_bc: #choose which combo of dust models to use
             #fdust*fbc
-            if param[-1]<0:
-                return model
-            model[str(i)]=f_dust(param[-2]*(model['wave']/5500.)**(-.7))*f_dust(param[-1]*(model['wave']/5500.)**(-.7))*model[str(i)]
+            model[str(i)]*=T_ism*T_bc
         else:
             #fdust
-            model[str(i)]=f_dust(param[-2]*(model['wave']/5500.)**(-.7))*model[str(i)]
+            model[str(i)]*=T_ism
     return model
 
 def f_dust(tau): #need to make work when tau is an array
     #dust extinction functin
-    out=tau*0
+    out=nu.zeros_like(tau)
     if nu.all(out==tau): #if all zeros
-        return tau*0+1.
+        return nu.ones_like(tau)
     if nu.any(tau<0): #if has negitive tau
-        return tau*0+nu.inf
-    out[tau<=1]=1/(2.*tau[tau<=1])*(1+(tau[tau<=1]-1)*nu.exp(-tau[tau<=1])-tau[tau<=1]**2*exp1(tau[tau<=1]))
+        out.fill(nu.inf)
+        return out
+    temp=tau[tau<=1]
+    out[tau<=1]=1/(2.*temp)*(1+(temp-1)*nu.exp(-temp)-temp**2*exp1(temp))
     out[tau>1]=nu.exp(-tau[tau>1])
 
     return out
@@ -425,8 +424,10 @@ def f_dust(tau): #need to make work when tau is an array
 #####classes############# 
 class MC_func:
     #makes more like function, so input params and the chi is outputted
-    def __init__(self,data,spect=spect):
-        data_match_all(data)
+    def __init__(self,data):
+        #global spect
+        self.spect=data_match_all(data)
+        #spect=self.spect
         #normalized so area under curve is 1 to keep chi values resonalble
         self.norms=self.area_under_curve(data)*10**-5 #need to turn off
         self.data=nu.copy(data)
@@ -437,7 +438,7 @@ class MC_func:
         age_unq=nu.unique(lib_vals[0][:,1])
         self.lib_vals=lib_vals
         self.age_unq= age_unq
-        self.metal_unq,self.spect=metal_unq,spect
+        self.metal_unq=metal_unq
         #self.bounds()
         
     def area_under_curve(self,data):
@@ -471,7 +472,7 @@ class MC_func:
             return nu.nan
         model=get_model_fit_opt(param,self.lib_vals,self.age_unq,self.metal_unq,bins)  
         model=dust(nu.hstack((param,dust_param)),model) #dust
-        N,model,chi=N_normalize(self.data, model,bins)
+        N,chi=N_normalize(self.data, model,bins)
     
         return chi,N
 
