@@ -2,7 +2,7 @@
 
 
 from Age_date import *
-from mpi4py import MPI
+#from mpi4py import MPI
 from scipy.cluster import vq as sci
 from scipy.stats import levene, f_oneway
 #import time as Time
@@ -186,7 +186,7 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
 
     param=nu.zeros([option.itter+1,len(parambest)])
     active_param=nu.zeros(len(parambest)-2)
-    active_dust=nu.random.rand(2)*5.
+    active_dust=nu.random.rand(2)*4.
 
     #bin=nu.log10(nu.linspace(10**age_unq.min(),10**age_unq.max(),bins+1)) #lin space
     bin=nu.linspace(age_unq.min(),age_unq.max(),bins+1) #log space
