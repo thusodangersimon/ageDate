@@ -36,7 +36,7 @@ import pyfits as fits
 import os
 from scipy.stats import signaltonoise as stn
 
-def Salt_fits(name):
+def Salt_fits(name,redshift=None):
     #takes 1-d spectra and returns [wavelenght,flux,uncertanty]
     #uncertanty is calculated fron scipy.stats.signaltonoise program
     #signal to noise is calculated by numpy.mean(data)/numpy.std(data)
@@ -48,7 +48,61 @@ def Salt_fits(name):
     out[:,0]=start+nu.arange(length)*step
     out[:,1]=spectra[0].data
     out[:,2]+=nu.std(out[:,1])
+    #redshift calibration
+    if not spectra[0].header.has_key('Z') and redshift:
+        raise KeyError('Does not have redshift keyword. Run get_2slaq_redshift'+
+                       ' to coorect')
+    else:
+        try:
+            redshift=spectra[0].header['Z']
+        except KeyError:
+            print name
+            raise
+    out[:,0] = z_cal(out[:,0],redshift)
     return out
+
+def get_2slaq_redshift(fits_files,cat_file,object_name):
+    #reads in 2slaq.cat file and adds "Z" key_word to fits file
+    #will skip over '#' charaters and match object_name to cat and add redshift
+    #to input fits files
+    slaq_cat=open(cat_file)
+    fits_hdu=fits.open(fits_files,'update')
+    line=slaq_cat.readline()
+    #check format of cat file
+    #if first line is not start of catalog
+    if not (len(line.split()[0])==19 and line.split()[0][0]=='J'): 
+        #check for #'s
+        if line.split()[0][0]=='#':
+            #skip to first non hash
+            while line.split()[0][0]=='#':
+                line=slaq_cat.readline()
+        else: #try skiping to first contition
+            while (len(line.split()[0])==19 and line.split()[0][0]=='J'):
+                line=slaq_cat.readline()
+    #start of loading catalog
+    cat={}
+    cat[line.split()[0]]=float(line.split()[12])
+    for i in slaq_cat:
+        temp=i.split()
+        cat[temp[0]]=float(temp[12])
+    if cat.has_key(object_name):
+        fits_hdu[0].header.update('Z',cat[object_name], 'Redshift')
+    else:
+        #try first 7 chars and search
+        temp=nu.array(cat.keys())
+        index=[]
+        for i in range(len(temp)):
+            if temp[i][:7]==object_name[:7]:
+                index.append(i+0)
+        if len(index)>1 or len(index)==0:
+            #print '%s is not found in catolog' %object_name
+            raise ValueError('%s is not found in catolog' %object_name)
+        else:
+            fits_hdu[0].header.update('Z',cat[temp[index[0]]], 'Redshift')
+    #write out
+    fits_hdu.update_extend()
+    fits_hdu.close()
+
 
 #==============================================================================
 # reading routine for SDSS-style format (format=1)
@@ -101,7 +155,11 @@ def stack(indir,sp='1d'):
 
     out[:,1]/=len(temp_data.keys())
     out[:,2]=nu.sqrt(out[:,2]/len(temp_data.keys())**2)
+    return out
 
+def z_cal(wave,redshift):
+    #does redshift calibration to put at z=0
+    return wave/(1+float(redshift)) 
     
 """
 
