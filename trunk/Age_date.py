@@ -47,6 +47,8 @@ try:
     spect,info= load_spec_lib(lib_path)  
 except OSError :
     lib_path=raw_input('location to spectra libray? eg. /home/thuso/Phd/Spectra_lib/')
+    if not lib_path[-1]=='/':
+        lib_path+='/'
     spect,info= load_spec_lib(lib_path)
 
 
@@ -285,10 +287,12 @@ def N_normalize(data,model,bins):
     except ValueError:
         N=nu.zeros([len(model.keys())])
         chi=nu.inf
-    #index=nu.nonzero(N==0)[0]
     N[N==0]+=10**-6
-    #index=nu.int64(model.keys())
-    return N,chi**2
+    #for numpy version 1.6
+    try:
+        return N,chi**2
+    except OverflowError:
+        return N,chi
     
 def chain_gen_all(means,metal_unq, age_unq,bins,sigma):
     #creates new chain for MCMC, does log spacing for metalicity
@@ -446,28 +450,23 @@ class MC_func:
         #gives area under curve of the data spectra
         return nu.trapz(data[:,1],data[:,0])
 
-    def func(self,param):
+    def func(self,param,dust_param,N=None):
+        '''returns y axis of ssp from parameters'''
         bins=param.shape[0]/3
         if len(param)!=bins*3:
             return nu.nan
-        if check(param,self.metal_unq, self.age_unq,bins): #make sure params are in correct range
-            for i in xrange(len(self.bounds)): #find which is out and fix
-                if self.bounds[i][0]>param[i]: #if below bounds
-                    param[i]=nu.copy(self.bounds[i][0])
-                if self.bounds[i][1]<param[i]: #if above bounds
-                    param[i]=nu.copy(self.bounds[i][1])
-
         model=get_model_fit_opt(param,self.lib_vals,self.age_unq,self.metal_unq,bins)  
-    #model=data_match_new(data,model,bins)
-        index=xrange(2,bins*3,3)
-        model['wave']= model['wave']*.0
-        for ii in model.keys():
-            if ii!='wave':
-                model['wave']+=model[ii]*param[index[int(ii)]]
-        return nu.sum((self.data[:,1]-model['wave'])**2)
+        model=dust(nu.hstack((param,dust_param)),model) #dust
+        if not N:
+            N,chi=N_normalize(self.data, model,bins)
+        else:
+            N=param[range(2,bins*3,3)]
+        return nu.sum(nu.array(model.values()).T[:,nu.argsort(nu.int64(nu.array(model.keys())))]*N,axis=1)
+ 
+
 
     def func_N_norm(self,param,dust_param):
-        #returns chi and N norm best fit params
+        '''returns chi and N norm best fit params'''
         bins=param.shape[0]/3
         if len(param)!=bins*3:
             return nu.nan
