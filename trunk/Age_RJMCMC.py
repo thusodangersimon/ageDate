@@ -65,14 +65,18 @@ def RJ_multi(data,burnin,k_max=16,cpus=cpu_count()):
                 print 'Starting convergence test'
             key_to_use=conver_test[0].keys()
             for i in conver_test:
-                for j in key_to_use:
-                    if len(i[j])<1000:
-                        key_to_use.remove(j)
+                j=0
+                while j<len( key_to_use):
+                    if len(i[key_to_use[j]])<1000:
+                        key_to_use.remove(key_to_use[j])
+                    else:
+                        j+=1
             if key_to_use:
                 #do convergence calc
                 if Convergence_tests(conver_test,key_to_use):
                     #make sure not all from same chain
-                    if nu.unique(rank)<3:
+                    if len(nu.unique(rank))<=cpus/2.:
+                        print 'But all from the same chain'
                         continue
                     #convergence!
                     #tidy up and end
@@ -87,12 +91,12 @@ def RJ_multi(data,burnin,k_max=16,cpus=cpu_count()):
                         temp=0
                         for i in conver_test:
                             temp+=len(i[j])
-                        if temp>5*10**6:
-                            sys.stdout.flush()
-                            while q_final.qsize()>0:
+                    if temp>10**6:
+                        sys.stdout.flush()
+                        while q_final.qsize()>0:
                                 q_final.get()
-                            option.value=False
-                            break   
+                        option.value=False
+                        break   
 
         else:
             Time.sleep(5)
