@@ -180,23 +180,30 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
         bayes_fact[str(i)]=[]
     #bins to start with
     bins=nu.random.randint(1,k_max)
+    while True:
     #create starting active params
-    bin=nu.log10(nu.linspace(10**age_unq.min(),10**age_unq.max(),bins+1))
-    bin_index=0
+        bin=nu.log10(nu.linspace(10**age_unq.min(),10**age_unq.max(),bins+1))
+        bin_index=0
     #start in random place
-    for k in xrange(3*bins):
-        if any(nu.array(range(0,bins*3,3))==k):#metalicity
-            active_param[str(bins)][k]=(nu.random.random()*metal_unq.ptp()+metal_unq[0])
-        else:#age and normilization
-            if any(nu.array(range(1,bins*3,3))==k): #age
-                active_param[str(bins)][k]=nu.random.random()*age_unq.ptp()+age_unq[0] #random place anywhere
-                bin_index+=1
-            else: #norm
-                active_param[str(bins)][k]=nu.random.random()*10000
+        for k in xrange(3*bins):
+            if any(nu.array(range(0,bins*3,3))==k):#metalicity
+                active_param[str(bins)][k]=(nu.random.random()*metal_unq.ptp()+metal_unq[0])
+            else:#age and normilization
+                if any(nu.array(range(1,bins*3,3))==k): #age
+                    active_param[str(bins)][k]=nu.random.random()*age_unq.ptp()+age_unq[0] #random place anywhere
+                    bin_index+=1
+                else: #norm
+                    active_param[str(bins)][k]=nu.random.random()*10000
     #try leastquares fit
-    chi[str(bins)].append(0.)
+        if len(chi[str(bins)])==1:
+            chi[str(bins)].append(0.)
     #active_param[str(bins)]=fun[str(bins)].n_neg_lest(active_param[str(bins)])
-    chi[str(bins)][-1],active_param[str(bins)][range(2,bins*3,3)]=fun.func_N_norm(active_param[str(bins)],active_dust)
+        chi[str(bins)][-1],active_param[str(bins)][range(2,bins*3,3)]=fun.func_N_norm(active_param[str(bins)],active_dust)
+    #check if starting off in bad place ie chi=inf
+        if nu.isinf(chi[str(bins)][-1]):
+            continue
+        else:
+            break
     param[str(bins)].append(nu.copy(nu.hstack((active_param[str(bins)],active_dust))))
     #parambest=nu.copy(active_param)
 
@@ -276,20 +283,20 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             Nreject[str(bins)]+=1
 
         ###########################step stuff
-        if len(param[str(bins)])<6000: #change sigma with acceptance rate
-            if  (acept_rate[str(bins)][-1]<.234 and 
-                                        all(sigma[str(bins)].diagonal()[nu.array([range(1,bins*3,3),range(0,bins*3,3)]).ravel()]<5.19)):
+        #if len(param[str(bins)])<6000: #change sigma with acceptance rate
+        if  (acept_rate[str(bins)][-1]<.234 and 
+             all(sigma[str(bins)].diagonal()[nu.array([range(1,bins*3,3),range(0,bins*3,3)]).ravel()]<5.19)):
                #too few aceptnce decrease sigma
-                sigma[str(bins)]=sigma[str(bins)]/1.05
-                sigma_dust/=1.05
-            elif acept_rate[str(bins)][-1]>.40 and all(sigma[str(bins)].diagonal()>=10**-5): #not enough
-                sigma[str(bins)]=sigma[str(bins)]*1.05
-                sigma_dust*=1.05
+            sigma[str(bins)]=sigma[str(bins)]/1.05
+            sigma_dust/=1.05
+        elif acept_rate[str(bins)][-1]>.40 and all(sigma[str(bins)].diagonal()>=10**-5): #not enough
+            sigma[str(bins)]=sigma[str(bins)]*1.05
+            sigma_dust*=1.05
             # else: #use covarnence matrix
-            if j%100==0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
-                sigma[str(bins)]=Covarence_mat(nu.array(param[str(bins)])[:,:-2],len(param[str(bins)]))
+        if j%100==0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
+            sigma[str(bins)]=Covarence_mat(nu.array(param[str(bins)])[:,:-2],len(param[str(bins)]))
                 
-                sigma_dust=Covarence_mat(nu.array(param[str(bins)])[:,-2:],len(param[str(bins)]))
+            sigma_dust=Covarence_mat(nu.array(param[str(bins)])[:,-2:],len(param[str(bins)]))
                 #active_param=fun.n_neg_lest(active_param)
         #if nu.all(sigma[str(bins)].diagonal()==0): #if step is 0 make small
         #    for k in xrange(sigma[str(bins)].shape[0]):
