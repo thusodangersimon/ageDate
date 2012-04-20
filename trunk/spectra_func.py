@@ -29,6 +29,7 @@
 """ Basic IO functions for Age_date.py. Also creates synthetic galaxy spectra using sfh files
 """
 
+import cPickle as pik
 import numpy as nu
 import os, sys
 from multiprocessing import Pool
@@ -51,21 +52,42 @@ def get_fitting_info(lib_path='/home/thuso/Phd/Code/Spectra_lib/'):
      
     return out[standard_file,:],nu.array(lib)[standard_file]   
 
-def load_spec_lib(lib_path='/home/thuso/Phd/Code/Spectra_lib/'):
-    #loads all spectra into libary
-    lib=get_fitting_info(lib_path)[1]
-    temp=read_spec(lib[0],lib_path)
-    #create array
-    out=nu.zeros([temp.shape[0],len(lib)+1])#out[:,0]=wavelength range
-    out[:,0]=temp[:,0]
-    #pool=Pool()
-    #m=pool.map
-    m=map
-    tempout=m(read_spec,lib,[lib_path]*len(lib))
-    #pool.close()
-    for i,j in enumerate(tempout):
-        out[:,i+1]=j[:,1]
-    return out, lib
+def load_spec_lib(lib_path='/home/thuso/Phd/Spectra_lib/'):
+    '''loads all spectra into libary first load of lib may be slow.
+    .splib files take precendence over .spec files'''
+    #check if exsiting .splib file 
+    files=os.listdir(lib_path)
+    splib_files=[]
+    splib_checker=lambda i: True if i[-5:] == 'splib' else False
+    if sum(map(splib_checker,files))>0: #quick check to se
+        for i in files:
+             if i[-5:] == 'splib':
+                 splib_files.append(i)
+        if len(splib_files)>1: #more thank 1 splib file to choose from
+            a=False
+            while not a:
+                a=raw_input('Please select lib to load %s ' %splib_files)
+        else:
+            a=splib_files[0]
+        return pik.load(open(a))
+    else:
+        print 'First Load, May take some time'
+        outname = raw_input('Please Give name of input Lib ')
+        
+        lib=get_fitting_info(lib_path)[1]
+        temp=read_spec(lib[0],lib_path)
+        #create array
+        out=nu.zeros([temp.shape[0],len(lib)+1])#out[:,0]=wavelength range
+        out[:,0]=temp[:,0]
+        #pool=Pool()
+        #m=pool.map
+        m=map
+        tempout=m(read_spec,lib,[lib_path]*len(lib))
+        #pool.close()
+        for i,j in enumerate(tempout):
+            out[:,i+1]=j[:,1]
+        pik.dump((out,lib),open(lib_path+outname+'.splib','w'),2)
+        return out, lib
 
 def edit_spec_range(spect,lam_min,lam_max):
     index=nu.nonzero(nu.logical_and(spect[:,0]>=lam_min,spect[:,0]<=lam_max))[0]
@@ -81,9 +103,9 @@ def from_file(files,lookback,lam_min=0,lam_max=nu.inf,lib_path='/home/thuso/Phd/
     return own_array_spect(datas[:,1],nu.log10(datas[:,3]),datas[:,2],lam_min=lam_min,lam_max=lam_max)
 
 def own_array_spect(age,metal=None,norm=None,Norm_max=5,lam_min=0,lam_max=nu.inf,lib_path='/home/thuso/Phd/Spectra_lib/'):
-    #takes an input age array and or metal, Norm  with same lenght
+    '''#takes an input age array and or metal, Norm  with same lenght
     #and turns it into composite spectra
-    #interpolates values an removes values out of bounds
+    #interpolates values an removes values out of bounds'''
     
     #initalize everything
     from Age_date import get_model_fit_opt
