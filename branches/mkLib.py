@@ -215,9 +215,33 @@ def miles_fits(inpath,outpath):
         outname='ssp_%1.4f_%1.6f.spec' %(Z,nu.log10(float(i[-12:-5])*10**9))
         nu.savetxt(outpath+outname,nu.vstack((wave,temp[0].data)).T)
 
-def FSPS(inpath,outpath,lambda_file):
-    #should have a location to wavelength file as well as in and out path
-    pass
+def ESPS(inpath,outpath):
+    if inpath[-1] != '/':
+        inpath += '/'
+    if outpath[-1] != '/':
+        outpath += '/'
+    
+    files = nu.array(os.listdir(inpath))
+    for i in files:
+        temp = nu.loadtxt(inpath+i)
+        temp_file = open(inpath+i)
+        j = temp_file.readline()
+        Z=i[-3:]
+        Z=float('.'+Z)
+        while j.split()[1].lower() != 'age':
+            j = temp_file.readline()
+            try:
+                j.split()[1].lower()
+            except IndexError:
+                j = temp_file.readline()
+
+        age= nu.float32(nu.array(j.split())[3:])
+        wave, temp = nu.copy(temp[:,0]), temp[:,range(1,temp.shape[1],3)]
+        wave = air_to_vacuum(wave) #convert from air to vacuum wavelengths
+        #convert air to vacuum wavelengths
+        for j in xrange(temp.shape[1]):
+            nu.savetxt(outpath+'ssp_%1.4f_%1.6f.spec' %(Z,nu.log10(age[j])),
+                       nu.vstack((wave,temp[:,j])).T)
 
 def ulyss_fits(inpath,outpath):
     import pyfits as fits
@@ -253,3 +277,62 @@ def ulyss_fits(inpath,outpath):
             outname='ssp_%1.4f_%1.6f.spec' %(metal[j],age[i])
             temp[:,1]=files[0].data[j,i,1:]
             nu.savetxt(outpath+outname,temp)
+
+####from astrophysiscs tools#######
+def air_to_vacuum(airwl,nouvconv=True):
+    """
+    Returns vacuum wavelength of the provided air wavelength array or scalar.
+    Good to ~ .0005 angstroms.
+
+    If nouvconv is True, does nothing for air wavelength < 2000 angstroms.
+    
+    Input must be in angstroms.
+    
+    Adapted from idlutils airtovac.pro, based on the IAU standard 
+    for conversion in Morton (1991 Ap.J. Suppl. 77, 119)
+    """
+    airwl = nu.array(airwl,copy=False,dtype=float,ndmin=1)
+    isscal = airwl.shape == tuple()
+    if isscal:
+        airwl = airwl.ravel()
+    
+    #wavenumber squared
+    sig2 = (1e4/airwl)**2
+    
+    convfact = 1. + 6.4328e-5 + 2.94981e-2/(146. - sig2) +  2.5540e-4/( 41. - sig2)
+    newwl = airwl.copy() 
+    if nouvconv:
+        convmask = newwl>=2000
+        newwl[convmask] *= convfact[convmask]
+    else:
+        newwl[:] *= convfact
+    return newwl[0] if isscal else newwl
+
+def vacuum_to_air(vacwl,nouvconv=True):
+    """
+    Returns air wavelength of the provided vacuum wavelength array or scalar.
+    Good to ~ .0005 angstroms.
+    
+    If nouvconv is True, does nothing for air wavelength < 2000 angstroms.
+    
+    Input must be in angstroms.
+    
+    Adapted from idlutils vactoair.pro.
+    """
+    vacwl = nu.array(vacwl,copy=False,dtype=float)
+    isscal = vacwl.shape == tuple()
+    if isscal:
+        vacwl = vacwl.ravel()
+    
+    #wavenumber squared
+    wave2 = vacwl*vacwl
+    
+    convfact = 1.0 + 2.735182e-4 + 131.4182/wave2 + 2.76249e8/(wave2*wave2)
+    newwl = vacwl.copy()/convfact
+    
+    if nouvconv:    
+        #revert back those for which air < 2000
+        noconvmask = newwl<2000
+        newwl[noconvmask] *= convfact[noconvmask] 
+    
+    return newwl[0] if isscal else newwl
