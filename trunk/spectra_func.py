@@ -41,16 +41,25 @@ def read_spec(name,lib_path='/home/thuso/Phd/Code/Spectra_lib/'):
 def get_fitting_info(lib_path='/home/thuso/Phd/Code/Spectra_lib/'):
     #gets list of ages,metalicity and asocated file names
     lib=os.listdir(lib_path)
-    out=nu.zeros([len(lib),2])
-    standard_file=[]
+    find_fun = lambda i: i if i[-4:] == 'spec' else None
+    standard_file=map(find_fun,lib)
+    try:
+        while True:
+            standard_file.remove(None)
+    except ValueError:
+        pass
+    if len(standard_file) == 0:
+        import Age_date as ag
+        lib=ag.info
+        out=nu.zeros([len(lib),2])
+    else:
+        out=nu.zeros([len(lib),2])
     for j,i in enumerate(lib):
-        if i[-4:]!='spec':
-            
-            continue
-        standard_file.append(j)
         out[j,:]=[float(i[4:10]),float(i[11:-5])]
-     
-    return out[standard_file,:],nu.array(lib)[standard_file]   
+    #not sure why this is ok 
+    #out[standard_file,:],nu.array(lib)[standard_file]   
+
+    return out,lib
 
 def load_spec_lib(lib_path='/home/thuso/Phd/Spectra_lib/'):
     '''loads all spectra into libary first load of lib may be slow.
@@ -69,7 +78,7 @@ def load_spec_lib(lib_path='/home/thuso/Phd/Spectra_lib/'):
                 a=raw_input('Please select lib to load %s ' %splib_files)
         else:
             a=splib_files[0]
-        return pik.load(open(a))
+        return pik.load(open(lib_path+a))
     else:
         print 'First Load, May take some time'
         outname = raw_input('Please Give name of input Lib ')
