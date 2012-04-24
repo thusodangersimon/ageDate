@@ -36,7 +36,7 @@ a=nu.seterr(all='ignore')
 
 
 
-def RJ_multi(data,burnin,k_max=16,cpus=cpu_count()):
+def RJ_multi(data,burnin,max_itter=5*10**5,k_max=16,cpus=cpu_count()):
     #does multiple chains for RJMCMC
     #shares info about chain to other chains
     option=Value('b',True)
@@ -56,7 +56,7 @@ def RJ_multi(data,burnin,k_max=16,cpus=cpu_count()):
         work[-1].start()
 
     rank,size,conver_test=-nu.ones(cpus),nu.zeros(cpus),[]
-    while True: 
+    while option.iter.value<=max_itter+burnin*cpus and option.value: 
         if q_talk.qsize()>=cpus:
             conver_test=[]
             for i in range(cpus):
@@ -86,17 +86,13 @@ def RJ_multi(data,burnin,k_max=16,cpus=cpu_count()):
                     #tidy up and end
                     sys.stdout.flush()
                     option.value=False
-                    break         
-                else: 
-       #doesn't seem like convergence works use other methods to stop chain
-                    #continue
-                    if option.iter.value>5*10**5:
-                        sys.stdout.flush()
-                        option.value=False
-                        break   
-
+                else:
+                    print 'Convergence test failed'
+            else:
+                print 'Convergence test failed'
         else:
             Time.sleep(5)
+            print '%2.2f percent done' %((float(option.iter.value)/max_itter)*100.)
     option.value=False
     #wait for proceses to finish
     count=0
@@ -214,7 +210,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
     birth_rate=.5
     
     while option.value:
-        if size%500==0:
+        if size%5000==0:
             print "hi, I'm at itter %i, chi %f from %s bins and for cpu %i" %(len(param[str(bins)]),chi[str(bins)][-1],bins,rank)
             sys.stdout.flush()
             #print sigma[str(bins)].diagonal()
@@ -342,7 +338,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             bayes_fact[str(bins)].append(nu.exp((chi[str(bins)][-1]-tchi)/2.)*birth_rate*critera) #save acceptance critera for later
             #rjmcmc acceptance critera ##############
             if bayes_fact[str(bins)][-1]>nu.random.rand():
-                print '%i has changed from %i to %i' %(rank,bins,temp_bins)
+                #print '%i has changed from %i to %i' %(rank,bins,temp_bins)
                 #accept model change
                 bins=temp_bins+0
                 chi[str(bins)].append(nu.copy(tchi))
@@ -364,15 +360,15 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
         if nu.min([1,nu.exp((chi[str(bins)][-2]-chi[str(bins)][-1])/(2.*SA(T_cuurent+1,burnin,T_start,T_stop))-(chi[str(bins)][-2]+chi[str(bins)][-1])/(2.*SA(T_cuurent,burnin,T_start,T_stop)))/T])>nu.random.rand():
             if T_cuurent<burnin:
                 T_cuurent+=1
-                #print T_cuurent,rank
+                print T_cuurent,burnin,rank
             elif T_cuurent==round(burnin):
                 print 'done with cooling'
                 T_cuurent+=1
             Nexchange_ratio+=1   
-        #make sure the change temp rate is aroudn 2%
-        if Nexchange_ratio/(nu.sum(Nacept.values())+nu.sum(Nreject.values()))>.02:
+        #make sure the change temp rate is aroudn 20%
+        if Nexchange_ratio/(nu.sum(Nacept.values())+nu.sum(Nreject.values()))>.25:
             T=T*1.05
-        elif Nexchange_ratio/(nu.sum(Nacept.values())+nu.sum(Nreject.values()))<.005:
+        elif Nexchange_ratio/(nu.sum(Nacept.values())+nu.sum(Nreject.values()))<.20:
             T=T/1.05
         #change temperature schedual
         #keep on order with chi squared
@@ -443,26 +439,10 @@ def Check(param,metal_unq, age_unq,bins,lib_vals=get_fitting_info(lib_path)): #c
     for j in xrange(bins):#check age and metalicity
         if any([metal_unq[-1],age_unq[-1]]<param[j*3:j*3+2]) or any([metal_unq[0],age_unq[0]]>param[j*3:j*3+2]):
             return True
-        else:
-            pass
-        '''
-            metal,age,line=find_az_box(param[j*3:j*3+2],age_unq,metal_unq)
-            if len(metal)!=4:
-                metal=metal*2
-            if len(age)!=4:
-                age=age*2
-            metal.sort();age.sort()
-            for i in range(4):
-                index=nu.nonzero(nu.logical_and(lib_vals[0][:,1]==age[i],
-                                                lib_vals[0][:,0]==10**metal[i]))[0] 
-                if not index:
-                    return True
-                    '''            
         if not (0<param[j*3+2]):  #check normalizations
             #print 'here',j
             return True
     return False
-
 
 def Chain_gen_all(means,metal_unq, age_unq,bins,sigma):
     #creates new chain for MCMC, does log spacing for metalicity
