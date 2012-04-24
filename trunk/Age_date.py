@@ -403,7 +403,7 @@ def dust(param,model):
     T_ism=f_dust(param[-2]*tau_lam)
     T_bc=f_dust(param[-1]*tau_lam)
     for i in xrange(bins): #for i in range(bins)
-        if param[i+1]<=t_bc: #choose which combo of dust models to use
+        if param[3*i+1]<=t_bc: #choose which combo of dust models to use
             #fdust*fbc
             model[str(i)]*=T_ism*T_bc
         else:
@@ -451,7 +451,8 @@ class MC_func:
         return nu.trapz(data[:,1],data[:,0])
 
     def func(self,param,dust_param,N=None):
-        '''returns y axis of ssp from parameters'''
+        '''returns y axis of ssp from parameters
+        if no N value, then does least squares for normallization params'''
         bins=param.shape[0]/3
         if len(param)!=bins*3:
             return nu.nan
@@ -460,11 +461,11 @@ class MC_func:
         if not N:
             N,chi=N_normalize(self.data, model,bins)
         else:
+            model.pop('wave')
             N=param[range(2,bins*3,3)]
-        return nu.sum(nu.array(model.values()).T[:,nu.argsort(nu.int64(nu.array(model.keys())))]*N,axis=1)
+
+        return nu.sum(nu.array(model.values()).T[:,nu.argsort(nu.int64(model.keys()))]*N[nu.int64(model.keys())],1)
  
-
-
     def func_N_norm(self,param,dust_param):
         '''returns chi and N norm best fit params'''
         bins=param.shape[0]/3
@@ -476,7 +477,6 @@ class MC_func:
     
         return chi,N
 
- 
     def min_bound(self,bins):
         #outputs an array of minimum values for parameters
         out=nu.zeros(bins*3)
