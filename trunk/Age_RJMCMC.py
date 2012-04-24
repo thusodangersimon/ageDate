@@ -38,9 +38,13 @@ a=nu.seterr(all='ignore')
 
 def RJ_multi(data,burnin,k_max=16,cpus=cpu_count()):
     #does multiple chains for RJMCMC
-    #shares info about chain every 300 itterations to other chains
+    #shares info about chain to other chains
     option=Value('b',True)
     option.cpu_tot=cpus
+    option.iter=Value('i',True)
+    option.chibest=Value('d',nu.inf)
+    option.parambest=Array('d',nu.ones(k_max*3+2)+nu.nan)
+
     #interpolate spectra so it matches the data
     global spect
     spect=data_match_all(data)
@@ -53,10 +57,13 @@ def RJ_multi(data,burnin,k_max=16,cpus=cpu_count()):
 
     rank,size,conver_test=-nu.ones(cpus),nu.zeros(cpus),[]
     while True: 
-        if q_final.qsize()>=cpus:
+        if q_talk.qsize()>=cpus:
             conver_test=[]
             for i in range(cpus):
-                rank[i],size[i],temp=q_final.get()
+                try:
+                    rank[i],size[i],temp=q_talk.get(timeout=1)
+                except:
+                    break
                 conver_test.append(temp)
             #make sure recived chains are from different processes
             if not all(nu.sort(rank)==range(cpus)):
@@ -71,40 +78,25 @@ def RJ_multi(data,burnin,k_max=16,cpus=cpu_count()):
                         key_to_use.remove(key_to_use[j])
                     else:
                         j+=1
-            if key_to_use:
+            if key_to_use and not len(nu.unique(rank))<=cpus/2.:
                 #do convergence calc
                 if Convergence_tests(conver_test,key_to_use):
                     #make sure not all from same chain
-                    if len(nu.unique(rank))<=cpus/2.:
-                        print 'But all from the same chain'
-                        continue
-                    #convergence!
+                    print 'Convergence! wrapping up'
                     #tidy up and end
                     sys.stdout.flush()
-                    while q_final.qsize()>0:
-                        q_final.get()
                     option.value=False
                     break         
-                else: #doesn't seem like convergence works use other methods to stop chain
+                else: 
+       #doesn't seem like convergence works use other methods to stop chain
                     #continue
-                    for j in key_to_use:
-                        temp=0
-                        for i in conver_test:
-                            temp+=len(i[j])
-                    if temp>10**6:
+                    if option.iter.value>5*10**5:
                         sys.stdout.flush()
-                        while q_final.qsize()>0:
-                                q_final.get()
                         option.value=False
                         break   
 
         else:
             Time.sleep(5)
-    while q_final.qsize()>0: #clear final queue
-        try:
-            a= q_final.get(timeout=1)
-        except:
-            break
     option.value=False
     #wait for proceses to finish
     count=0
@@ -146,7 +138,7 @@ def RJ_multi(data,burnin,k_max=16,cpus=cpu_count()):
             except ValueError: #if empty skip
                 pass
     for j in nu.int64(fac[:,0]): #post processing
-        outparam[str(int(j))],outchi[str(int(j))]=outparam[str(int(j))][2:,:],outchi[str(int(j))][1:]
+        outparam[str(int(j))],outchi[str(int(j))]=outparam[str(int(j))][2+burnin:,:],outchi[str(int(j))][1+burnin:]
         #outparam[str(int(j))][:,range(0,3*j,3)]=10**outparam[str(int(j))][:,range(0,3*j,3)]
         #outparam[str(int(j))][:,range(2,3*j,3)]=outparam[str(int(j))][:,range(2,3*j,3)]
     
@@ -205,11 +197,15 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
         else:
             break
     param[str(bins)].append(nu.copy(nu.hstack((active_param[str(bins)],active_dust))))
-    #parambest=nu.copy(active_param)
-
-    mybest=nu.copy([chi[str(bins)][0],bins])
-    parambest=nu.copy(nu.hstack((active_param[str(bins)],active_dust)))
-
+    #set best chi and param
+    if option.chibest.value>chi[str(bins)][-1]:
+        option.chibest.value=chi[str(bins)][-1]+.0
+        for kk in range(k_max):
+            if kk<bins*3+2:
+                option.parambest[kk]=nu.hstack((active_param[str(bins)],
+                                               active_dust))[kk]
+            else:
+                option.parambest[kk]=nu.nan
     #start rjMCMC
     T_cuurent,Nexchange_ratio=1.0,1.0
     size=0
@@ -224,29 +220,9 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             #print sigma[str(bins)].diagonal()
             #print 'Acceptance %i reject %i' %(Nacept,Nreject)
             #print active_param[str(bins)][range(2,bins*3,3)]
-        if q_talk.qsize()==0:
-            active_param[str(bins)]= Chain_gen_all(active_param[str(bins)],metal_unq, age_unq,bins,sigma[str(bins)])
-            active_dust=chain_gen_dust(active_dust,sigma_dust)
-        else:
-            try:
-                temp=q_talk.get(timeout=1)
-                if mybest[0]>temp[1] and bins==temp[0]:
-                    mybest=[temp[1]+0,temp[0]+0]
-                    active_param[str(bins)]=temp[2]+0
-                    active_dust=temp[3]+0
-                    q_talk.put(temp)
-                elif  bins!=temp[0] and mybest[0]>temp[1]: #only accept best move is bins are the same
-                    q_talk.put(temp)
-                    mybest=[temp[1]+0,temp[0]+0]
-                    active_param[str(bins)]= Chain_gen_all(active_param[str(bins)],metal_unq, age_unq,bins,sigma[str(bins)])
-                    active_dust=chain_gen_dust(active_dust,sigma_dust)
-                else:
-                    active_param[str(bins)]= Chain_gen_all(active_param[str(bins)],metal_unq, age_unq,bins,sigma[str(bins)])
-                    active_dust=chain_gen_dust(active_dust,sigma_dust)
-            except:
-                active_param[str(bins)]= Chain_gen_all(active_param[str(bins)],metal_unq, age_unq,bins,sigma[str(bins)])
-                active_dust=chain_gen_dust(active_dust,sigma_dust)
-        #bin_index=0
+        #sample from distiburtion
+        active_param[str(bins)]= Chain_gen_all(active_param[str(bins)],metal_unq, age_unq,bins,sigma[str(bins)])
+        active_dust=chain_gen_dust(active_dust,sigma_dust)
         #calculate new model and chi
         chi[str(bins)].append(0.)
         chi[str(bins)][-1],active_param[str(bins)][range(2,bins*3,3)]=fun.func_N_norm(active_param[str(bins)],active_dust)
@@ -261,7 +237,8 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             active_param[str(bins)]=active_param[str(bins)][temp_index]
          
         #decide to accept or not
-        a=nu.exp((chi[str(bins)][-2]-chi[str(bins)][-1])/SA(T_cuurent,burnin,T_start,T_stop))
+        a=nu.exp((chi[str(bins)][-2]-chi[str(bins)][-1])/
+                 SA(T_cuurent,burnin,T_start,T_stop))
         #metropolis hastings
         if a>nu.random.rand(): #acepted
             param[str(bins)].append(nu.copy(nu.hstack((active_param[str(bins)],active_dust))))
@@ -269,12 +246,17 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             if not nu.isinf(min(chi[str(bins)])): #put temperature on order of chi calue
                 T_start=nu.round(min(chi[str(bins)]))+1.
             #see if global best fit
-            if chi[str(bins)][-1]< mybest[0]:
-                mybest=nu.copy([chi[str(bins)][-1],bins])
-                parambest=nu.copy(nu.hstack((active_param[str(bins)],active_dust))) 
-                print '%i has best fit with chi of %2.2f and %i bins, %i steps left' %(rank,mybest[0],mybest[1],j_timeleft-j)
-                #send to other params
-                q_talk.put((bins,chi[str(bins)][-1],active_param[str(bins)],active_dust))
+            if option.chibest.value>chi[str(bins)][-1]:
+                #set global in sharred arrays
+                option.chibest.value=chi[str(bins)][-1]+.0
+                for kk in xrange(k_max):
+                    if kk<bins*3+2:
+                        option.parambest[kk]=nu.hstack((active_param[str(bins)],
+                                               active_dust))[kk]
+                    else:
+                        option.parambest[kk]=nu.nan
+                print '%i has best fit with chi of %2.2f and %i bins, %i steps left' %(rank,option.chibest.value,bins,j_timeleft-j)
+                
         else:
             param[str(bins)].append(nu.copy(param[str(bins)][-1]))
             active_param[str(bins)]=nu.copy(param[str(bins)][-1][:-2])
@@ -401,13 +383,36 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             elif acept_rate[str(bins)][-1]<.25 and T_start<3*10**5:
                 T_start*=2.
                 #T_stop-=.1'''
+        ################go to best fit place if after burnin
+        if (T_cuurent>burnin-500 and 
+            bins!=(nu.sum(~nu.isnan(option.parambest))-2)/3 and 
+            nu.random.rand()<.01):
+            #get correct RJ factor
+            temp_bins=(nu.sum(~nu.isnan(option.parambest))-2)/3
+            if bins>temp_bins:
+                critera=(1/2.)**temp_bins
+            else:
+                critera=(2.)**temp_bins
+            if critera*nu.exp((chi[str(bins)][-1]-option.chibest.value)/2.)>nu.random.rand():
+                #accept change
+                bins=nu.copy(temp_bins)
+                for kk in xrange(3*bins):
+                    active_param[str(bins)][kk]=nu.copy(option.parambest[kk])
+                for kk in xrange(3*bins,3*bins+2):
+                    active_dust[str(bins)][kk-3*bins]=nu.copy(option.parambest[kk])
+                chi[str(bins)].append(option.chibest.value)
+                param[str(bins)].append(nu.copy(parambest[:-2]))
+                
+                
+            
         ##############################convergece assment
         size=dict_size(param)
         if size%999==0 and size>30000:
-            q_final.put((rank,size,param))
+            q_talk.put((rank,size,param))
                 
         ##############################house keeping
         j+=1
+        option.iter.value+=1
         acept_rate[str(bins)].append(nu.copy(Nacept[str(bins)]/(Nacept[str(bins)]+Nreject[str(bins)])))
         out_sigma[str(bins)].append(nu.copy(sigma[str(bins)].diagonal()))
     #####################################return once finished 
@@ -468,26 +473,6 @@ def Chain_gen_all(means,metal_unq, age_unq,bins,sigma):
         out=nu.random.multivariate_normal(means,sigma)
         if Time.time()-t>.1:
             sigma/=1.05
-            if Time.time()-t>.5:
-                #change them one at a time till find the problem param
-                for i in xrange(len(means)):
-                    out[i]=nu.random.randn()*sigma[i,i]+means[i]
-                    if i==0 or i%3==0: #metal
-                        if out[i]<metal_unq.min() :
-                            out[i]=metal_unq.min()
-                        elif out[i]>metal_unq.max(): 
-                            out[i]=metal_unq.max()
-                    elif i==1 or (i-1)%3==0: #age
-                        if out[i]<age_unq.min() :
-                            out[i]=age_unq.min()
-                        elif out[i]>age_unq.max(): 
-                            out[i]=age_unq.max()
-
-                    elif i==2 or (i-2)%3==0: #norm
-                        if out[i]<0:
-                            out[i]=0
-                    
-
     return out
 
 def SA(i,i_fin,T_start,T_stop):
@@ -504,7 +489,7 @@ def Covarence_mat(param,j):
     if j-2000<0:
         return nu.cov(param[:j,:].T)
     else:
-        return nu.cov(param[j-2000:j,:].T)
+        return nu.cov(param[j-5000:j,:].T)
 
 def Convergence_tests(param,keys,n=1000):
     #uses Levene's test to see if var between chains are the same if that is True
