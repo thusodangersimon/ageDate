@@ -186,51 +186,42 @@ def get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins):
 def data_match_all(data):
     #makes sure data and model have same wavelength range and points for library
     model={}
+    out_data=nu.copy(data)
     global spect
+    #make spect_lib correct shape for changing
     for i in xrange(spect[0,:].shape[0]):
         if i==0:
             model['wave']=nu.copy(spect[:,i])
         else:
             model[str(i-1)]=nu.copy(spect[:,i])
-    #see if spectral lib is square ie has all combo's of age and metals
-    lib_vals=get_fitting_info(lib_path)
-    metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
-    age_unq=nu.unique(lib_vals[0][:,1])
-
-    model=data_match_new(data,model,spect[0,:].shape[0]-1)
+    #check to see if data wavelength is outside of spectra lib
+    min_index=nu.searchsorted(model['wave'],out_data[0,0])
+    max_index=nu.searchsorted(model['wave'],out_data[-1,0])
+    if min_index==0: #data is bellow spectra lib
+        print 'Spectra Library has does not go down to the same wavelength as input spectrum.'
+        out_data=data[nu.searchsorted(model['wave'],out_data[:,0])>0,:]
+    if max_index==model['wave'].shape[0]: #data goes above spectra lib
+        print 'Spectra Library has does not go up to the same wavelength as input spectrum.'
+        out_data=out_data[nu.searchsorted(model['wave'],out_data[:,0])<model['wave'].shape[0],:]
+    #interpolate spectra lib so it has same wavelength axis as data 
+    model=data_match_new(out_data,model,spect[0,:].shape[0]-1)
     out=nu.zeros([model['0'].shape[0],len(model.keys())+1])
-    out[:,0]=nu.copy(data[:,0])
+    out[:,0]=nu.copy(out_data[:,0])
     for i in model.keys():
         out[:,int(i)+1]=model[i]
     spect=nu.copy(out)
-    return spect
+    return spect,out_data
 
 def data_match_new(data,model,bins):
     #makes sure data and model have same wavelength range and points but with a dictionary
+    #assumes spect_lib is longer than data
     out={}
-    if model['wave'].shape[0]==data.shape[0]: #if same number of points
-        if all(model['wave']==data[:,0]):#if they have the same x-axis
-            for i in xrange(bins):
-                out[str(i)]=model[str(i)]
-        else: #if same number of points but different at points
-            print 'data match not ready yet'
-            raise
-    else: #not same shape, interp and or cut
-        index=nu.nonzero(nu.logical_and(model['wave']>=min(data[:,0]),
-                                        model['wave']<=max(data[:,0])))[0]
-        if index.shape[0]==data.shape[0]: #see if need to cut only
-            if sum(model['wave'][index]==data[:,0])==index.shape[0]:
-                for i in xrange(bins):
-                    out[str(i)]=model[str(i)][index]
-                #out['wave']=model['wave'][index]
-            else: #need to interpolate but keep same size
-                for i in xrange(bins):
-                    out[str(i)]=spectra_lin_interp(model['wave'],model[str(i)],data[:,0])
-                #model['wave']=data[:,0]
-        else:
-            for i in range(bins):
-                out[str(i)]=spectra_lin_interp(model['wave'],model[str(i)],data[:,0])
-            #model['wave']=data[:,0]
+    if nu.all(model['wave']==data[:,0]):#if they have the same x-axis
+        for i in xrange(bins):
+            out[str(i)]=model[str(i)]
+    else: #not same shape, interp 
+        for i in xrange(bins):
+            out[str(i)]=spectra_lin_interp(model['wave'],model[str(i)],data[:,0])
     return out
     
 
@@ -430,12 +421,11 @@ class MC_func:
     #makes more like function, so input params and the chi is outputted
     def __init__(self,data,bins=None):
         #global spect
-        self.spect=data_match_all(data)
+        self.spect,self.data=data_match_all(data)
         if bins:
             self.bins=bins
         #normalized so area under curve is 1 to keep chi values resonalble
         self.norms=self.area_under_curve(data)*10**-5 #need to turn off
-        self.data=nu.copy(data)
         self.data[:,1]=self.data[:,1]/self.norms
         lib_vals=get_fitting_info(lib_path)
         lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
@@ -531,23 +521,18 @@ def plot_model(param,data,bins):
     lib_vals=get_fitting_info(lib_path)
     lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0])
     metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
-    age_unq=nu.unique(lib_vals[0][:,1])
+    #age_unq=nu.unique(lib_vals[0][:,1])
     #check to see if metalicity is in log range (sort of)
     if any(param[range(0,bins*3,3)]>metal_unq.max()) or any(param[range(0,bins*3,3)]<metal_unq.min()):
         print 'taking log of metalicity'
         param[range(0,bins*3,3)]=nu.log10(param[range(0,bins*3,3)])
-    model=get_model_fit_opt(param,lib_vals,age_unq,metal_unq,bins)  
-    model=dust(param,model) 
-    model=data_match_new(data,model,bins)
-    index=xrange(2,bins*3,3)
-    for ii in model.keys():
-        model[ii]=model[ii]*param[index[int(ii)]]
-    index=nu.int64(model.keys())
-    out=nu.sum(nu.array(model.values()).T,1)
-    lab.plot(data[:,0],out,label='Model')
-    lab.plot(data[:,0],data[:,1],label='Data')
+
+    fun=MC_func(data)
+    out=fun.func(param[:-2],param[-2:],True)
+    lab.plot(fun.data[:,0],out,label='Model')
+    lab.plot(fun.data[:,0],data[:,1],label='Data')
     lab.legend()
-    return nu.vstack((data[:,0],out)).T
+    return nu.vstack((fun.data[:,0],out)).T
 
 
 
