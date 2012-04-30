@@ -80,9 +80,9 @@ class contestant(object):
     def __init__(self,mode):
         'has to modes, change always (ca) or stay'
         if mode=='ca' or mode=='change always':
-            self.mode=change
+            self.mode=self.change
         else:
-            self.mode=stay
+            self.mode=self.stay
 
         self._first_choice=nu.random.randint(3)+1
 
@@ -95,15 +95,16 @@ class contestant(object):
 
 
 if __name__=='__main__':
-
+    n=10**5
     prob_stay,prob_change=[],[]
     mode='stay'
-    for i in range(10**2):
+    for i in xrange(n):
         h=host()
         c=contestant(mode)
-        
-
-    mode='ca'
-    for i in range(10**2):
+        prob_stay.append(h.cont_choose(c.mode(h.cont_choose(c._first_choice))))
+    for i in xrange(n):
         h=host()
         c=contestant(mode)
+        prob_change.append(h.cont_choose(c.mode(h.cont_choose(c._first_choice))))
+    n=float(n)
+    print 'prob of stay %0.2f. Prob of change %0.2f' %(sum(prob_stay)/n,sum(prob_change)/n)
