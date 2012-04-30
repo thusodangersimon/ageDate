@@ -5,14 +5,11 @@ from Age_date import *
 #from mpi4py import MPI
 from scipy.cluster import vq as sci
 from scipy.stats import levene, f_oneway
-#import time as Time
 a=nu.seterr(all='ignore')
 
 def MCMC_multi(data,itter,bins,cpus=cpu_count(),burnin=5000):
     #more effecent version of multi core MCMC
     #uses cominication methods instead of creating and distroying processes
-
-    #shared arrays (chibest, parambest,i)
     chibest=Value('f', nu.inf)
 
     i=Value('i', 0)
@@ -264,24 +261,24 @@ def MCMC_SA(data,bins,i,chibest,parambest,option,q=None):
             chi[j]=nu.copy(chi[j-1])
             Nreject+=1
  
-        if j<1000: #change sigma with acceptance rate
+        #if j<1000: #change sigma with acceptance rate
             #k=random.randint(0,len(sigma)-1)
-            if Nacept/(Nacept+Nreject)>.50 and all(sigma.diagonal()>=10**-5): 
+        if Nacept/(Nacept+Nreject)>.50: #and all(sigma.diagonal()>=10**-5): 
                 #too few aceptnce decrease sigma
-                sigma/=1.05
-                sigma_dust/=1.05
-            elif Nacept/(Nacept+Nreject)<.25 and all(sigma.diagonal()[non_N_index]<10): #not enough
-                sigma*=1.05
-                sigma_dust*=1.05
-        else: #use covarnence matrix
-            if j%500==0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
-                sigma=Covarence_mat(param[:,:-2],j)
+            sigma/=1.05
+            sigma_dust/=1.05
+        elif Nacept/(Nacept+Nreject)<.25 and all(sigma.diagonal()[non_N_index]<10): #not enough
+            sigma*=1.05
+            sigma_dust*=1.05
+        #else: #use covarnence matrix
+        if j%500==0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
+            sigma=Covarence_mat(param[:,:-2],j)
                 #check if bellow 10**-5
                 #if any(sigma.diagonal()<10**-5):
                 #    for k in range(sigma.shape[0]):
                 #       if sigma[k,k]<10**-5:
                 #           sigma[k,k]=10**-5
-                sigma_dust==Covarence_mat(param[:,-2:],j)
+            sigma_dust==Covarence_mat(param[:,-2:],j)
                 #active_param=fun.n_neg_lest(active_param)
         #change temperature
         if nu.min([1,nu.exp(-(chi[j-1]-chi[j])/(2.*SA(T_cuurent+1,option.burnin,T_start,T_stop))-(chi[j-1]+chi[j])/(2.*SA(T_cuurent,option.burnin,T_start,T_stop)))/T])>nu.random.rand():
