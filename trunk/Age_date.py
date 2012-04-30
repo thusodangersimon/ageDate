@@ -289,23 +289,24 @@ def chain_gen_all(means,metal_unq, age_unq,bins,sigma):
     #creates new chain for MCMC, does log spacing for metalicity
     #lin spacing for everything else, runs check on values also
     out=nu.random.multivariate_normal(means,sigma)
-    t=Time.time()
+    '''t=Time.time()
     while check(out,metal_unq, age_unq,bins):
         out=nu.random.multivariate_normal(means,sigma)
         if Time.time()-t>.5:
             sigma=sigma/1.05
+            print sigma
             if Time.time()-t>2.:
                 print "I'm %i and I'm stuck" %current_process().ident
                 print means,sigma
                 #raise
-
+                '''
     return out
 
 def chain_gen_dust(means,sigma):
     #creates new chain for MCMC, for dust componet
+   # out=nu.random.multivariate_normal(means,sigma)
+    #while (out[0]<0 or out[1]<0) or (out[0]>5. or out[1]>5.):
     out=nu.random.multivariate_normal(means,sigma)
-    while (out[0]<0 or out[1]<0) or (out[0]>5. or out[1]>5.):
-        out=nu.random.multivariate_normal(means,sigma)
 
     return out
 
@@ -422,10 +423,8 @@ class MC_func:
     def __init__(self,data,bins=None):
         #global spect
         self.spect,self.data=data_match_all(data)
-        if bins:
-            self.bins=bins
         #normalized so area under curve is 1 to keep chi values resonalble
-        self.norms=self.area_under_curve(data)*10**-5 #need to turn off
+        self.norms=self.area_under_curve(data)*10**-7 #need to turn off
         self.data[:,1]=self.data[:,1]/self.norms
         lib_vals=get_fitting_info(lib_path)
         lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
@@ -434,8 +433,50 @@ class MC_func:
         self.lib_vals=lib_vals
         self.age_unq= age_unq
         self.metal_unq=metal_unq
-        #self.bounds()
+        #set prior info for age, and metalicity
+        self.metal_bound=nu.array([metal_unq.min(),metal_unq.max()])
+        self.dust_bound=nu.array([0.,4.])
+        #if want age to be binned
+        if bins == 'linear':
+            self.age_bound =lambda age_unq,bins: (
+                nu.log10(nu.linspace(10**age_unq.min(),10**age_unq.max(),bins + 1)))
+        elif bins == 'log':
+             self.age_bound =lambda age_unq,bins: nu.linspace(age_unq.min(),age_unq.max(),bins+1)
+        else: #no binning
+            self.age_bound=lambda age_unq,bins:nu.array([age_unq.min(),age_unq.max()])
+       
+
+    def uniform_prior(self,param):
+        #calculates prior probablity for a value (sort of, if not in range returns 0 else 1
         
+        #check to see if no bins or some type of binning
+        self.bins=(len(param)-2)/3
+        temp=self.age_bound(self.age_unq,self.bins)
+        out=1.
+        if len(temp)<=2:
+            #all types of binning should look same
+            for i in xrange(1,3*self.bins,3):
+                if param[i]>temp.max() or param[i]<temp.min(): #age
+                    out=0
+                    break
+                if param[i-1]>self.metal_bound.max() or param[i-1]<self.metal_bound.min(): #metal
+                    out=0
+                    break
+        else: #some type of binning
+            for i in xrange(self.bins):
+                if param[i*3+1]>temp[i+1] or param[i*3+1]<temp[i]:
+                    out=0
+                    break
+                if param[i*3]>self.metal_bound.max() or param[i*3]<self.metal_bound.min(): #metal
+                    out=0
+                    break
+        #check dust
+        if nu.any(param[-2:]>self.dust_bound.max()) or nu.any(param[-2:]<self.dust_bound.min()):
+            return 0
+        return out
+        
+
+
     def area_under_curve(self,data):
         #gives area under curve of the data spectra
         return nu.trapz(data[:,1],data[:,0])
@@ -446,6 +487,9 @@ class MC_func:
         bins=param.shape[0]/3
         if len(param)!=bins*3:
             return nu.nan
+        #check if params are in correct range
+        if self.uniform_prior(nu.hstack((param,dust_param)))<1:
+            return nu.zeros_like(self.spect[:,0])
         model=get_model_fit_opt(param,self.lib_vals,self.age_unq,self.metal_unq,bins)  
         model=dust(nu.hstack((param,dust_param)),model) #dust
         if not N:
@@ -461,6 +505,10 @@ class MC_func:
         bins=param.shape[0]/3
         if len(param)!=bins*3:
             return nu.nan
+        #check if params are in correct range
+        if self.uniform_prior(nu.hstack((param,dust_param)))<1:
+            return nu.inf,nu.zeros(bins)
+
         model=get_model_fit_opt(param,self.lib_vals,self.age_unq,self.metal_unq,bins)  
         model=dust(nu.hstack((param,dust_param)),model) #dust
         N,chi=N_normalize(self.data, model,bins)
@@ -529,8 +577,8 @@ def plot_model(param,data,bins):
 
     fun=MC_func(data)
     out=fun.func(param[:-2],param[-2:],True)
+    lab.plot(fun.data[:,0],fun.data[:,1]*fun.norms,label='Data')
     lab.plot(fun.data[:,0],out,label='Model')
-    lab.plot(fun.data[:,0],data[:,1],label='Data')
     lab.legend()
     return nu.vstack((fun.data[:,0],out)).T
 
