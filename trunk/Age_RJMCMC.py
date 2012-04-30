@@ -30,7 +30,7 @@
 
 from Age_date import *
 from scipy.cluster import vq as sci
-#from scipy.stats import levene, f_oneway,kruskal
+from scipy.stats import levene, f_oneway,kruskal
 from anderson_darling import anderson_darling_k as ad_k
 a=nu.seterr(all='ignore')
 
@@ -98,13 +98,13 @@ def RJ_multi(data,burnin,max_itter=5*10**5,k_max=16,cpus=cpu_count()):
     count=0
     temp=[]
     while count<cpus:
-        if q_final.qsize()>0:
-            try:
-                temp.append(q_final.get(timeout=1))
-                count+=1
-            except:
-                print len(temp)
-                break
+        option.value=False
+        try:
+            temp.append(q_final.get(timeout=1))
+            count+=1
+        except:
+            print len(temp)
+            break
     #post processing
     #decides which model is the best and which one has best chi sqared
     bayes_fac={}
@@ -218,7 +218,10 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             #print active_param[str(bins)][range(2,bins*3,3)]
         #sample from distiburtion
         active_param[str(bins)]= Chain_gen_all(active_param[str(bins)],metal_unq, age_unq,bins,sigma[str(bins)])
+        t=Time.time()
         active_dust=chain_gen_dust(active_dust,sigma_dust)
+        if Time.time()-t>.3:
+            print sigma_dust
         #calculate new model and chi
         chi[str(bins)].append(0.)
         chi[str(bins)][-1],active_param[str(bins)][range(2,bins*3,3)]=fun.func_N_norm(active_param[str(bins)],active_dust)
@@ -360,7 +363,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
         if nu.min([1,nu.exp((chi[str(bins)][-2]-chi[str(bins)][-1])/(2.*SA(T_cuurent+1,burnin,T_start,T_stop))-(chi[str(bins)][-2]+chi[str(bins)][-1])/(2.*SA(T_cuurent,burnin,T_start,T_stop)))/T])>nu.random.rand():
             if T_cuurent<burnin:
                 T_cuurent+=1
-                print T_cuurent,burnin,rank
+                #print T_cuurent,burnin,rank
             elif T_cuurent==round(burnin):
                 print 'done with cooling'
                 T_cuurent+=1
@@ -370,7 +373,9 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             T=T*1.05
         elif Nexchange_ratio/(nu.sum(Nacept.values())+nu.sum(Nreject.values()))<.20:
             T=T/1.05
-        #change temperature schedual
+        #change current temperature with size of param[bin]
+        if len(param[str(bins)])<burnin:
+            T_cuurent=len(param[str(bins)])
         #keep on order with chi squared
         '''if j%20==0:
             if acept_rate[str(bins)][-1]>.5 and T_start<10**-5:
@@ -391,15 +396,16 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
                 critera=(2.)**temp_bins
             if critera*nu.exp((chi[str(bins)][-1]-option.chibest.value)/2.)>nu.random.rand():
                 #accept change
+                #sigma[str(temp_bins)]=nu.i
                 bins=nu.copy(temp_bins)
                 for kk in xrange(3*bins):
                     active_param[str(bins)][kk]=nu.copy(option.parambest[kk])
                 for kk in xrange(3*bins,3*bins+2):
-                    active_dust[str(bins)][kk-3*bins]=nu.copy(option.parambest[kk])
+                    active_dust[kk-3*bins]=nu.copy(option.parambest[kk])
                 chi[str(bins)].append(option.chibest.value)
-                param[str(bins)].append(nu.copy(parambest[:-2]))
-                
-                
+                param[str(bins)].append(nu.copy(option.parambest[:3*bins-2]))
+                print '%i is switching to best fit' %rank
+                #print active_param[str(bins)].shape,sigma[str(bins)].shape,bins
             
         ##############################convergece assment
         size=dict_size(param)
@@ -448,20 +454,20 @@ def Chain_gen_all(means,metal_unq, age_unq,bins,sigma):
     #creates new chain for MCMC, does log spacing for metalicity
     #lin spacing for everything else, runs check on values also
     out=nu.random.multivariate_normal(means,sigma)
-    t=Time.time()
+    '''t=Time.time()
     while Check(out,metal_unq, age_unq,bins):
         out=nu.random.multivariate_normal(means,sigma)
         if Time.time()-t>.1:
-            sigma/=1.05
+            sigma/=1.05'''
     return out
 
 def SA(i,i_fin,T_start,T_stop):
     #temperature parameter for Simulated anneling (SA). 
     #reduices false acceptance rate if a<60% as a function on acceptance rate
-    if i>.02*i_fin:
+    if i>i_fin:
         return 1.0
     else:
-        return (T_stop-T_start)/float(.02*i_fin)*i+T_start
+        return (T_stop-T_start)/float(i_fin)*i+T_start
 
 def Covarence_mat(param,j):
     #creates a covarence matrix for the step size 
@@ -490,9 +496,7 @@ def Convergence_tests(param,keys,n=1000):
     if any(D_result.values()):
         print 'A-D test says they are the same'
         return True
-    else:
-        return False
-    '''#try kustkal test
+    #try kustkal test
     A_result={}
     out=False
     for i in keys:
@@ -527,16 +531,29 @@ def Convergence_tests(param,keys,n=1000):
                 return True
             else:
                 print '%i out of %i parameters have same varance' %(sum( L_result[i]>.05),
-                                                                param[0][i].shape[1])'''
-    #return False
+                                                                param[0][i].shape[1])
+    return False
  
 if __name__=='__main__':
 
     #profiling
     import cProfile as pro
-    data,info1,weight,dust=dust_iterp_spec(3,'norm',2000,10000)
-    burnin,k_max,cpus=50,16,1
+    import cPickle as pik
+    temp=pik.load(open('0.3836114.pik'))
+    #data,info1,weight,dust=dust_iterp_spec(3,'norm',2000,10000)
+    j='0.865598733333'
+    data=temp[3][j]
+    burnin,k_max,cpus=5000,16,1
     option=Value('b',True)
+    option.cpu_tot=cpus
+    option.iter=Value('i',True)
+    option.chibest=Value('d',nu.inf)
+    option.parambest=Array('d',nu.ones(k_max*3+2)+nu.nan)
+
+    #interpolate spectra so it matches the data
+    global spect
+    spect=data_match_all(data)
+
     rank=1
     q_talk,q_final=Queue(),Queue()
     pro.runctx('rjmcmc(data,burnin,k_max,option,rank,q_talk,q_final)'
