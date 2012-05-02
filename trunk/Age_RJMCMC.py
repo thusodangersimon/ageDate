@@ -218,10 +218,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             #print active_param[str(bins)][range(2,bins*3,3)]
         #sample from distiburtion
         active_param[str(bins)]= Chain_gen_all(active_param[str(bins)],metal_unq, age_unq,bins,sigma[str(bins)])
-        t=Time.time()
         active_dust=chain_gen_dust(active_dust,sigma_dust)
-        if Time.time()-t>.3:
-            print sigma_dust
         #calculate new model and chi
         chi[str(bins)].append(0.)
         chi[str(bins)][-1],active_param[str(bins)][range(2,bins*3,3)]=fun.func_N_norm(active_param[str(bins)],active_dust)
@@ -248,14 +245,14 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             if option.chibest.value>chi[str(bins)][-1]:
                 #set global in sharred arrays
                 option.chibest.value=chi[str(bins)][-1]+.0
-                for kk in xrange(k_max):
+                for kk in xrange(k_max*3):
                     if kk<bins*3+2:
                         option.parambest[kk]=nu.hstack((active_param[str(bins)],
                                                active_dust))[kk]
                     else:
                         option.parambest[kk]=nu.nan
                 print '%i has best fit with chi of %2.2f and %i bins, %i steps left' %(rank,option.chibest.value,bins,j_timeleft-j)
-                
+                #break
         else:
             param[str(bins)].append(nu.copy(param[str(bins)][-1]))
             active_param[str(bins)]=nu.copy(param[str(bins)][-1][:-2])
@@ -397,13 +394,13 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             if critera*nu.exp((chi[str(bins)][-1]-option.chibest.value)/2.)>nu.random.rand():
                 #accept change
                 #sigma[str(temp_bins)]=nu.i
-                bins=nu.copy(temp_bins)
+                bins=temp_bins+0
                 for kk in xrange(3*bins):
                     active_param[str(bins)][kk]=nu.copy(option.parambest[kk])
                 for kk in xrange(3*bins,3*bins+2):
                     active_dust[kk-3*bins]=nu.copy(option.parambest[kk])
-                chi[str(bins)].append(option.chibest.value)
-                param[str(bins)].append(nu.copy(option.parambest[:3*bins-2]))
+                chi[str(bins)].append(nu.copy(option.chibest.value))
+                param[str(bins)].append(nu.copy(option.parambest)[:3*bins+2])
                 print '%i is switching to best fit' %rank
                 #print active_param[str(bins)].shape,sigma[str(bins)].shape,bins
             
