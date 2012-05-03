@@ -34,8 +34,6 @@ from scipy.stats import levene, f_oneway,kruskal
 from anderson_darling import anderson_darling_k as ad_k
 a=nu.seterr(all='ignore')
 
-
-
 def RJ_multi(data,burnin,max_itter=5*10**5,k_max=16,cpus=cpu_count()):
     #does multiple chains for RJMCMC
     #shares info about chain to other chains
@@ -92,7 +90,7 @@ def RJ_multi(data,burnin,max_itter=5*10**5,k_max=16,cpus=cpu_count()):
                 print 'Convergence test failed'
         else:
             Time.sleep(5)
-            print '%2.2f percent done' %((float(option.iter.value)/max_itter)*100.)
+            print '%2.2f percent done' %((float(option.iter.value)/(max_itter+burnin*cpus))*100.)
     option.value=False
     #wait for proceses to finish
     count=0
@@ -217,8 +215,12 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             #print 'Acceptance %i reject %i' %(Nacept,Nreject)
             #print active_param[str(bins)][range(2,bins*3,3)]
         #sample from distiburtion
-        active_param[str(bins)]= Chain_gen_all(active_param[str(bins)],metal_unq, age_unq,bins,sigma[str(bins)])
-        active_dust=chain_gen_dust(active_dust,sigma_dust)
+        try:
+            active_param[str(bins)]= Chain_gen_all(active_param[str(bins)],metal_unq, age_unq,bins,sigma[str(bins)])
+            active_dust=chain_gen_dust(active_dust,sigma_dust)
+        except ValueError:
+            print active_param[str(bins)],sigma[str(bins)]
+            raise
         #calculate new model and chi
         chi[str(bins)].append(0.)
         chi[str(bins)][-1],active_param[str(bins)][range(2,bins*3,3)]=fun.func_N_norm(active_param[str(bins)],active_dust)
@@ -287,7 +289,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             rand_step,rand_index=nu.random.rand(3)*[metal_unq.ptp(), age_unq.ptp(),1.],nu.random.randint(bins)
             temp_bins=1+bins
             #criteria for this step
-            critera=(1/2.)**temp_bins
+            critera=(1/3.)**temp_bins
             #new param step
             for k in range(len(active_param[str(bins)])):
                 active_param[str(temp_bins)][k]=active_param[str(bins)][k]
@@ -311,7 +313,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             attempt=True #so program knows to attempt a new model
             temp_bins=bins-1
             #criteria for this step
-            critera=2.**temp_bins
+            critera=3.**temp_bins
             if .5>nu.random.rand():
                 #remove bins with 1-N/Ntot probablitiy
                 Ntot=nu.sum(active_param[str(bins)][range(2,bins*3,3)])
