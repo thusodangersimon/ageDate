@@ -424,7 +424,7 @@ class MC_func:
         #global spect
         self.spect,self.data=data_match_all(data)
         #normalized so area under curve is 1 to keep chi values resonalble
-        self.norms=self.area_under_curve(data)*10**-7 #need to turn off
+        self.norms=self.area_under_curve(data)*10**-5 #need to turn off
         self.data[:,1]=self.data[:,1]/self.norms
         lib_vals=get_fitting_info(lib_path)
         lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
