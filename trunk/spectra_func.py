@@ -34,6 +34,7 @@ import numpy as nu
 import os
 import sys
 from multiprocessing import Pool
+import boundary as bound
 
 def read_spec(name, lib_path='/home/thuso/Phd/Code/Spectra_lib/'):
     #reads in spec and turns into numpy array [lambda,flux]
@@ -100,43 +101,60 @@ def edit_spec_range(spect, lam_min, lam_max):
             spect[:,0] >= lam_min, spect[:, 0] <= lam_max))[0]
     return spect[index,:]
 
-def iterp_spec(bins, func='flat', have_dust=True, lam_min=0,
+def iterp_spec(bins, func='flat', has_dust=True, age_bins=False, lam_min=0,
                    lam_max=nu.inf, slope=None,
                lib_path='/home/thuso/Phd/Spectra_lib/'):
-    ##does everything from create_spectra but values not only from libary
+    '''does everything from create_spectra but values not only from libary
     #also adds dust absorption returns specrtra,info in ssp lib fmt, 
-    #weight, dust(tau_ism,tau_BC)
-    from Age_date import get_model_fit_opt, dust, find_az_box
+    #weight, dust(tau_ism,tau_BC) age_bins=[False, "linear","log"]'''
+    from Age_date import get_model_fit_opt, dust
     lib_vals = get_fitting_info(lib_path)
     lib_vals[0][:,0] = 10**nu.log10(lib_vals[0][:, 0])
     metal_unq = nu.log10(nu.unique(lib_vals[0][:, 0]))
     age_unq = nu.unique(lib_vals[0][:,1])
-   #generate random parameters
+    dust_bound = nu.array([0,4])
+    if age_bins:
+        #does different types of age binning
+        if age_bins.lower() == 'linear':
+            age_bins = nu.log10(nu.linspace(10**age_unq.min(),
+                                            10**age_unq.max(), 1+bins))
+        elif age_bins.lower() == 'log':
+            age_bins = nu.linspace(age_unq.min(),age_unq.max(), 1+bins)
+        else:
+            raise ValueError('"%s" is not a valid spacing opion' %age_bins)
+    else:
+        age_bins = nu.array([age_unq.min(), age_unq.max()])
+    #generate random parameters
     while True:
-        age = nu.random.rand(bins) * age_unq.ptp() + age_unq.min()
+        if len(age_bins) > 2:
+            age = nu.zeros(bins)
+            for i in xrange(bins):
+                age[i] = (nu.random.rand() * (age_bins[i+1] - age_bins[i]) + 
+                          age_bins[i])
+        else:
+            age = nu.random.rand(bins) * age_unq.ptp() +age_unq.min()
         metal = nu.random.rand(bins) * metal_unq.ptp() + metal_unq.min()
         age.sort()
         norm = SFR_func(func, bins, age)
         #turn params into standard format
         param = nu.zeros(len(age) * 3)
         index = 0
-        for i in range(0, len(age) * 3, 3):
+        for i in xrange(0, len(age) * 3, 3):
             param[i:i + 3] = [metal[index], age[index], norm[index]]
             index += 1
-            #make sure params in range
-            me, ag, ln = find_az_box(param[i: i + 2], age_unq, metal_unq)
-            if ag[0] == ag[2] and me[0] == me[2]:
-                break
+        if has_dust:
+            #add dust
+            param = nu.hstack((param, nu.random.rand(2) * dust_bound.ptp() +
+                       dust_bound.min()))
         else:
-            print 'finished'
+            param = nu.hstack((param, nu.zeros(2)))
+        #make sure params in range
+        if check(param,age_bins,dust_bound,lib_vals,age_unq,metal_unq):
             break
-        #check if param are in spectral lib range
-        
         
     #get spectra
-    model = get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins)
-    #add dust
-    param = nu.hstack((param, nu.random.rand(2) * 4.))
+    lib_vals[0][:,0] = 10**lib_vals[0][:,0]
+    model = get_model_fit_opt(param[:-2], lib_vals, age_unq, metal_unq, bins)
     model = dust(param, model)
     #get specified wavelenght range
     index = nu.nonzero(nu.logical_and(model['wave'] >= 
@@ -155,6 +173,43 @@ def iterp_spec(bins, func='flat', have_dust=True, lam_min=0,
         info_out.append('ssp_%1.4f_%1.6f.spec' %(10**metal[i], age[i]))
     #specrtra,info in ssp lib fmt, weight, dust(tau_ism,tau_BC)
     return out, info_out, norm, param[-2:]
+
+def check(param, age_bins, dust_bound, lib_vals, age_unq, metal_unq):
+    #checks to see if points are in param space
+    bins = (len(param) - 2) / 3
+    out = True
+    if len(age_bins) <= 2:
+        #all types of binning should look same
+        for i in xrange(1, 3 * bins, 3):
+            #age
+            if param[i] > age_bins.max() or param[i] < age_bins.min(): 
+                return False
+                
+    else: #some type of binning
+        for i in xrange(bins):
+            if (param[i * 3 + 1] > age_bins[i + 1] or 
+                param[i * 3 + 1] < age_bins[i]):
+                return False
+                
+    #make sure in boundary of points
+    index = nu.sort(nu.hstack((range(0,bins*3,3),range(1,bins*3,3))))
+    index = index.reshape(bins,2)
+    if nu.all(lib_vals[0][:,0] < 0): #metalicity is in log form
+        hull = bound.find_boundary(lib_vals[0])
+    else:
+        lib_vals[0][:,0] = nu.log10(lib_vals[0][:,0])
+        hull = bound.find_boundary(lib_vals[0])
+
+    for i in xrange(bins):
+        if not bound.pinp_wbounds(param[index][i], hull):
+            return False
+
+    #check dust
+    if (nu.any(param[-2:] > dust_bound.max()) or 
+        nu.any(param[-2:] < dust_bound.min())):
+        return False
+    return True
+
 
 #create spectra with different SFR
 ####add a weighting function
