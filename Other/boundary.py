@@ -29,265 +29,174 @@
 ''' tells from a set of points if another point lies with in them'''
 
 import numpy as nu
-import matplotlib.animation as animation
-import pylab as lab
-
-
 
 def find_boundary(points):
     ''' takes in a list of points and returns the vertex of each side of the 
     polygon that it makes
-    Jarvis Convex Hull algorithm.
-    points is a list of CGAL.Point_2 points
     '''
     #find first point on boundary
-    unq_x = nu.unique(points[:,0])
-    unq_y = nu.unique(points[:,1])
-    hull = []
-    for i in [unq_x.min(),unq_x.max()]:
-        for j in unq_y:
-            if nu.any(nu.logical_and(points[:,0] == i, 
-                                     points[:,1] == j)):
-                hull.append([i,j])
-                break
-        if hull:
-            break
-    r, u = r0, r0*nu.inf
-    #put all other points in array
-    remainingPoints = []
-    for i in points:
-        if not nu.all(i == hull):
-            remainingPoints.append(i)
-    remainingPoints = nu.array(remainingPoints)
-    #find  border
-    while  nu.all(remainingPoints):
-        u = remainingPoints[nu.random.randint(len(remainingPoints))]
-        for i in points:
-            if nu.all(i != u) and (not is_clockwise(r, u, i) or 
-                           is_collinear(r, u, i)):
-                u = i
-        r = u
-        #points.remove(r)
-        hull.append(r)
-        remainingPoints = remainingPoints[nu.all(remainingPoints == 
-                                                 r, axis=1) == False]
-    return nu.array(hull)
- 
-def is_clockwise(first, second=None, third=None):
-    '''takes 3 points or a list of points
-    if their are 3 points it will see if 
-    third point is clockwise from last 2.
-    If their is just a list of points will 
-    test to see if increasing clockwise'''
-    if not nu.all(second):
-        vertex = first
-    else:
-        vertex = nu.vstack((first, second, third))
-    if vertex.shape[0] < 3:
-      raise TypeError('Did no input in the right shape')
-    #ported from c code. Writen by G. Adam Stanislav.
-    count = 0
-    for i in range(vertex.shape[0]) :
-       j = (i + 1) % vertex.shape[0]
-       k = (i + 2) % vertex.shape[0]
-       z  = (vertex[j,0] - vertex[i,0]) * (vertex[k,1] - vertex[j,1])
-       z -= (vertex[j,1] - vertex[i,1]) * (vertex[k,0] - vertex[j,0])
-       if (z < 0):
-           count -= 1
-       elif(z > 0):
-           count += 1
-    if count > 0:
-        return True
-    else:
-        return False
-
-def is_collinear(first, second, third):
-    '''tells if points lie on a line'''
-    test_points = nu.vstack((first, second, third))
-    m_b = nu.polyfit(test_points[:-1,0], test_points[:-1,1],1)
-    if nu.polyval(m_b, third[0]) == third[1]:
-        return True
-    else:
-        return False
-      
-    #y-axis vertex finding
-def in_boundary(vertex, point):
-    '''tells if a point is in a polygon takes input from find_boundary'''
-    assert len(point) == vertex.shape[1]
-    #take dot product to see if right (positive) or left (negitive)
-    #of lines
-    for i in xrange(vertex.shape[0]):
-        #for last point in array wrap arround to firts point
-        if vertex.shape[0] - 1 == i:
-            bound_vec = vertex[0] - vertex[i]
-        else:
-            bound_vec = vertex[i + 1] - vertex[i]
-        point_vec = point - vertex[i]
-        if nu.dot(point_vec, bound_vec) < 0:
-            return False
-
-    return True
-
-
-def disp(points=None):
-    #shows the javis program in action
-    import Age_date as ag
-    points=ag.get_fitting_info('/home/thuso/Phd/Spectra_lib')[0]
- 
-    fig = lab.figure()
-    plt = fig.add_subplot(111)
-    plt.plot(points[:,0], points[:,1],'b.')#,animated=True)
-    fig.canvas.draw()
-    unq_x = nu.unique(points[:,0])
-    unq_y = nu.unique(points[:,1])
-    hull = []
-    for i in [unq_x.min(),unq_x.max()]:
-        for j in unq_y:
-            if nu.any(nu.logical_and(points[:,0] == i, 
-                                     points[:,1] == j)):
-                hull.append([i,j])
-                break
-        if hull:
-            break
-    r0 = nu.array(hull[0])
-    r, u = r0, r0*nu.inf
-    #put all other points in array
-    remainingPoints = []
-    for i in points:
-        if not nu.all(i == hull):
-            remainingPoints.append(i)
-    remainingPoints = nu.array(remainingPoints)
-    #find  border
-    kk = 0
-    while  nu.all(remainingPoints): #and kk < 1:
-        u = remainingPoints[nu.random.randint(len(remainingPoints))]
-        plt.plot([r0[0],u[0]], [r0[1],u[1]],'g')
-        fig.canvas.draw()
-        for i in points:
-            plt.plot([u[0],i[0]], [u[1],i[1]],'r')
-            fig.canvas.draw()
-            if nu.all(i != u) and (not is_clockwise(r, u, i) or 
-                           is_collinear(r, u, i)):
-                #change color of line
-                del plt.lines[-1]
-                plt.lines[-1].set_markerfacecolor('b')
-                fig.canvas.draw()
-                u = i
-                r = u
-                hull.append(r)
-                remainingPoints = remainingPoints[nu.all(remainingPoints == 
-                                                         r, axis=1) == False]
-            else:
-                del plt.lines[-1]
-                fig.canvas.draw()
-        del plt.lines[-1]
-        fig.canvas.draw()
-        kk += 1
-    #return nu.array(hull)
- 
-def convex_hull(points):
-    """Computes the convex hull of a set of 2D points.
- 
-    Input: an iterable sequence of (x, y) pairs representing the points.
-    Output: a list of vertices of the convex hull in counter-clockwise order,
-      starting from the vertex with the lexicographically smallest coordinates.
-    Implements Andrew's monotone chain algorithm. O(n log n) complexity.
-    """
- 
-    # Sort the points lexicographically (numpy array
-    #are compared lexicographically).
-    # Remove duplicates to detect the case we have just one unique point.
     points = points[nu.argsort(points[:,0])]
-  
-    # 2D cross product of OA and OB vectors, i.e. z-component of their 3D cross product.
-    # Returns a positive value, if OAB makes a counter-clockwise turn,
-    # negative for clockwise turn, and zero if the points are collinear.
-    def cross(o, a, b):
-        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
- 
-    # Build lower hull 
-    lower = []
-    for p in points:
-        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
-            lower.pop()
-        lower.append(p)
- 
-    # Build upper hull
-    upper = []
-    for p in reversed(points):
-        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
-            upper.pop()
-        upper.append(p)
- 
-    # Concatenation of the lower and upper hulls gives the convex hull.
-    # Last point of each list is omitted because it is repeated at the beginning of the other list. 
-    return lower[:-1] + upper[:-1]
- 
- 
-# Example: convex hull of a 10-by-10 grid.
-#assert convex_hull([(i/10, i%10) for i in range(100)]) == [(0, 0), (9, 0), (9, 9), (0, 9)]
-
-
-
-if __name__== '__main__':
+    index = []
+    #make sure starting point is a vertex of hull
+    for i in [points[:,0].min(), points[:,0].max()]:
+        for j in [points[:,1].min(), points[:,1].max()]:
+            #if the points exsist in points start there
+            if nu.any(nu.all(points == [i,j],axis=1)):
+                index, = nu.nonzero(nu.all(points == [i,j],axis=1))
+                new_index = [index[0]]
+                #put vertex point at start of array
+                points = points[nu.hstack((index[0],
+                                           range(index),
+                                           range(index+1,len(points))))]
+                break
+        if index:
+            break
+    vertex = points[0] + 0
+    hull = [vertex + 0]
+    rightmost = points[1] + 0 
+    #find  border
+    while  True:
+        for i in points:
+            #sees if point is on the right side of righmost
+            if ((nu.all(i == vertex) and 
+                nu.all(i == rightmost)) and 
+                is_right(vertex, rightmost, i)) <= 0:
+                #if on line make sure further away than other point
+                if ((is_right(vertex, rightmost, i)) == 0 and
+                ((i- vertex)**2).sum() > ((rightmost- vertex)**2).sum()):
+                    rightmost = i + 0
+                elif is_right(vertex, rightmost, i) < 0:
+                    rightmost = i + 0
+                
+        vertex = rightmost + 0
+        hull.append(vertex +0)
+        if nu.all(hull[0] == vertex):
+            break
+    if len(hull) < 3:
+        raise ValueError('Convex hull failed, try again')
+    return nu.array(hull)
     
-   #lab.ion()
-    import Age_date as ag
-    points=ag.get_fitting_info('/home/thuso/Phd/Spectra_lib')[0]
- 
+def is_right(P0, P1, P2):
+    #tests if a point is Left|On|Right of an infinite line.
+    #Input:  three points P0, P1, and P2 
+    #Return: >0 for P2 left of the line through P0 and P1
+    #=0 for P2 on the line
+    #<0 for P2 right of the line
+    #See: the January 2001 Algorithm on Area of Triangles
+    return (P1[0] - P0[0])*(P2[1] - P0[1]) - (P2[0] - P0[0])*(P1[1] - P0[1]);
+    
+def point_in_polygon(point,poly):
+    #tells if point is in polygon
+    n = len(poly)
+    inside = False
+    x,y = point
+    p1x,p1y = poly[0]
+    for i in xrange(n+1):
+        p2x,p2y = poly[i % n]
+        if y > min(p1y,p2y):
+            if y <= max(p1y,p2y):
+                if x <= max(p1x,p2x):
+                    if p1y != p2y:
+                        xinters = (y-p1y)*(p2x-p1x)/(p2y-p1y)+p1x
+                    if p1x == p2x or x <= xinters:
+                        inside = not inside
+        p1x,p1y = nu.copy([p2x,p2y])
+
+    return inside
+
+def pinp_wbounds(point,poly):
+    #tells if point is in polygon and hadels if its on a boundary
+    
+    p1x,p1y = poly[0]
+    #bound = 'on Boundary'
+    n = len(poly)
+    x,y = point
+    count = False
+    #//check all rays
+    for i in range(n):
+        if nu.all(point == [p1x,p1y]):
+            #if on vertex
+            #return bound
+            return True
+        p2x,p2y = poly[i % n]
+
+        #//ray is outside of our interests
+        if y < min(p1y, p2y) or y > max(p1y, p2y):
+            #//next ray left point
+            p1x = p2x
+            p1y = p2y
+            continue
+        #//ray is crossing over by the algorithm (common part of)
+        if y > min(p1y, p2y) and y < max(p1y, p2y):
+            #//x is before of ray
+            if x <= max(p1x, p2x):
+                #//overlies on a horizontal ray
+                if p1y == p2y and x >= min(p1x, p2x):
+                    #return bound
+                    return True
+                #//ray is vertical
+                if p1x == p2x:
+                    #//overlies on a ray
+                    if p1x == x:
+                        #return bound
+                        return True
+                    #//before ray
+                    else:
+                        count = not count
+
+                #//cross point on the left side
+                else:
+                    #//cross point of x
+                    xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
+
+                    #//overlies on a ray
+                    if abs(x - xinters) < 10**-6: #abritray small number
+                        #return bound
+                        return True
+                    #//before ray
+                    if x < xinters:
+                        count = not count
+        #//special case when ray is crossing through the vertex
+        else:
+        
+            #//p crossing over p2
+            if y == p2y and x <= p2x:
+                #//next vertex
+                p3x,p3y = poly[(i+1) % n]
+                
+                #//p.y lies between p1.y & p3.y
+                if y >= min(p1y, p3y) and y <= max(p1y, p3y):
+                    count = not count
+        #//next ray left point
+        p1x,p1y = p2x,p2y
+    #%//EVEN
+    return count
+
+def test(points):
+    #tests if all possible points in a square are in points and plots
+    import pylab as lab
+    #makes points for square
+    x_unq = nu.unique(points[:,0])
+    y_unq = nu.unique(points[:,1])
+    #make accept and reject lists
+    accept, reject =[], []
+    hull = find_boundary(points)
+    #sort which points are in boundary
+    for i in x_unq:
+        for j in y_unq:
+            if pinp_wbounds(nu.array([i,j]), hull):
+                accept.append(nu.array([i,j]))
+            else:
+                reject.append(nu.array([i,j]))
+
+    #plot them
+    accept = nu.array(accept)
     fig = lab.figure()
     plt = fig.add_subplot(111)
-    plt.plot(points[:,0], points[:,1],'b.',animated=True)
-    #fig.canvas.draw()
-    unq_x = nu.unique(points[:,0])
-    unq_y = nu.unique(points[:,1])
-    hull = []
-    for i in [unq_x.min(),unq_x.max()]:
-        for j in unq_y:
-            if nu.any(nu.logical_and(points[:,0] == i, 
-                                     points[:,1] == j)):
-                hull.append([i,j])
-                break
-        if hull:
-            break
-    r0 = nu.array(hull[0])
-    r, u = r0, r0*nu.inf
-    #put all other points in array
-    remainingPoints = []
-    for i in points:
-        if not nu.all(i == hull):
-            remainingPoints.append(i)
-    remainingPoints = nu.array(remainingPoints)
-    #find  border
-    kk = 0
-    #while  nu.all(remainingPoints) and kk < 1:
-    u = remainingPoints[nu.random.randint(len(remainingPoints))]
-    plt.plot([r0[0],u[0]], [r0[1],u[1]],'g')
-    
-    def ah(i):
-        global u,r
-        #for i in points[:10]:
-        plt.plot([u[0],i[0]], [u[1],i[1]],'r')
-        #fig.canvas.draw()
-        if nu.all(i != u) and (not is_clockwise(r, u, i) or 
-                               is_collinear(r, u, i)):
-                #change color of line
-            del plt.lines[-1]
-            plt.lines[-1].set_markerfacecolor('b')
-            #fig.canvas.draw()
-            u = i
-            r = u
-            hull.append(r)
-            remainingPoints = remainingPoints[nu.all(remainingPoints == 
-                                                         r, axis=1) == False]
-        else:
-            del plt.lines[-1]
-            #fig.canvas.draw()
-        try:
-            del plt.lines[-1]
-        except IndexError:
-            pass
-        #fig.canvas.draw()
-        #kk += 1
-
-    ani = animation.FuncAnimation(fig, ah, points, interval=25, blit=True)
+    plt.plot(accept[:,0],accept[:,1],'.',markersize=10,label='in bounds')
+    if reject:
+        reject = nu.array(reject)
+        plt.plot(reject[:,0],reject[:,1],'+' ,
+                 markersize=10,label='out of bounds')
+    plt.legend()
+    lab.show()
