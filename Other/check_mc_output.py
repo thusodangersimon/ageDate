@@ -34,7 +34,7 @@ import cPickle as pik
 import os, sys
 import Age_date as mc
 from scipy.stats import sigmaclip
-
+from scipy.cluster import vq 
 
 def RJmcmc_LRG_check(indir,bins=1):
 
@@ -71,3 +71,58 @@ def RJmcmc_LRG_check(indir,bins=1):
     lab.ylabel('Age (Gyr)')
     
     lab.show()
+
+
+def plot_SFR_age(param,chi):
+    '''plots age vs SFR for all models with above 30k itterations in them
+    uses k means clustering to seperate chains incase the went through
+    some "label switiching."'''
+
+    results = {}
+    for i in param.keys():
+        #make sure has 30K chains
+        if len(param[i]) >= 3 * 10**4:
+            results[i] = {'age':[], 'SFR': [], 'metal':[]}
+            #get age and norm chains
+            age = param[i][:,range(1,3*int(i),3)].ravel()
+            norm = param[i][:,range(2,3*int(i),3)].ravel()
+            metal = param[i][:,range(0,3*int(i),3)].ravel()
+            #do kmeans clustering
+            means, p = vq.kmeans2(age,int(i))
+            for j in nu.unique(p):
+                results[i]['age'].append(nu.percentile(age[p == j],
+                                                       [50,16,84]))
+                results[i]['SFR'].append(nu.percentile(norm[p == j],
+                                                       [50,16,84]))
+                results[i]['metal'].append(nu.percentile(metal[p == j],
+                                                         [50,16,84]))
+            
+            results[i]['age'] = nu.array(results[i]['age'])
+            results[i]['SFR'] = nu.array(results[i]['SFR'])
+            results[i]['metal'] = nu.array(results[i]['metal'])
+            #make quitiles relitive
+            results[i]['age'][:,1] = (results[i]['age'][:,0] - 
+                                      results[i]['age'][:,1])
+            results[i]['age'][:,2] = (results[i]['age'][:,2] - 
+                                      results[i]['age'][:,0])
+            
+            results[i]['SFR'][:,1] = (results[i]['SFR'][:,0] - 
+                                      results[i]['SFR'][:,1])
+            results[i]['SFR'][:,2] = (results[i]['SFR'][:,2] - 
+                                      results[i]['SFR'][:,0])
+            
+            results[i]['metal'][:,1] = (results[i]['metal'][:,0] - 
+                                        results[i]['metal'][:,1])
+            results[i]['metal'][:,2] = (results[i]['metal'][:,2] - 
+                                        results[i]['metal'][:,0])
+            
+            #plot
+            lab.figure()
+            lab.title('%s params' %i)
+            lab.xlabel('Age log(yrs)')
+            lab.ylabel('SFR')
+            lab.errorbar(results[i]['age'][:,0],results[i]['SFR'][:,0],
+                         xerr=results[i]['age'][:,1:].T,
+                         yerr=results[i]['SFR'][:,1:].T,
+                         fmt='.')
+    return results
