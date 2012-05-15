@@ -40,6 +40,7 @@ from scipy.optimize.minpack import leastsq
 from scipy.optimize import fmin_l_bfgs_b as fmin_bound
 from scipy.special import exp1 
 import time as Time
+import boundary as bound
 #123456789012345678901234567890123456789012345678901234567890123456789
 
 ###spectral lib stuff####
@@ -470,8 +471,11 @@ class MC_func:
         #initalize bound varables
         lib_vals=get_fitting_info(lib_path)
         #to keep roundoff error constistant
-        lib_vals[0][:,0]=10 ** nu.log10(lib_vals[0][:, 0]) 
-        metal_unq = nu.log10(nu.unique(lib_vals[0][:, 0]))
+        lib_vals[0][:,0]= nu.log10(lib_vals[0][:, 0]) 
+        metal_unq = nu.unique(lib_vals[0][:, 0])
+        #get boundary of parameters
+        self.hull = bound.find_boundary(lib_vals[0])
+        lib_vals[0][:,0] = 10**lib_vals[0][:,0]
         age_unq = nu.unique(lib_vals[0][:, 1])
         self.lib_vals = lib_vals
         self.age_unq = age_unq
@@ -480,6 +484,7 @@ class MC_func:
         #set prior info for age, and metalicity
         self.metal_bound = nu.array([metal_unq.min(),metal_unq.max()])
         self.dust_bound = nu.array([0., 4.])
+        
         #if want age to be binned
         if bins == 'linear':
             self.age_bound = lambda age_unq, bins: (
@@ -492,10 +497,12 @@ class MC_func:
             self.age_bound=lambda age_unq, bins: nu.array(
                 [age_unq.min(), age_unq.max()])
        
-    def uniform_prior(self, param):
+    def uniform_prior(self, param, bol=True):
         #calculates prior probablity for a value 
         #(sort of, if not in range returns 0 else 1
         
+        #need to add non bool output, doesn't catch holes in param space
+
         #check to see if no bins or some type of binning
         self.bins = (len(param) - 2) / 3
         temp = self.age_bound(self.age_unq, self.bins)
@@ -523,6 +530,13 @@ class MC_func:
                     param[i * 3] < self.metal_bound.min()): 
                     out=0
                     break
+        #make sure in boundary of points
+        index = nu.sort(nu.hstack((range(0, self.bins*3,3),
+                                   range(1,self.bins*3,3))))
+        index = index.reshape(self.bins,2)
+        for i in xrange(self.bins):
+            if not bound.pinp_wbounds(param[index[i]], self.hull):
+                return 0
         #check dust
         if (nu.any(param[-2:] > self.dust_bound.max()) or 
             nu.any(param[-2:] < self.dust_bound.min())):
