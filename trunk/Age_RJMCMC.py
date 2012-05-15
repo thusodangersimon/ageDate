@@ -62,6 +62,7 @@ def RJ_multi(data,burnin,max_itter=5*10**5,k_max=16,cpus=cpu_count()):
                     rank[i],size[i],temp=q_talk.get(timeout=1)
                 except:
                     break
+            '''
                 conver_test.append(temp)
             #make sure recived chains are from different processes
             if not all(nu.sort(rank)==range(cpus)):
@@ -86,8 +87,9 @@ def RJ_multi(data,burnin,max_itter=5*10**5,k_max=16,cpus=cpu_count()):
                     option.value=False
                 else:
                     print 'Convergence test failed'
+                pass
             else:
-                print 'Convergence test failed'
+                print 'Convergence test failed'''''
         else:
             Time.sleep(5)
             print '%2.2f percent done' %((float(option.iter.value)/(max_itter+burnin*cpus))*100.)
@@ -103,6 +105,12 @@ def RJ_multi(data,burnin,max_itter=5*10**5,k_max=16,cpus=cpu_count()):
         except:
             print len(temp)
             break
+    if not temp:
+        print 'Recived no data from processes, exiting'
+        return False,False,False
+    for i in work:
+        i.terminate()
+
     #post processing
     #decides which model is the best and which one has best chi sqared
     bayes_fac={}
@@ -208,7 +216,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
     birth_rate=.5
     
     while option.value:
-        if size%5000==0:
+        if option.iter.value%5000==0:
             print "hi, I'm at itter %i, chi %f from %s bins and for cpu %i" %(len(param[str(bins)]),chi[str(bins)][-1],bins,rank)
             sys.stdout.flush()
             #print sigma[str(bins)].diagonal()
@@ -219,7 +227,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             active_param[str(bins)]= Chain_gen_all(active_param[str(bins)],metal_unq, age_unq,bins,sigma[str(bins)])
             active_dust=chain_gen_dust(active_dust,sigma_dust)
         except ValueError:
-            print active_param[str(bins)],sigma[str(bins)]
+            print active_param[str(bins)],sigma[str(bins)],j
             raise
         #calculate new model and chi
         chi[str(bins)].append(0.)
@@ -289,7 +297,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             rand_step,rand_index=nu.random.rand(3)*[metal_unq.ptp(), age_unq.ptp(),1.],nu.random.randint(bins)
             temp_bins=1+bins
             #criteria for this step
-            critera=(1/3.)**temp_bins
+            critera=1/8. #(1/3.)**temp_bins
             #new param step
             for k in range(len(active_param[str(bins)])):
                 active_param[str(temp_bins)][k]=active_param[str(bins)][k]
@@ -298,7 +306,9 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
                 active_param[str(temp_bins)][-3:]=active_param[str(bins)][rand_index*3:rand_index*3+3]+rand_step
                 active_param[str(temp_bins)][rand_index*3:rand_index*3+3]=active_param[str(bins)][rand_index*3:rand_index*3+3]-rand_step
                 k=0
-                while Check(active_param[str(temp_bins)],metal_unq, age_unq, temp_bins): #check to see if in bounds
+                #check to see if in bounds
+                while fun.uniform_prior(nu.hstack((active_param[str(temp_bins)],
+                                                   active_dust))): 
                     k+=1
                     if k<100:
                         rand_step=nu.random.rand(3)*[metal_unq.ptp(), age_unq.ptp(),1.]
@@ -313,7 +323,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             attempt=True #so program knows to attempt a new model
             temp_bins=bins-1
             #criteria for this step
-            critera=3.**temp_bins
+            critera=8. #3.**temp_bins
             if .5>nu.random.rand():
                 #remove bins with 1-N/Ntot probablitiy
                 Ntot=nu.sum(active_param[str(bins)][range(2,bins*3,3)])
@@ -384,7 +394,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
                 T_start*=2.
                 #T_stop-=.1'''
         ################go to best fit place if after burnin
-        if (T_cuurent>burnin-500 and 
+        '''if (T_cuurent>burnin-500 and 
             bins!=(nu.sum(~nu.isnan(option.parambest))-2)/3 and 
             nu.random.rand()<.01):
             #get correct RJ factor
@@ -404,13 +414,14 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
                 chi[str(bins)].append(nu.copy(option.chibest.value))
                 param[str(bins)].append(nu.copy(option.parambest)[:3*bins+2])
                 print '%i is switching to best fit' %rank
+                j = 1
                 #print active_param[str(bins)].shape,sigma[str(bins)].shape,bins
-            
+                '''
         ##############################convergece assment
-        size=dict_size(param)
+        '''size=dict_size(param)
         if size%999==0 and size>30000:
             q_talk.put((rank,size,param))
-                
+           ''' 
         ##############################house keeping
         j+=1
         option.iter.value+=1
@@ -439,25 +450,10 @@ def is_send(N1,N2,N_prev):
         val_N+=N1[i]+N2[i]-N_prev['accept'][i]-N_prev['reject'][i]
     return val_N
 
-def Check(param,metal_unq, age_unq,bins,lib_vals=get_fitting_info(lib_path)): #checks if params are in bounds no bins!!!
-    lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0])
-    for j in xrange(bins):#check age and metalicity
-        if any([metal_unq[-1],age_unq[-1]]<param[j*3:j*3+2]) or any([metal_unq[0],age_unq[0]]>param[j*3:j*3+2]):
-            return True
-        if not (0<param[j*3+2]):  #check normalizations
-            #print 'here',j
-            return True
-    return False
-
 def Chain_gen_all(means,metal_unq, age_unq,bins,sigma):
     #creates new chain for MCMC, does log spacing for metalicity
     #lin spacing for everything else, runs check on values also
     out=nu.random.multivariate_normal(means,sigma)
-    '''t=Time.time()
-    while Check(out,metal_unq, age_unq,bins):
-        out=nu.random.multivariate_normal(means,sigma)
-        if Time.time()-t>.1:
-            sigma/=1.05'''
     return out
 
 def SA(i,i_fin,T_start,T_stop):
