@@ -221,9 +221,9 @@ def SFR_func(func, bins, age):
     elif func == 'norm':
         norm = 5 * nu.exp(-(age - 9.98) ** 2 / (2))
     elif func == 'expo':
-        pass
+        norm = expo(age)
     elif func == 'sinc':
-        pass
+        norm = sinc(age)
     elif func == 'stnt':
             #double peak
         norm = (5 * (1 + ((age - 8.5) / 0.05)**2 / 0.4)**(-(.4 + 
@@ -232,6 +232,14 @@ def SFR_func(func, bins, age):
     if bins == 1: 
         norm[0] = 1.
     return norm
+
+def sinc(age,x=7.5):
+    #sinc^2 functions centerd at x
+    return 50 * nu.sinc(age - x)**2.
+
+def expo(age, decay=2.):
+    #exponential decay function
+    return 0.1 * nu.exp(age / decay)
 
 def flat(bins, age_lower, age_upper, 
          lib,lib_path):
@@ -290,15 +298,6 @@ def line(slope, bins, age_lower, age_upper, lib, lib_path):
 
 def student_t(bins,max_SFR,std_SFR):
     pass
-
-def age_covert(age):
-    #turns age from lister values into Gyr
-    return 10**(age - 8)
-
-def metal_convert(metal):
-    #converts metalicity to bishops calc 
-    ####need covert to better way
-    nu.log10(Z + 1.1111) + 5
 
 def info_for_lib(lib_path='/home/thuso/Phd/Code/Spectra_lib/'):
     #calculates information content of spectral library
