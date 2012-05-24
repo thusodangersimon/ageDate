@@ -36,8 +36,13 @@ Gives standard names to files
 import os
 import numpy as nu
 import csv
+import pyfits as fits
+try:
+    from astLib import astSED as sed_lib
+except:
+    print 'some moduals may not work since no astLib installed'
 
-def from_file(inpath,outpath):
+def BC03(inpath,outpath):
     #makes exsisting spectra files into stadard using a file with the refeences
     
     if inpath[-1]!='/':
@@ -87,42 +92,94 @@ def metal_non_inf_conver(Z):
     #if their are 0's in metalicty so no nan crop up
     return 
 
-def Mar05(inpath,outpath):
-    #formats the Mar05 ssp into standard format
+def P09_all(inpath,outpath):
+    #looks in all dirs of main P09 dir and gets ssps
+    if inpath[-1]!='/':
+        inpath=inpath+'/'
+    if outpath[-1]!='/':
+        outpath=outpath+'/'
+    #check if a dir
+    files=os.listdir(inpath)
+    i=0
+    while i<len(files):
+        if os.path.isfile(inpath+files[i]):
+            files.pop(i)
+        else:
+            i+=1
+    #go into each file in files and extract the ssps
+    for i in files:
+        tochange=os.listdir(inpath+i)
+        i+='/'
+        try:
+            Z=float(i[4])*10**(-float(i[6]))
+        except ValueError: #non-standard dir probably not used to hold ssp
+            continue
+        temp_class=sed_lib.P09Model(inpath+i)
+        for j in temp_class.ages:
+            outname='ssp_%1.4f_%1.6f.spec' %(Z,nu.log10(j*10**9))
+            nu.savetxt(outpath+outname,nu.array(temp_class.getSED(j).asList())) #not normailized
+
+
+
+def P05(inpath,outpath):
+    #does P05 ssp's
     
     if inpath[-1]!='/':
         inpath=inpath+'/'
     if outpath[-1]!='/':
         outpath=outpath+'/'
 
+    #metalicity is formated as Zedf e.d * 10**-f
+
+def Mar05(inpath,outpath,IMF='ss', option='bhb'):
+    '''formats the Mar05 and M11 ssp into standard format
+    uses astLib
+    IMF can be "ss" for Salpeter, "kr" for kruopa or "cha" for chabrier
+    option can be bhb or rhr'''
+    if inpath[-1]!='/':
+        inpath=inpath+'/'
+    if outpath[-1]!='/':
+        outpath=outpath+'/'
+    option=option.lower()
+    #check IMF adn option are correct options
+    if not (option=='bhb' or option=='rhb'):
+        print 'those branches do not exsist try again: bhb or rhb'
+        raise
+    assert IMF == 'ss' or IMF == 'kr' or IMF == 'cha'
     #load file names
     files=nu.array(os.listdir(inpath))
     for i in files:
-        #load file
-        temp=nu.loadtxt(inpath+i)
+        #if suffix is bhb or rbr
+        if i.endswith(option) and i.rfind(IMF)>0:
+            temp=sed_lib.M05Model(inpath+i,fileType='ssp')
+        elif i.rfind(IMF)>0:
+            temp=sed_lib.M05Model(inpath+i,fileType='ssp')
+        else:
+            continue
+        #temp=sed_lib.M05Model(inpath+i,fileType='ssp')
         #split
-        split=temp.shape[0]/nu.unique(temp[:,2]).shape[0]
-        split_files=nu.split(temp,split)
-        for j in split_files:
-            if j[0,1]==.67:
-                metal=.007
-            elif j[0,1]==.35:
-                metal=.004
-            elif j[0,1]==0:
-                metal=.002
-            elif j[0,1]==-.33:
-                metal=.001
-            elif j[0,1]==-1.35:
-                metal=.0001
-            elif j[0,1]==-2.25:
-                metal=10**-4
-            outname='ssp_%1.4f_%1.6f.spec' %(metal,nu.log10(j[0,0]*10**9))
-            nu.savetxt(outpath+outname,j[:,2:4])
+        if i[i.find('z'):i.rfind('.')]=='z007': #in solar metalicity
+            metal=3.5
+        elif i[i.find('z'):i.rfind('.')]=='z004':
+            metal=2.
+        elif i[i.find('z'):i.rfind('.')]=='z002':
+            metal=1.
+        elif i[i.find('z'):i.rfind('.')]=='z001':
+            metal=.5
+        elif i[i.find('z'):i.rfind('.')]=='z0001':
+            metal=1/50.
+        elif i[i.find('z'):i.rfind('.')]=='z10m4':
+            metal=1/200.
+        #loop over ages in class
+        print i
+        for j in temp.ages:
+            outname='ssp_%1.4f_%1.6f.spec' %(metal,nu.log10(j*10**9))
+            nu.savetxt(outpath+outname,nu.array(temp.getSED(j).asList())) #not normailized
 
 def speed(inpath,outpath):
     pass
 
-def miles(inpath,outpath):
+def miles_fits(inpath,outpath):
     if inpath[-1]!='/':
         inpath=inpath+'/'
     if outpath[-1]!='/':
@@ -132,10 +189,156 @@ def miles(inpath,outpath):
     files=nu.array(os.listdir(inpath))
     for i in files:
         #load file
-        temp=nu.loadtxt(inpath+i)
-        outname='ssp_%1.4f_%1.6f.spec' %(metal_non_inf_conver(float(i[9:13])),nu.log10(float(i[14:])*10**9))
-        nu.savetxt(outpath+outname,temp)
+        temp=fits.open(inpath+i)
+        wave=nu.arange(temp[0].header['CRVAL1'],temp[0].header['CDELT1']*
+                temp[0].header['NAXIS1']+temp[0].header['CRVAL1'],temp[0].header['CDELT1']) #make wavelngth range
+        #get metalicty
+        for j in temp[0].header.get_comment():
+            if j.value.find('Age')>0:
+                break
+        try:    
+            metal=float(j.value[-6:-1])
+        except ValueError:
+            print i
+            raise
+        if metal==-2.32:
+            Z=0.0001
+        elif metal==-1.71:
+            Z=0.0004
+        elif metal==-1.31:
+            Z=0.0010
+        elif metal==-0.71:
+            Z=0.0040
+        elif metal==-0.40:
+            Z=0.0080
+        elif metal==0.00:
+            Z=0.0190
+        elif metal==0.22: #an error on the Miles website
+            Z=0.0300
+        else:
+            raise
+        
+        outname='ssp_%1.4f_%1.6f.spec' %(Z,nu.log10(float(i[-12:-5])*10**9))
+        nu.savetxt(outpath+outname,nu.vstack((wave,temp[0].data)).T)
 
-def FSPS(inpath,outpath,lambda_file):
-    #should have a location to wavelength file as well as in and out path
-    pass
+def ESPS(inpath,outpath):
+    if inpath[-1] != '/':
+        inpath += '/'
+    if outpath[-1] != '/':
+        outpath += '/'
+    
+    files = nu.array(os.listdir(inpath))
+    for i in files:
+        temp = nu.loadtxt(inpath+i)
+        temp_file = open(inpath+i)
+        j = temp_file.readline()
+        Z=i[-3:]
+        Z=float('.'+Z)
+        while j.split()[1].lower() != 'age':
+            j = temp_file.readline()
+            try:
+                j.split()[1].lower()
+            except IndexError:
+                j = temp_file.readline()
+
+        age= nu.float32(nu.array(j.split())[3:])
+        wave, temp = nu.copy(temp[:,0]), temp[:,range(1,temp.shape[1],3)]
+        wave = air_to_vacuum(wave) #convert from air to vacuum wavelengths
+        #convert air to vacuum wavelengths
+        for j in xrange(temp.shape[1]):
+            nu.savetxt(outpath+'ssp_%1.4f_%1.6f.spec' %(Z,nu.log10(age[j])),
+                       nu.vstack((wave,temp[:,j])).T)
+
+def ulyss_fits(inpath,outpath):
+    import pyfits as fits
+    #take ssp lib froma fits file and turns into correct format   
+    if outpath[-1]!='/':
+        outpath=outpath+'/'
+
+    files=fits.open(inpath)
+    for i in files: #extract age and metal combinations
+        try:
+            if i.header['EXTNAME'].lower()=='age':
+                age=i.data
+            elif i.header['EXTNAME'].lower()=='metal':
+                metal=i.data
+        except KeyError:
+            pass
+    # make wavelength array
+    wave=nu.arange(files[0].header['CRVAL1'],
+                   files[0].header['CRVAL1']+files[0].header['CDELT1']
+                   *(files[0].data.shape[2]-1),files[0].header['CDELT1'])
+    #makes 1 to many elements
+    #wave=wave[:-1]
+    #convert age from Myr to Gyr and take log10
+    age=nu.log10(nu.exp(age)*10**6)
+    #convert metal from dex to solar 
+    metal=10**metal
+    
+    #save 
+    temp=-nu.ones([wave.shape[0],2])
+    temp[:,0]=wave
+    for i in range(len(age)):
+        for j in range(len(metal)):
+            outname='ssp_%1.4f_%1.6f.spec' %(metal[j],age[i])
+            temp[:,1]=files[0].data[j,i,1:]
+            nu.savetxt(outpath+outname,temp)
+
+####from astrophysiscs tools#######
+def air_to_vacuum(airwl,nouvconv=True):
+    """
+    Returns vacuum wavelength of the provided air wavelength array or scalar.
+    Good to ~ .0005 angstroms.
+
+    If nouvconv is True, does nothing for air wavelength < 2000 angstroms.
+    
+    Input must be in angstroms.
+    
+    Adapted from idlutils airtovac.pro, based on the IAU standard 
+    for conversion in Morton (1991 Ap.J. Suppl. 77, 119)
+    """
+    airwl = nu.array(airwl,copy=False,dtype=float,ndmin=1)
+    isscal = airwl.shape == tuple()
+    if isscal:
+        airwl = airwl.ravel()
+    
+    #wavenumber squared
+    sig2 = (1e4/airwl)**2
+    
+    convfact = 1. + 6.4328e-5 + 2.94981e-2/(146. - sig2) +  2.5540e-4/( 41. - sig2)
+    newwl = airwl.copy() 
+    if nouvconv:
+        convmask = newwl>=2000
+        newwl[convmask] *= convfact[convmask]
+    else:
+        newwl[:] *= convfact
+    return newwl[0] if isscal else newwl
+
+def vacuum_to_air(vacwl,nouvconv=True):
+    """
+    Returns air wavelength of the provided vacuum wavelength array or scalar.
+    Good to ~ .0005 angstroms.
+    
+    If nouvconv is True, does nothing for air wavelength < 2000 angstroms.
+    
+    Input must be in angstroms.
+    
+    Adapted from idlutils vactoair.pro.
+    """
+    vacwl = nu.array(vacwl,copy=False,dtype=float)
+    isscal = vacwl.shape == tuple()
+    if isscal:
+        vacwl = vacwl.ravel()
+    
+    #wavenumber squared
+    wave2 = vacwl*vacwl
+    
+    convfact = 1.0 + 2.735182e-4 + 131.4182/wave2 + 2.76249e8/(wave2*wave2)
+    newwl = vacwl.copy()/convfact
+    
+    if nouvconv:    
+        #revert back those for which air < 2000
+        noconvmask = newwl<2000
+        newwl[noconvmask] *= convfact[noconvmask] 
+    
+    return newwl[0] if isscal else newwl
