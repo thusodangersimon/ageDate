@@ -41,6 +41,8 @@ from scipy.optimize import fmin_l_bfgs_b as fmin_bound
 from scipy.special import exp1 
 import time as Time
 import boundary as bound
+import Age_MCMC as mc
+import Age_RJMCMC as rjmc
 #123456789012345678901234567890123456789012345678901234567890123456789
 
 ###spectral lib stuff####
@@ -56,24 +58,6 @@ except OSError :
     if not lib_path[-1] == '/':
         lib_path += '/'
     spect,info = load_spec_lib(lib_path)
-
-
-def random_permute(seed):
-    #does random sequences to produice a random seed for parallel programs
-    ##middle squared method
-    seed = str(seed**2)
-    while len(seed) < 7:
-        seed=str(int(seed)**2)
-    #do more randomization
-    ##multiply with carry
-    a,b,c = int(seed[-1]), 2**32, int(seed[-3])
-    j = nu.random.random_integers(4, len(seed))
-    for i in range(int(seed[-j:-j+3])):
-        seed = (a*int(seed) + c) % b
-        c = (a * seed + c) / b
-        seed = str(seed)
-    return int(seed)
-
                
 def find_az_box(param, age_unq, metal_unq):
     #find closest metal
@@ -390,30 +374,6 @@ def nn_ls_fit(data, max_bins=16, min_norm=10**-4, spect=spect):
     return (metal[nu.argsort(age)], age[nu.argsort(age)], 
             N[N > min_norm][nu.argsort(age)])
 
-def rand_choice(x, prob):
-    #chooses value from x with probabity of prob**-1 
-    #so lower prob values are more likeliy
-    #x must be monotonically increasing
-    if not nu.sum(prob) == 1: #make sure prob equals 1
-        prob = prob / nu.sum(prob)
-    if nu.any(prob == 0): #get weird behavor when 0
-        #smallest value for float32 and 1/value!=inf
-        prob[prob == 0] = 6.4e-309 
-    #check is increasing
-    u = nu.random.rand()
-    if nu.all(x == nu.sort(x)): #if sorted easy
-        N = nu.cumsum(prob ** -1 / nu.sum(prob ** -1))
-        index = nu.array(range(len(x)))
-    else:
-        index = nu.argsort(x)
-        temp_x = nu.sort(x)
-        N = nu.cumsum(prob[index] ** -1 / nu.sum(prob[index] ** - 1))
-    try:
-        return index[nu.min(nu.abs(N - u)) == nu.abs(N - u)][0]
-    except IndexError:
-        print x,prob
-        raise
-
 def dict_size(dic):
     #returns total number of elements in dict
     size = 0
@@ -455,18 +415,34 @@ def f_dust(tau):
                                         - temp ** 2 * exp1(temp)))
     out[tau > 1] = nu.exp(-tau[tau > 1])
     return out
+'''
+def f_dust(tau):
+    #uses weave.inline
+    out = nu.zeros_like(tau)
+    if nu.all(out == tau): #if all zeros
+        return nu.ones_like(tau)
+    if nu.any(tau < 0): #if has negitive tau
+        out.fill(nu.inf)
+''' 
+
+def call_it(instance, name, args=(), kwargs=None):
+    "indirect caller for instance methods and multiprocessing"
+    if kwargs is None:
+        kwargs = {}
+    return getattr(instance, name)(*args, **kwargs)
 
 #####classes############# 
 class MC_func:
-    #makes more like function, so input params and the chi is outputted
-    def __init__(self, data, bins=None):
+    '''Does everything the is required for and Age_date mcmc sampler'''
+    def __init__(self, data,option='rjmc', burnin=10**4, itter=5*10**5,
+                 cpus=cpu_count(),bins=None):
         #match spectra for use in class
         self.spect, self.data=data_match_all(data)
         #normalized so area under curve is 1 to keep chi 
         #values resonalble
         #need to properly handel uncertanty
-        self.norms=self.area_under_curve(data) * 10 ** -5 #need to turn off
-        self.data[:,1] = self.data[:, 1] / self.norms
+        #self.norms=self.area_under_curve(data) * 10 ** -5 #need to turn off
+        #self.data[:,1] = self.data[:, 1] / self.norms
 
         #initalize bound varables
         lib_vals=get_fitting_info(lib_path)
@@ -477,26 +453,127 @@ class MC_func:
         self.hull = bound.find_boundary(lib_vals[0])
         lib_vals[0][:,0] = 10**lib_vals[0][:,0]
         age_unq = nu.unique(lib_vals[0][:, 1])
-        self.lib_vals = lib_vals
-        self.age_unq = age_unq
-        self.metal_unq = metal_unq
-
+        self._lib_vals = lib_vals
+        self._age_unq = age_unq
+        self._metal_unq = metal_unq
+        self._option = option
+        self._cpus = cpus
+        self.bins = bins
+        self._burnin = burnin
+        self._iter = itter
         #set prior info for age, and metalicity
         self.metal_bound = nu.array([metal_unq.min(),metal_unq.max()])
         self.dust_bound = nu.array([0., 4.])
         
-        #if want age to be binned
-        if bins == 'linear':
-            self.age_bound = lambda age_unq, bins: (
-                nu.log10(nu.linspace(10 ** age_unq.min(), 
-                                     10 ** age_unq.max(), bins + 1)))
-        elif bins == 'log':
-             self.age_bound = lambda age_unq, bins: nu.linspace(
-                 age_unq.min(), age_unq.max(), bins + 1)
-        else: #no binning
-            self.age_bound=lambda age_unq, bins: nu.array(
+    def run(self,verbose=True):
+        'starts run of Age_date using configuation files'
+        option = Value('b',True)
+        option.cpu_tot = self._cpus
+        option.iter = Value('i',True)
+        option.chibest = Value('d',nu.inf)
+        option.parambest = Array('d',nu.ones(self._k_max * 3 + 2) + nu.nan)
+        #start multiprocess need to make work with mpi
+        work=[]
+        q_talk,q_final=Queue(),Queue()
+
+        for ii in range(self._cpus):
+            work.append(Process(target=self.samp,
+                                args=(self.data,self._burnin,self._k_max,
+                                      option,ii,q_talk,q_final,self.send_class)))
+            work[-1].start()
+        while (option.iter.value <= self._iter + self._burnin * self._cpus 
+               and option.value):  
+            Time.sleep(5)
+            sys.stdout.flush()
+            print '%2.2f percent done' %((float(option.iter.value)/
+                                          (self._iter + self._burnin
+                                           * self._cpus))*100.)
+
+        #put in convergence diagnosis
+        option.value=False
+        #wait for proceses to finish
+        count=0
+        temp=[]
+        while count<self._cpus:
+            count+=1
+            try:
+                temp.append(q_final.get(timeout=5))
+            except:
+                print 'having trouble recieving data from queue please wait'
+                
+        if not temp:
+            print 'Recived no data from processes, exiting'
+            return False,False,False
+        for i in work:
+            i.terminate()
+        #figure out how to handel output
+
+    class send_functions(object):
+        'groups functions needed for MCMC or RJMCMC sampling'
+        def __init__(self,sampler,prior,proposal,log_lik):
+            self.sampler = sampler
+            self.prior = prior
+            self.proposal = proposal
+            self.lik = log_lik
+            #things needed for functions to work in both samplers
+            lib_vals=get_fitting_info(lib_path)
+            #to keep roundoff error constistant
+            lib_vals[0][:,0]= nu.log10(lib_vals[0][:, 0]) 
+            metal_unq = nu.unique(lib_vals[0][:, 0])
+            lib_vals[0][:,0] = 10**lib_vals[0][:,0]
+            age_unq = nu.unique(lib_vals[0][:, 1])
+            self._lib_vals = lib_vals
+            self._age_unq = age_unq
+            self._metal_unq = metal_unq
+
+    def autosetup(self):
+        'auto sets up class so ready for running'
+        #choose sampler
+        self.sampler(self._option)
+        '''#choose prior/boundary(not 100% ready yet)
+        self.prior = self.uniform_prior
+        #choose proposal function (only multivariate norm now)
+        self.proposal = nu.random.multivariate_normal
+        #choose -2log liklihood function (normal dist aka chi squared)
+        self.log_lik =  self.func_N_norm
+        '''
+        #make into send class
+        self.send_class = self.send_functions(self.samp,self.uniform_prior,
+                                          nu.random.multivariate_normal,
+                                            self.func_N_norm)  
+    def sampler(self,option):
+        '''puts samplers for use'''
+        if option == 'rjmc':
+            self.samp = rjmc.rjmcmc
+            self._k_max = 16
+            self.age_bound = lambda age_unq, bins: nu.array(
                 [age_unq.min(), age_unq.max()])
-       
+        elif option == 'mcmc':
+            self.samp = mc.MCMC_SA
+            #if want age to be binned only works
+            if self.bins == 'linear':
+                self.age_bound = lambda age_unq, bins: (
+                    nu.log10(nu.linspace(10 ** age_unq.min(), 
+                                         10 ** age_unq.max(), bins + 1)))
+            elif self.bins == 'log':
+                self.age_bound = lambda age_unq, bins: nu.linspace(
+                    age_unq.min(), age_unq.max(), bins + 1)
+            else: #no binning
+                self.age_bound = lambda age_unq, bins: nu.array(
+                    [age_unq.min(), age_unq.max()])
+
+        elif option == 'rjmpi':
+            raise FutureWarning('Not yet working')
+            self.samp = rjmc.rjmpi
+            self.age_bound = lambda age_unq, bins: nu.array(
+                [age_unq.min(), age_unq.max()])
+
+        elif option == 'mcmpi':
+            raise FutureWarning('Not yet working')
+            self.samp = mc.mcmpi
+        else:
+            print 'Wrong option, use "rjmc, mcmc, rjmpi, mcmpi"'
+
     def uniform_prior(self, param, bol=True):
         #calculates prior probablity for a value 
         #(sort of, if not in range returns 0 else 1
@@ -505,7 +582,7 @@ class MC_func:
 
         #check to see if no bins or some type of binning
         self.bins = (len(param) - 2) / 3
-        temp = self.age_bound(self.age_unq, self.bins)
+        temp = self.age_bound(self._age_unq, self.bins)
         out = 1.
         if len(temp) <= 2:
             #all types of binning should look same
@@ -566,11 +643,14 @@ class MC_func:
             #otherwise use from param array
             model.pop('wave')
             N = param[range(2, bins * 3, 3)]
-        
-        return nu.sum(nu.array(model.values()).T[:,
+        out = nu.zeros_like(model['0'])
+        for i in model.keys():
+            out += N[int(i)] * model[i]
+        '''return nu.sum(nu.array(model.values()).T[:,
                 nu.argsort(nu.int64(model.keys()))] * 
-                      N[nu.int64(model.keys())], 1)
- 
+                      N[nu.int64(model.keys())], 1)'''
+        return out
+        
     def func_N_norm(self, param, dust_param):
         '''returns chi and N norm best fit params'''
         bins = param.shape[0] / 3
@@ -580,8 +660,8 @@ class MC_func:
         if self.uniform_prior(nu.hstack((param,dust_param))) < 1:
             return nu.inf, nu.zeros(bins)
 
-        model = get_model_fit_opt(param, self.lib_vals, self.age_unq,
-                                  self.metal_unq, bins)  
+        model = get_model_fit_opt(param, self._lib_vals, self._age_unq,
+                                  self._metal_unq, bins)  
         model = dust(nu.hstack((param, dust_param)), model) #dust
         N,chi = N_normalize(self.data, model, bins)
     
@@ -640,6 +720,7 @@ class MC_func:
         except IndexError:
             out = param
         return out
+
 
 def plot_model(param, data, bins):
     import pylab as lab
