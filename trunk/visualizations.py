@@ -37,10 +37,10 @@ def make_chi_grid(data,points=500):
     #makes a 3d pic of metal,age,chi with input spectra 2-D only
     fun=ag.MC_func(data)
     #create grid
-    metal,age=nu.meshgrid(nu.linspace(fun.metal_unq.min(),
-                                      fun.metal_unq.max(),points),
-                          nu.linspace(fun.age_unq.min(),
-                                      fun.age_unq.max(),points))
+    metal,age=nu.meshgrid(nu.linspace(fun._metal_unq.min(),
+                                      fun._metal_unq.max(),points),
+                          nu.linspace(fun._age_unq.min(),
+                                      fun._age_unq.max(),points))
 
     param = nu.array(zip(metal.ravel(),age.ravel(),nu.ones_like(age.ravel())))
     dust_param = nu.zeros([len(param),2])
@@ -48,7 +48,7 @@ def make_chi_grid(data,points=500):
     po,out=Pool(),[]
     for i in xrange(len(param)):
         out.append(po.apply_async(func,args = (fun.data,param[i],dust_param[i],
-                            fun.lib_vals ,fun.age_unq,fun.metal_unq)))
+                            fun._lib_vals ,fun._age_unq,fun._metal_unq)))
     b=nu.array(map(get, out))
     po.close()
     po.join()
