@@ -28,10 +28,13 @@
 #
 ''' all moduals asociated with reverse jump mcmc'''
 
-from Age_date import *
+#from Age_date import *
+import numpy as nu
+import sys
 from scipy.cluster import vq as sci
 from scipy.stats import levene, f_oneway,kruskal
 from anderson_darling import anderson_darling_k as ad_k
+from multiprocessing import *
 a=nu.seterr(all='ignore')
 
 def RJ_multi(data,burnin,max_itter=5*10**5,k_max=16,cpus=cpu_count()):
@@ -44,8 +47,8 @@ def RJ_multi(data,burnin,max_itter=5*10**5,k_max=16,cpus=cpu_count()):
     option.parambest=Array('d',nu.ones(k_max*3+2)+nu.nan)
 
     #interpolate spectra so it matches the data
-    global spect
-    spect=data_match_all(data)
+    #global spect
+    #spect=data_match_all(data)
     work=[]
     q_talk,q_final=Queue(),Queue()
     #start multiprocess mcmc
@@ -148,21 +151,20 @@ def RJ_multi(data,burnin,max_itter=5*10**5,k_max=16,cpus=cpu_count()):
     return outparam,outchi,fac[fac[:,0].argsort(),:]
 
 
-def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=None):
+def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=None,fun=None):
     #parallel worker program reverse jump mcmc program
     nu.random.seed(random_permute(current_process().pid))
     #initalize boundaries
-    lib_vals=get_fitting_info(lib_path)
-    lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
-    metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
-    age_unq=nu.unique(lib_vals[0][:,1])
+    lib_vals = fun._lib_vals
+    metal_unq = fun._metal_unq
+    age_unq = fun._age_unq
     #create fun for all number of bins
     attempt=False
-    fun,param,active_param,chi,sigma={},{},{},{},{}
+    param,active_param,chi,sigma={},{},{},{}
     Nacept,Nreject,acept_rate,out_sigma={},{},{},{}
     active_dust,sigma_dust=nu.random.rand(2)*4.,nu.identity(2)*nu.random.rand()*2
     bayes_fact={} #to calculate bayes factor
-    fun=MC_func(data)
+    #fun=MC_func(data)
     for i in range(1,k_max+1):
         param[str(i)]=[]
         active_param[str(i)],chi[str(i)]=nu.zeros(3*i),[nu.inf]
@@ -193,7 +195,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
         if len(chi[str(bins)])==1:
             chi[str(bins)].append(0.)
     #active_param[str(bins)]=fun[str(bins)].n_neg_lest(active_param[str(bins)])
-        chi[str(bins)][-1],active_param[str(bins)][range(2,bins*3,3)]=fun.func_N_norm(active_param[str(bins)],active_dust)
+        chi[str(bins)][-1],active_param[str(bins)][range(2,bins*3,3)]=fun.lik(active_param[str(bins)],active_dust)
     #check if starting off in bad place ie chi=inf
         if nu.isinf(chi[str(bins)][-1]):
             continue
@@ -229,15 +231,17 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             #print active_param[str(bins)][range(2,bins*3,3)]
         #sample from distiburtion
         try:
-            active_param[str(bins)]= Chain_gen_all(active_param[str(bins)],metal_unq, age_unq,bins,sigma[str(bins)])
-            active_dust=chain_gen_dust(active_dust,sigma_dust)
+            active_param[str(bins)]= fun.proposal(active_param[str(bins)],
+                                                   sigma[str(bins)])
+            active_dust=fun.proposal(active_dust,sigma_dust)
              #print birth_rate, rank
         except ValueError:
             print len(param[str(bins)]),j
             raise
         #calculate new model and chi
         chi[str(bins)].append(0.)
-        chi[str(bins)][-1],active_param[str(bins)][range(2,bins*3,3)]=fun.func_N_norm(active_param[str(bins)],active_dust)
+        chi[str(bins)][-1],active_param[str(bins)][range(2,bins*3,3)]=fun.lik(
+            active_param[str(bins)],active_dust)
         #sort by age
         if not nu.all(active_param[str(bins)][range(1,bins*3,3)]==
                       nu.sort(active_param[str(bins)][range(1,bins*3,3)])):
@@ -290,7 +294,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             sigma[str(bins)]=sigma[str(bins)]*1.05
             sigma_dust*=1.05
             # else: #use covarnence matrix
-        if j%100==0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
+        if j%100==0 and j != 0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
             sigma[str(bins)]=Covarence_mat(nu.array(param[str(bins)])[:,:-2],len(param[str(bins)]))
             
             sigma_dust=Covarence_mat(nu.array(param[str(bins)])[:,-2:],len(param[str(bins)]))
@@ -316,8 +320,8 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
                 active_param[str(temp_bins)][rand_index*3:rand_index*3+3]=active_param[str(bins)][rand_index*3:rand_index*3+3]-rand_step
                 k=0
                 #check to see if in bounds
-                while fun.uniform_prior(nu.hstack((active_param[str(temp_bins)],
-                                                   active_dust))): 
+                while fun.prior(nu.hstack((active_param[str(temp_bins)],
+                                           active_dust))): 
                     k+=1
                     if k<100:
                         rand_step=nu.random.rand(3)*[metal_unq.ptp(), age_unq.ptp(),1.]
@@ -327,7 +331,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
                     active_param[str(temp_bins)][rand_index*3:rand_index*3+3]=active_param[str(bins)][rand_index*3:rand_index*3+3]-rand_step
             else: #draw new values randomly from param space
                 active_param[str(temp_bins)][-3:]=nu.random.rand(3)*nu.array([metal_unq.ptp(),age_unq.ptp(),5.])+nu.array([metal_unq.min(),age_unq.min(),0])
-        elif j > j_timeleft and bins > 1:
+        elif j > j_timeleft and bins > 1 and  0.01 < nu.random.rand():
             #death
             attempt=True #so program knows to attempt a new model
             temp_bins=bins-1
@@ -352,7 +356,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
                                                                         [3*ii:3*ii+3])
                         k+=1
                 active_param[str(temp_bins)][3*k:3*k+3]=(active_param[str(bins)][3*rand_index[0]:3*rand_index[0]+3]+active_param[str(bins)] [3*rand_index[1]:3*rand_index[1]+3])/2.
-        elif j>j_timeleft and  0.01 > nu.random.rand(): #move to global bestfit
+        elif j>j_timeleft: #move to global bestfit
             attempt=True
             print 'here'
             #extract best fit from global array
@@ -366,7 +370,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
         #calc chi of new model
         if attempt:
             attempt=False
-            tchi,active_param[str(temp_bins)][range(2,temp_bins*3,3)]=fun.func_N_norm(active_param[str(temp_bins)],active_dust)
+            tchi,active_param[str(temp_bins)][range(2,temp_bins*3,3)]=fun.lik(active_param[str(temp_bins)],active_dust)
             bayes_fact[str(bins)].append(nu.exp((chi[str(bins)][-1]-tchi)/2.)*critera) #save acceptance critera for later
             #rjmcmc acceptance critera ##############
             if bayes_fact[str(bins)][-1]>nu.random.rand():
@@ -385,6 +389,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
                     active_param[str(bins)]=active_param[str(bins)][temp_index]
                 param[str(bins)].append(nu.copy((nu.hstack((active_param[str(bins)],active_dust)))))
                 j,j_timeleft=0,nu.random.exponential(200)
+                continue
             if T_cuurent>=burnin:
                 j,j_timeleft=0,nu.random.exponential(200)
         else: #reset j and time till check for attempt jump
@@ -456,7 +461,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
         ###correct metalicity and norm 
         try:
             param[i][:,range(0,3*int(i),3)]=10**param[i][:,range(0,3*int(i),3)] #metalicity conversion
-            param[i][:,range(2,3*int(i),3)]=param[i][:,range(2,3*int(i),3)]*fun.norms #norm conversion
+            param[i][:,range(2,3*int(i),3)]=param[i][:,range(2,3*int(i),3)] #*fun.norms #norm conversion
         except ValueError:
             pass
         #acept_rate[i]=nu.array(acept_rate[i])
@@ -472,12 +477,6 @@ def is_send(N1,N2,N_prev):
         val_N+=N1[i]+N2[i]-N_prev['accept'][i]-N_prev['reject'][i]
     return val_N
 
-def Chain_gen_all(means,metal_unq, age_unq,bins,sigma):
-    #creates new chain for MCMC, does log spacing for metalicity
-    #lin spacing for everything else, runs check on values also
-    out=nu.random.multivariate_normal(means,sigma)
-    return out
-
 def SA(i,i_fin,T_start,T_stop):
     #temperature parameter for Simulated anneling (SA). 
     #reduices false acceptance rate if a<60% as a function on acceptance rate
@@ -485,6 +484,22 @@ def SA(i,i_fin,T_start,T_stop):
         return 1.0
     else:
         return (T_stop-T_start)/float(i_fin)*i+T_start
+
+def random_permute(seed):
+    #does random sequences to produice a random seed for parallel programs
+    ##middle squared method
+    seed = str(seed**2)
+    while len(seed) < 7:
+        seed=str(int(seed)**2)
+    #do more randomization
+    ##multiply with carry
+    a,b,c = int(seed[-1]), 2**32, int(seed[-3])
+    j = nu.random.random_integers(4, len(seed))
+    for i in range(int(seed[-j:-j+3])):
+        seed = (a*int(seed) + c) % b
+        c = (a * seed + c) / b
+        seed = str(seed)
+    return int(seed)
 
 def swarm_func(param,dust_param,chi,parambest,chibest,bins):
     #pushes current chain towards global best fit with streangth
@@ -527,6 +542,31 @@ def Covarence_mat(param,j):
             return False
         else:
             return cov
+
+
+def rand_choice(x, prob):
+    #chooses value from x with probabity of prob**-1 
+    #so lower prob values are more likeliy
+    #x must be monotonically increasing
+    if not nu.sum(prob) == 1: #make sure prob equals 1
+        prob = prob / nu.sum(prob)
+    if nu.any(prob == 0): #get weird behavor when 0
+        #smallest value for float32 and 1/value!=inf
+        prob[prob == 0] = 6.4e-309 
+    #check is increasing
+    u = nu.random.rand()
+    if nu.all(x == nu.sort(x)): #if sorted easy
+        N = nu.cumsum(prob ** -1 / nu.sum(prob ** -1))
+        index = nu.array(range(len(x)))
+    else:
+        index = nu.argsort(x)
+        temp_x = nu.sort(x)
+        N = nu.cumsum(prob[index] ** -1 / nu.sum(prob[index] ** - 1))
+    try:
+        return index[nu.min(nu.abs(N - u)) == nu.abs(N - u)][0]
+    except IndexError:
+        print x,prob
+        raise
 
 def Convergence_tests(param,keys,n=1000):
     #uses Levene's test to see if var between chains are the same if that is True
@@ -590,25 +630,27 @@ if __name__=='__main__':
     #profiling
     import cProfile as pro
     import cPickle as pik
-    temp=pik.load(open('0.3836114.pik'))
-    #data,info1,weight,dust=dust_iterp_spec(3,'norm',2000,10000)
-    j='0.865598733333'
-    data=temp[3][j]
+    from Age_date import *
+    #temp=pik.load(open('0.3836114.pik'))
+    data,info1,weight,dust=iterp_spec(1)
+    #j='0.865598733333'
+    #data=temp[3][j]
     burnin,k_max,cpus=5000,16,1
     option=Value('b',True)
     option.cpu_tot=cpus
     option.iter=Value('i',True)
     option.chibest=Value('d',nu.inf)
     option.parambest=Array('d',nu.ones(k_max*3+2)+nu.nan)
-
+    fun=MC_func(data)
+    fun.autosetup()
     #interpolate spectra so it matches the data
-    global spect
-    spect=data_match_all(data)
-
+    #global spect
+    #spect=data_match_all(data)
+    assert fun.send_class.__dict__.has_key('_lib_vals')
     rank=1
     q_talk,q_final=Queue(),Queue()
-    pro.runctx('rjmcmc(data,burnin,k_max,option,rank,q_talk,q_final)'
+    pro.runctx('rjmcmc(data,burnin,k_max,option,rank,q_talk,q_final,fun)'
                , globals(),{'data':data,'burnin':burnin,'k_max':k_max,
                             'rank':1,'q_talk':q_talk,'q_final':q_final
-                            ,'option':option}
-               ,filename='agedata.Profile')
+                            ,'option':option,'fun': fun.send_class}
+               ,filename='agedata1.Profile')
