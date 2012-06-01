@@ -358,7 +358,6 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
                 active_param[str(temp_bins)][3*k:3*k+3]=(active_param[str(bins)][3*rand_index[0]:3*rand_index[0]+3]+active_param[str(bins)] [3*rand_index[1]:3*rand_index[1]+3])/2.
         elif j>j_timeleft: #move to global bestfit
             attempt=True
-            print 'here'
             #extract best fit from global array
             best_param = nu.array(option.parambest)
             best_param = best_param[~nu.isnan(best_param)]
@@ -624,7 +623,47 @@ def Convergence_tests(param,keys,n=1000):
                 print '%i out of %i parameters have same varance' %(sum( L_result[i]>.05),
                                                                 param[0][i].shape[1])
     return False
- 
+
+def dic_data(temp,burnin):
+    '''processes data from rjmcmc, should be a list of tuples,
+    containin dicts'''
+    bayes_fac={}
+    for i in temp:
+        for j in i[2].keys():
+            try:
+                bayes_fac[j]=nu.concatenate((bayes_fac[j],i[2][j]))
+            except KeyError:
+                bayes_fac[j]=i[2][j]
+
+    fac=[]
+    for i in bayes_fac.keys():
+        if bayes_fac[i].shape[0]>0:
+            bayes_fac[i][bayes_fac[i]>1]=1. #accept critera is min(1,alpha)
+            fac.append([int(i),nu.mean(nu.nan_to_num(bayes_fac[i])),len(bayes_fac[i])])
+            #remove 1st bin for now#############
+    fac=nu.array(fac)
+    #grab chains with best fit and chech to see if mixed properly
+    outparam,outchi={},{}
+    for i in fac[:,0]:
+        outparam[str(int(i))],outchi[str(int(i))]=nu.zeros([2,3*i+2]),nu.array([nu.inf])
+    for i in temp:
+        for j in fac[:,0]:
+            try:
+                outparam[str(int(j))]=nu.concatenate((outparam[str(int(j))],i[0][str(int(j))][~nu.isinf(i[1][str(int(j))][1:]),:]),axis=0)
+                outchi[str(int(j))]=nu.concatenate((outchi[str(int(j))],i[1][str(int(j))][~nu.isinf(i[1][str(int(j))])]))
+            except ValueError: #if empty skip
+                pass
+    for j in nu.int64(fac[:,0]): #post processing
+        outparam[str(int(j))],outchi[str(int(j))]=outparam[str(int(j))][2+burnin:,:],outchi[str(int(j))][1+burnin:]
+    #remove empty bins
+    for i in outparam.keys():
+        if not nu.any(outparam[i]):
+            outparam.pop(i)
+            outchi.pop(i)
+            fac= fac[fac[:,0]!=int(i)]
+    
+    return outparam,outchi,fac[fac[:,0].argsort(),:]
+
 if __name__=='__main__':
 
     #profiling
