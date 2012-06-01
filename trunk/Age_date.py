@@ -39,10 +39,12 @@ from scipy.optimize import nnls
 from scipy.optimize.minpack import leastsq
 from scipy.optimize import fmin_l_bfgs_b as fmin_bound
 from scipy.special import exp1 
+from scipy import weave
 import time as Time
 import boundary as bound
 import Age_MCMC as mc
 import Age_RJMCMC as rjmc
+
 #123456789012345678901234567890123456789012345678901234567890123456789
 
 ###spectral lib stuff####
@@ -112,7 +114,7 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins):
                 index = nu.nonzero(nu.logical_and(lib_vals[0][:,0] ==
                                                   i, lib_vals[0][:,1]
                                                   == age))[0]
-                if not index: #if not in lib_vals return dummy array
+                if len(index)<1: #if not in lib_vals return dummy array
                     out[str(ii)] = spect[:,0] + nu.inf
                     interp = False
                     break
@@ -134,7 +136,7 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins):
                                                   i, lib_vals[0][:,0]
                                                   == 10 ** metal))[0]
                 
-                if not index: #if not in lib_vals return dummy array
+                if len(index)<1: #if not in lib_vals return dummy array
                     out[str(ii)] = spect[:,0] + nu.inf
                     interp = False
                     break
@@ -150,7 +152,7 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins):
                                             temp_param[0], 
                                             lib_vals[0][:,1] == 
                                             temp_param[1]))[0]
-            if not index: #if not in lib_vals return dummy array
+            if len(index)<1: #if not in lib_vals return dummy array
                 out[str(ii)] = spect[:,0] + nu.inf
             else:
                 out[str(ii)] = nu.copy(spect[:,index[0] + 1])
@@ -161,12 +163,12 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins):
                                              'int32')]
             age.sort()
             
-            for i in range(4):
+            for i in xrange(4):
                 index = nu.nonzero(nu.logical_and(lib_vals[0][:, 1] ==
                                                   age[i],
                                                   lib_vals[0][:, 0] ==
                                                   10 ** metal[i]))[0]
-                if not index: #if not in lib_vals return dummy array
+                if len(index)<1: #if not in lib_vals return dummy array
                     out[str(ii)] = spect[:, 0] + nu.inf
                     interp = False
                     break
@@ -235,23 +237,6 @@ def data_match_new(data, model, bins):
                                              model[str(i)], data[:,0])
     return out
 
-def check(param, metal_unq, age_unq, bins): 
-    #checks if params are in bounds
-    #linear spacing
-    #age=nu.log10(nu.linspace(10**age_unq.min(),10**age_unq.max(),bins+1))
-    #log spacing
-    age = nu.linspace(age_unq.min(), age_unq.max(), bins + 1) 
-    for j in xrange(bins): #check age and metalicity
-        if (any([metal_unq[-1], age[j + 1]] < param[j * 3: j * 3 + 2])
-            or any([metal_unq[0], age[j]] > param[j * 3 :j * 3 + 2])):
-            
-            '''if any([metal_unq[-1],age_unq[-1]]<param[j*3:j*3+2]) or any([metal_unq[0],age_unq[0]]>param[j*3:j*3+2]):'''
-            return True
-        #if any(nu.abs(nu.diff(param.take(range(1,bins*3,3))))<.3):
-        #    return True
-        if not (0 < param[j * 3 + 2]): #and param[j*3+2]<1): #check normalizations
-            return True
-    return False
 
 def normalize(data, model):
     #normalizes the model spectra so it is closest to the data
@@ -308,17 +293,6 @@ def N_normalize(data, model, bins):
     except OverflowError:
         return N, chi
     
-def chain_gen_all(means, metal_unq, age_unq, bins, sigma):
-    #creates new chain for MCMC, does log spacing for metalicity
-    #lin spacing for everything else, runs check on values also
-    out=nu.random.multivariate_normal(means,sigma)
-    return out
-
-def chain_gen_dust(means,sigma): #redundent
-    #creates new chain for MCMC, for dust componet
-    out=nu.random.multivariate_normal(means,sigma)
-    return out
-
 def multivariate_student(mu,sigma,n):
     #samples from a multivariate student t distriburtion
     #with mean mu,sigma as covarence matrix, and n is degrees of freedom
@@ -415,21 +389,11 @@ def f_dust(tau):
                                         - temp ** 2 * exp1(temp)))
     out[tau > 1] = nu.exp(-tau[tau > 1])
     return out
-'''
-def f_dust(tau):
-    #uses weave.inline
-    out = nu.zeros_like(tau)
-    if nu.all(out == tau): #if all zeros
-        return nu.ones_like(tau)
-    if nu.any(tau < 0): #if has negitive tau
-        out.fill(nu.inf)
-''' 
 
-def call_it(instance, name, args=(), kwargs=None):
-    "indirect caller for instance methods and multiprocessing"
-    if kwargs is None:
-        kwargs = {}
-    return getattr(instance, name)(*args, **kwargs)
+def np_data(temp):
+    '''processes data from mcmc, should be a list of tuples,
+    containin ndarrays'''
+    pass
 
 #####classes############# 
 class MC_func:
@@ -441,8 +405,8 @@ class MC_func:
         #normalized so area under curve is 1 to keep chi 
         #values resonalble
         #need to properly handel uncertanty
-        #self.norms=self.area_under_curve(data) * 10 ** -5 #need to turn off
-        #self.data[:,1] = self.data[:, 1] / self.norms
+        self.norms=self.area_under_curve(data) * 10 ** -5 #need to turn off
+        self.data[:,1] = self.data[:, 1] / self.norms
 
         #initalize bound varables
         lib_vals=get_fitting_info(lib_path)
@@ -507,6 +471,12 @@ class MC_func:
         for i in work:
             i.terminate()
         #figure out how to handel output
+        if type(temp[0][0]) is dict:
+            #probably rjmcmc output
+            return rjmc.dic_data(temp,self._burnin)
+        elif type(temp[0][0]) is nu.ndarray:
+            #probably regurlar mcmc output
+            return np_data(temp)
 
     class send_functions(object):
         'groups functions needed for MCMC or RJMCMC sampling'
