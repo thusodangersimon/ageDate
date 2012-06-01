@@ -390,11 +390,6 @@ def f_dust(tau):
     out[tau > 1] = nu.exp(-tau[tau > 1])
     return out
 
-def np_data(temp):
-    '''processes data from mcmc, should be a list of tuples,
-    containin ndarrays'''
-    pass
-
 #####classes############# 
 class MC_func:
     '''Does everything the is required for and Age_date mcmc sampler'''
@@ -476,7 +471,7 @@ class MC_func:
             return rjmc.dic_data(temp,self._burnin)
         elif type(temp[0][0]) is nu.ndarray:
             #probably regurlar mcmc output
-            return np_data(temp)
+            return mc.np_data(temp,self.send_class._bins)
 
     class send_functions(object):
         'groups functions needed for MCMC or RJMCMC sampling'
@@ -508,9 +503,25 @@ class MC_func:
         self.log_lik =  self.func_N_norm
         '''
         #make into send class
-        self.send_class = self.send_functions(self.samp,self.uniform_prior,
-                                          nu.random.multivariate_normal,
-                                            self.func_N_norm)  
+        if self._option == 'mcmc':
+            bins = raw_input('How many bins do you want to use? ')
+            
+            self.send_class = self.send_functions(self.samp,self.uniform_prior,
+                                                  nu.random.multivariate_normal,
+                                                  self.func_N_norm)
+            self.send_class._bins = int(bins)
+            #fuction to tell mcmc how to bin chains
+            self.send_class.bin = self.age_bound(self._age_unq,int(bins))
+            #dummy varible
+            self._k_max = int(bins)
+
+        elif self._option == 'rjmc':
+            self.send_class = self.send_functions(self.samp,self.uniform_prior,
+                                                  nu.random.multivariate_normal,
+                                                  self.func_N_norm)  
+        else:
+            print 'Option not set up yet, set up manually.'
+
     def sampler(self,option):
         '''puts samplers for use'''
         if option == 'rjmc':
@@ -525,12 +536,9 @@ class MC_func:
                 self.age_bound = lambda age_unq, bins: (
                     nu.log10(nu.linspace(10 ** age_unq.min(), 
                                          10 ** age_unq.max(), bins + 1)))
-            elif self.bins == 'log':
+            else : #log
                 self.age_bound = lambda age_unq, bins: nu.linspace(
                     age_unq.min(), age_unq.max(), bins + 1)
-            else: #no binning
-                self.age_bound = lambda age_unq, bins: nu.array(
-                    [age_unq.min(), age_unq.max()])
 
         elif option == 'rjmpi':
             raise FutureWarning('Not yet working')
