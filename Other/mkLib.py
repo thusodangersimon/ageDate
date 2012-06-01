@@ -152,23 +152,24 @@ def Mar05(inpath,outpath,IMF='ss', option='bhb'):
         #if suffix is bhb or rbr
         if i.endswith(option) and i.rfind(IMF)>0:
             temp=sed_lib.M05Model(inpath+i,fileType='ssp')
+            i=i[:-4]
         elif i.rfind(IMF)>0:
-            temp=sed_lib.M05Model(inpath+i,fileType='ssp')
+            temp=sed_lib.M05Model(inpath+i,fileType='ssp') 
         else:
             continue
         #temp=sed_lib.M05Model(inpath+i,fileType='ssp')
         #split
-        if i[i.find('z'):i.rfind('.')]=='z007': #in solar metalicity
+        if i.endswith('z007'): #in solar metalicity
             metal=3.5
-        elif i[i.find('z'):i.rfind('.')]=='z004':
+        elif i.endswith('z004'):
             metal=2.
-        elif i[i.find('z'):i.rfind('.')]=='z002':
+        elif i.endswith('z002'):
             metal=1.
-        elif i[i.find('z'):i.rfind('.')]=='z001':
+        elif i.endswith('z001'):
             metal=.5
-        elif i[i.find('z'):i.rfind('.')]=='z0001':
+        elif i.endswith('z0001'):
             metal=1/50.
-        elif i[i.find('z'):i.rfind('.')]=='z10m4':
+        elif i.endswith('z10m4'):
             metal=1/200.
         #loop over ages in class
         print i
