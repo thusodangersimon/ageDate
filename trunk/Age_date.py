@@ -468,30 +468,14 @@ class MC_func:
         #figure out how to handel output
         if type(temp[0][0]) is dict:
             #probably rjmcmc output
-            return rjmc.dic_data(temp,self._burnin)
+            self.param, self.chi, self.bayes = rjmc.dic_data(temp, self._burnin)
+            return self.param, self.chi, self.bayes
         elif type(temp[0][0]) is nu.ndarray:
             #probably regurlar mcmc output
-            return mc.np_data(temp,self.send_class._bins)
+            self.param, self.chi = mc.np_data(temp, self.send_class._bins)
+            return self.param, self.chi 
 
-    class send_functions(object):
-        'groups functions needed for MCMC or RJMCMC sampling'
-        def __init__(self,sampler,prior,proposal,log_lik):
-            self.sampler = sampler
-            self.prior = prior
-            self.proposal = proposal
-            self.lik = log_lik
-            #things needed for functions to work in both samplers
-            lib_vals=get_fitting_info(lib_path)
-            #to keep roundoff error constistant
-            lib_vals[0][:,0]= nu.log10(lib_vals[0][:, 0]) 
-            metal_unq = nu.unique(lib_vals[0][:, 0])
-            lib_vals[0][:,0] = 10**lib_vals[0][:,0]
-            age_unq = nu.unique(lib_vals[0][:, 1])
-            self._lib_vals = lib_vals
-            self._age_unq = age_unq
-            self._metal_unq = metal_unq
-
-    def autosetup(self):
+    def autosetup(self,bins=None):
         'auto sets up class so ready for running'
         #choose sampler
         self.sampler(self._option)
@@ -504,7 +488,8 @@ class MC_func:
         '''
         #make into send class
         if self._option == 'mcmc':
-            bins = raw_input('How many bins do you want to use? ')
+            if not bins:
+                bins = raw_input('How many bins do you want to use? ')
             
             self.send_class = self.send_functions(self.samp,self.uniform_prior,
                                                   nu.random.multivariate_normal,
@@ -551,7 +536,91 @@ class MC_func:
             self.samp = mc.mcmpi
         else:
             print 'Wrong option, use "rjmc, mcmc, rjmpi, mcmpi"'
+    
+    def use_old_run(self,param=None,chi=None):
+        '''interactve way of using old run for constraining bins, and/or
+        making prior'''
+        import pylab as lab
+        lab.ion()
+        #check if has input
+        if not (nu.any(param) and nu.any(chi)):
+            if not (nu.any(self.param) and nu.any(self.chi)):
+                raise ValueError('No prior run avalible, please do' + 
+                                 'run or input one')
+        else:
+            self.param, self.chi = param, chi
+        #check to see if ndarray
+        if type(param) is nu.ndarray:
+            #turn into dict
+            #temp_param = {}
+            #temp_chi = {}
+            bins = str((param.shape[1] - 2) / 3)
+            self.param = {bins:nu.copy(self.param)}
+            self.chi = {bins:nu.copy(self.chi)}
 
+        #do hard part of deciding where to put bins and stuff
+        #assume gaussian parts
+        import check_mc_output as chk
+        guess = chk.plot_SFR_age(self.param, self.chi, False)
+        #guess best fit
+        best_fit = ['0', 1., nu.inf]
+        for i in self.param.keys():
+            if best_fit[2] >= self.chi[i].min(): #chi must be less
+                if len(self.param[i])/best_fit[1] > 1/3.:
+                    if int(i) > int(best_fit[0]): #if has more params
+                        #penalize it and see if still better
+                        if (self.chi[i].min() * 
+                            2.**((3*(int(i) -int(best_fit[0])))) < 
+                            best_fit[2]): 
+                            best_fit = [i,len(self.param[i]),self.chi[i].min()]
+                    else: 
+                        best_fit = [i,len(self.param[i]),self.chi[i].min()]
+        print 'Using best fit param with %s bins and min chi %f' %(best_fit[0], 
+                                                                   best_fit[2])
+
+        if best_fit[0] in set(guess.keys()): 
+            #use points from guess
+            temp_age = self.param[best_fit[0]]
+            temp_age = temp_age[:,range(1,int(best_fit[0])*3,3)].ravel()
+            age_bound = [temp_age.min()]
+            temp = guess[best_fit[0]]['age']
+            temp = temp[temp[:,0].argsort()]
+            for i in range(1,temp.shape[0]):
+                k = 1
+                while (nu.sum(temp[i-1:i+1,[0,2]][0] * nu.array([1,k])) < 
+                       -nu.diff(temp[i-1:i+1,[0,2]][1] * nu.array([1,k]))):
+                    k += 1
+                age_bound.append(nu.mean([nu.sum(temp[i-1:i+1,[0,2]][0] * 
+                                                 nu.array([1,k])),
+                                          -nu.diff(temp[i-1:i+1,[0,2]][1] * 
+                                                   nu.array([1,k]))]))  
+            age_bound.append(temp_age.max())
+            fig = lab.figure()
+            plt1 = fig.add_subplot(211) #histogram with bins
+            plt2 = fig.add_subplot(212) #residuals from best fit
+            #histogram plot
+            plt1.hist(temp_age, 200, normed=True)
+            for i in age_bound:
+                plt1.plot(nu.tile(i,2),[0,plt1.get_ylim()[1]],'r')
+            #make sure no spaces between bins
+            
+                      
+        else: #have user put them in or make them automatically
+            print 'No guess fit, run with more iterations'
+            raise FutureWarning('not ready yet')
+
+        #turn new bins in to self.age_bound
+        self.age_bound = lambda age_unq, bins : nu.array(age_bound)
+        #change prior to output?
+
+        #use output as sampler?
+
+        #set up stuff for next run
+        self._option = 'mcmc'
+        self.samp = mc.MCMC_SA
+        self.autosetup(int(best_fit[0]))
+        print 'Use run() method to start new run'
+            
     def uniform_prior(self, param, bol=True):
         #calculates prior probablity for a value 
         #(sort of, if not in range returns 0 else 1
@@ -585,7 +654,7 @@ class MC_func:
                     param[i * 3] < self.metal_bound.min()): 
                     out=0
                     break
-        #make sure in boundary of points
+        #make sure in boundary of points make into own funtion
         index = nu.sort(nu.hstack((range(0, self.bins*3,3),
                                    range(1,self.bins*3,3))))
         index = index.reshape(self.bins,2)
@@ -698,6 +767,24 @@ class MC_func:
         except IndexError:
             out = param
         return out
+    
+    class send_functions(object):
+        'groups functions needed for MCMC or RJMCMC sampling'
+        def __init__(self,sampler,prior,proposal,log_lik):
+            self.sampler = sampler
+            self.prior = prior
+            self.proposal = proposal
+            self.lik = log_lik
+            #things needed for functions to work in both samplers
+            lib_vals=get_fitting_info(lib_path)
+            #to keep roundoff error constistant
+            lib_vals[0][:,0]= nu.log10(lib_vals[0][:, 0]) 
+            metal_unq = nu.unique(lib_vals[0][:, 0])
+            lib_vals[0][:,0] = 10**lib_vals[0][:,0]
+            age_unq = nu.unique(lib_vals[0][:, 1])
+            self._lib_vals = lib_vals
+            self._age_unq = age_unq
+            self._metal_unq = metal_unq
 
 
 def plot_model(param, data, bins):
