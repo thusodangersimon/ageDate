@@ -187,18 +187,24 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins):
    #exit program
     return out
 
-def data_match_all(data):
-    #makes sure data and model have same wavelength range and points for library
+def data_match_all(data, spect):
+    '''makes sure data and model have same 
+    wavelength range and points for library. Removes uncertanties = 0
+    from data and lib spec'''
     model = {}
+    #remove sigma = 0
+    if data.shape[1] == 3:
+        if nu.sum(data[:,2] == 0) > 0:
+            data = data[data[:,2] !=0]
+ 
     out_data = nu.copy(data)
-    global spect
     #make spect_lib correct shape for changing
     for i in xrange(spect[0, :].shape[0]):
         if i == 0:
             model['wave'] = nu.copy(spect[:, i])
         else:
             model[str(i - 1)] = nu.copy(spect[:, i])
-    #check to see if data wavelength is outside of spectra lib
+   #check to see if data wavelength is outside of spectra lib
     min_index = nu.searchsorted(model['wave'], out_data[0, 0])
     max_index = nu.searchsorted(model['wave'], out_data[-1, 0])
     if min_index == 0: #data is bellow spectra lib
@@ -396,7 +402,7 @@ class MC_func:
     def __init__(self, data,option='rjmc', burnin=10**4, itter=5*10**5,
                  cpus=cpu_count(),bins=None):
         #match spectra for use in class
-        self.spect, self.data=data_match_all(data)
+        self.spect, self.data=data_match_all(data,spect)
         #normalized so area under curve is 1 to keep chi 
         #values resonalble
         #need to properly handel uncertanty
@@ -565,6 +571,8 @@ class MC_func:
         #guess best fit
         best_fit = ['0', 1., nu.inf]
         for i in self.param.keys():
+            if len(self.param[i]) == 0:
+                continue
             if best_fit[2] >= self.chi[i].min(): #chi must be less
                 if len(self.param[i])/best_fit[1] > 1/3.:
                     if int(i) > int(best_fit[0]): #if has more params
@@ -680,8 +688,8 @@ class MC_func:
         #check if params are in correct range
         if self.uniform_prior(nu.hstack((param,dust_param))) < 1:
             return nu.zeros_like(self.spect[:, 0])
-        model = get_model_fit_opt(param, self.lib_vals, self.age_unq,
-                                  self.metal_unq, bins)  
+        model = get_model_fit_opt(param, self._lib_vals, self._age_unq,
+                                  self._metal_unq, bins)  
         model = dust(nu.hstack((param, dust_param)), model) #dust
         #if no N use N_norm to find nnls best fit
         if not N: 
@@ -787,7 +795,7 @@ class MC_func:
             self._metal_unq = metal_unq
 
 
-def plot_model(param, data, bins):
+def plot_model(param, data, bins, plot=True):
     import pylab as lab
     #takes parameters and returns spectra associated with it
     lib_vals = get_fitting_info(lib_path)
@@ -802,14 +810,44 @@ def plot_model(param, data, bins):
                                                             3)])
 
     fun = MC_func(data)
+    fun.autosetup()
     out = fun.func(param[:-2], param[-2:], True)
-    lab.plot(fun.data[:, 0], fun.data[:, 1] * fun.norms, label='Data')
-    lab.plot(fun.data[:, 0], out, label='Model')
-    lab.legend()
+    if plot:
+        lab.plot(fun.data[:, 0], fun.data[:, 1] * fun.norms, label='Data')
+        lab.plot(fun.data[:, 0], out, label='Model')
+        lab.legend()
     return nu.vstack((fun.data[:, 0], out)).T
 
 
+def chi_squared_plot(param,chi,data,points):
+    import visualizations as vis
+    import pylab as plt
+    #define axis
+    left, width = 0.1, 0.65
+    bottom, height = 0.1, 0.65
+    bottom_h = left_h = left+width+0.02
 
+    rect_scatter = [left, bottom, width, height]
+    rect_histx = [left, bottom_h, width, 0.2]
+    rect_histy = [left_h, bottom, 0.2, height]
+    #get min
+    vmin = nu.min(chi)
+    chi[nu.isnan(chi)] = 1
+    # start with a rectangular Figure
+    plt.figure(1, figsize=(8,8))
+    
+    axScatter = plt.axes(rect_scatter)
+    axHistx = plt.axes(rect_histx)
+    axHisty = plt.axes(rect_histy)
+
+    axHistx.hist(lab.log10(param['2'][:,[0,3]].ravel()),200)
+    axHisty.hist(param['2'][:,[1,4]].ravel(),bins=200,orientation='horizontal')
+    axScatter.pcolor(metal,age,lab.log10(chi),vmin=lab.log10(vmin))
+
+    #set limits
+    xlim,ylim = axScatter.get_xlim(),axScatter.get_ylim()
+    axHistx.set_xlim(xlim)
+    axHisty.set_ylim(ylim)
 
 if __name__=='__main__':
     import cProfile as pro
