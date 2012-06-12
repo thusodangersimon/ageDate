@@ -33,9 +33,10 @@ import Age_date as ag ##temp import##
 import numpy as nu
 from multiprocessing import Pool,pool
 
-def make_chi_grid(data,points=500):
-    #makes a 3d pic of metal,age,chi with input spectra 2-D only
+def make_chi_grid(data,dust=None,points=500):
+    'makes a 3d pic of metal,age,chi with input spectra 2-D only'
     fun=ag.MC_func(data)
+    ag.spect = fun.spect
     #create grid
     metal,age=nu.meshgrid(nu.linspace(fun._metal_unq.min(),
                                       fun._metal_unq.max(),points),
@@ -43,7 +44,13 @@ def make_chi_grid(data,points=500):
                                       fun._age_unq.max(),points))
 
     param = nu.array(zip(metal.ravel(),age.ravel(),nu.ones_like(age.ravel())))
+    #probably need to handel dust in a better way
     dust_param = nu.zeros([len(param),2])
+    if nu.any(dust):
+        dust_param[:,0] = dust[0]
+        dust_param[:,1] = dust[1]
+        
+    
     #start making calculations for chi squared value
     po,out=Pool(),[]
     for i in xrange(len(param)):
