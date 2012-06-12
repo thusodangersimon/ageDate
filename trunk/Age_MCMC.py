@@ -286,7 +286,7 @@ def MCMC_SA(data, burnin, k_max, option, rank, q_talk, q_final, fun):
             temp = nu.array(param[-1000:])
             sigma_dust = Covarence_mat(temp[:,-2:], j)
             #incase chain it stuck for 1000 iterations
-            if sigma_dust.size == 0:
+            if sigma_dust.size == 0 or nu.any(nu.isnan(sigma_dust)):
                 sigma_dust = nu.copy(out_sigma[-1])
                 j += 1
                 continue
