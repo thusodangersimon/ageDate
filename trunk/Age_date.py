@@ -402,7 +402,9 @@ class MC_func:
     def __init__(self, data,option='rjmc', burnin=10**4, itter=5*10**5,
                  cpus=cpu_count(),bins=None):
         #match spectra for use in class
+        global spect
         self.spect, self.data=data_match_all(data,spect)
+        spect = self.spect
         #normalized so area under curve is 1 to keep chi 
         #values resonalble
         #need to properly handel uncertanty
