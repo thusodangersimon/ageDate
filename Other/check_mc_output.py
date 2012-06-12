@@ -73,7 +73,7 @@ def RJmcmc_LRG_check(indir,bins=1):
     lab.show()
 
 
-def plot_SFR_age(param,chi):
+def plot_SFR_age(param,chi,plot=True):
     '''plots age vs SFR for all models with above 30k itterations in them
     uses k means clustering to seperate chains incase the went through
     some "label switiching."'''
@@ -117,12 +117,13 @@ def plot_SFR_age(param,chi):
                                         results[i]['metal'][:,0])
             
             #plot
-            lab.figure()
-            lab.title('%s params' %i)
-            lab.xlabel('Age log(yrs)')
-            lab.ylabel('SFR')
-            lab.errorbar(results[i]['age'][:,0],results[i]['SFR'][:,0],
-                         xerr=results[i]['age'][:,1:].T,
-                         yerr=results[i]['SFR'][:,1:].T,
-                         fmt='.')
+            if plot:
+                lab.figure()
+                lab.title('%s params' %i)
+                lab.xlabel('Age log(yrs)')
+                lab.ylabel('SFR')
+                lab.errorbar(results[i]['age'][:,0],results[i]['SFR'][:,0],
+                             xerr=results[i]['age'][:,1:].T,
+                             yerr=results[i]['SFR'][:,1:].T,
+                             fmt='.')
     return results
