@@ -396,11 +396,61 @@ def f_dust(tau):
     out[tau > 1] = nu.exp(-tau[tau > 1])
     return out
 
+
+def gauss_kernel(velscale,sigma=1, cz=0,h3=0,h4=0):
+    '''cz:        Systemic cz in km/s
+    sigma:        Dispersion velocity in km/s. Defaulted to 1.
+    h3, h4:       Gauss-Hermite coefficients. Defaulted to 0.
+    resol:        Size (in km/s) of each pixel of the output array
+    '''
+    if sigma < 1:
+        sigma = 1.
+    c = 299792.458
+    logl_shift = nu.log(1. + cz/c) / velscale * c     #; shift in pixels
+    logl_sigma = nu.log(1. + sigma/c) / velscale * c  #; sigma in pixels
+
+    N = nu.ceil((nu.abs(logl_shift) + 5.*logl_sigma))
+    x = N - nu.arange(2*N+1)
+    y = (x-logl_shift)/logl_sigma
+    #normal terms
+    slitout = nu.exp(-y*y/2.) / logl_sigma / nu.sqrt(2.*nu.pi) 
+    #hemite terms
+    if h3 != 0 or h4 != 0:
+        slitout = slitout*(( 1. + h3*((2 * y**3 - 3 * y) /3.**.5) + 
+                             h4*((4*y**4 - 12*y**2 + 3)/24.**.5)))
+    #normalize
+    slitout /= nu.sum(slitout)
+    return slitout
+
+def LOSVD(model,param,velscale=None):
+    '''convolves data with a gausian with dispersion of sigma, and hermite poly
+    of h3 and h4'''
+    
+    #mean pix scale * speed of light
+    if not nu.any(velscale):
+        velscale = (nu.mean(nu.diff(model['wave']))/model['wave'].mean() 
+                    * 299792.458)
+    kernel = gauss_kernel(velscale,param[0],param[1],param[2],param[3])
+    if kernel.shape[0] == 0:
+        return model
+    #convolve individual spectra
+    for i in model.keys():
+        if i == 'wave':
+            continue
+        model[i] = nu.convolve(kernel, model[i],'same')
+    #uncertanty convolve
+    #if data.shape[1] == 3:
+    #    out[:,2] = nu.sqrt(nu.convolve(kernel**2, data[:,2]**2,'same'))
+
+    return model
+
+
+
 #####classes############# 
 class MC_func:
     '''Does everything the is required for and Age_date mcmc sampler'''
     def __init__(self, data,option='rjmc', burnin=10**4, itter=5*10**5,
-                 cpus=cpu_count(),bins=None):
+                 cpus=cpu_count(), use_dust=True, use_lovsd=True,bins=None):
         #match spectra for use in class
         global spect
         self.spect, self.data=data_match_all(data,spect)
@@ -430,15 +480,21 @@ class MC_func:
         self._iter = itter
         #set prior info for age, and metalicity
         self.metal_bound = nu.array([metal_unq.min(),metal_unq.max()])
+        #dust options
+        self._dust = use_dust
         self.dust_bound = nu.array([0., 4.])
-        
+        #line of sight velocity despersion stuff
+        self._losvd = use_lovsd
+        self._velocityscale = (nu.diff(self.data[:,0]).mean()
+                               / self.data[:,0].mean() * 299792.458)
+
     def run(self,verbose=True):
         'starts run of Age_date using configuation files'
         option = Value('b',True)
         option.cpu_tot = self._cpus
         option.iter = Value('i',True)
         option.chibest = Value('d',nu.inf)
-        option.parambest = Array('d',nu.ones(self._k_max * 3 + 2) + nu.nan)
+        option.parambest = Array('d',nu.ones(self._k_max * 3 + 2 + 4) + nu.nan)
         #start multiprocess need to make work with mpi
         work=[]
         q_talk,q_final=Queue(),Queue()
@@ -507,13 +563,19 @@ class MC_func:
             self.send_class.bin = self.age_bound(self._age_unq,int(bins))
             #dummy varible
             self._k_max = int(bins)
-
+            
         elif self._option == 'rjmc':
             self.send_class = self.send_functions(self.samp,self.uniform_prior,
                                                   nu.random.multivariate_normal,
                                                   self.func_N_norm)  
         else:
             print 'Option not set up yet, set up manually.'
+
+        #dust and losvd
+        self.send_class._dust = self._dust
+        self.send_class._losvd = self._losvd
+        self.send_class._velocityscale = self._velocityscale
+
 
     def sampler(self,option):
         '''puts samplers for use'''
@@ -681,7 +743,7 @@ class MC_func:
         #gives area under curve of the data spectra
         return nu.trapz(data[:, 1], data[:, 0])
 
-    def func(self,param, dust_param, N=None):
+    def func(self,param, dust_param=None,losvd_param=None, N=None):
         '''returns y axis of ssp from parameters
         if no N value, then does least squares for normallization params'''
         bins = param.shape[0] / 3
@@ -691,8 +753,13 @@ class MC_func:
         if self.uniform_prior(nu.hstack((param,dust_param))) < 1:
             return nu.zeros_like(self.spect[:, 0])
         model = get_model_fit_opt(param, self._lib_vals, self._age_unq,
-                                  self._metal_unq, bins)  
-        model = dust(nu.hstack((param, dust_param)), model) #dust
+                                  self._metal_unq, bins) 
+        #dust
+        if nu.any(dust_param):
+            model = dust(nu.hstack((param, dust_param)), model)
+        #line of sight velocity stuff
+        if nu.any(losvd_param):
+            model = LOSVD(model, losvd_param, self._velocityscale)
         #if no N use N_norm to find nnls best fit
         if not N: 
             N, chi = N_normalize(self.data, model, bins)
@@ -708,7 +775,7 @@ class MC_func:
                       N[nu.int64(model.keys())], 1)'''
         return out
         
-    def func_N_norm(self, param, dust_param):
+    def func_N_norm(self, param, dust_param=None,losvd_param=None):
         '''returns chi and N norm best fit params'''
         bins = param.shape[0] / 3
         if len(param) != bins * 3:
@@ -718,8 +785,14 @@ class MC_func:
             return nu.inf, nu.zeros(bins)
 
         model = get_model_fit_opt(param, self._lib_vals, self._age_unq,
-                                  self._metal_unq, bins)  
-        model = dust(nu.hstack((param, dust_param)), model) #dust
+                                  self._metal_unq, bins)
+        #dust
+        if nu.any(dust_param):
+            model = dust(nu.hstack((param, dust_param)), model)
+        #line of sight velocity despersion
+        if nu.any(losvd_param):
+            model = LOSVD(model,losvd_param,self._velocityscale)
+        #Find normalization and chi squared value
         N,chi = N_normalize(self.data, model, bins)
     
         return chi, N
@@ -813,7 +886,8 @@ def plot_model(param, data, bins, plot=True):
 
     fun = MC_func(data)
     fun.autosetup()
-    out = fun.func(param[:-2], param[-2:], True)
+    out = fun.func(param[range(3*bins)], param[-6:-4],param[-4:], False)
+    #out = fun.func(param[range(3*bins)], param[-2:],N=False)
     if plot:
         lab.plot(fun.data[:, 0], fun.data[:, 1] * fun.norms, label='Data')
         lab.plot(fun.data[:, 0], out, label='Model')
@@ -821,9 +895,10 @@ def plot_model(param, data, bins, plot=True):
     return nu.vstack((fun.data[:, 0], out)).T
 
 
-def chi_squared_plot(param,chi,data,points):
+def chi_squared_plot(param,chi,bins,data,points=100):
     import visualizations as vis
     import pylab as plt
+    lab = plt
     #define axis
     left, width = 0.1, 0.65
     bottom, height = 0.1, 0.65
@@ -832,9 +907,19 @@ def chi_squared_plot(param,chi,data,points):
     rect_scatter = [left, bottom, width, height]
     rect_histx = [left, bottom_h, width, 0.2]
     rect_histy = [left_h, bottom, 0.2, height]
+    #grid data
+    metal = nu.linspace(param[str(bins)][:,range(0,bins*3,3)].ravel().min(),
+                          param[str(bins)][:,range(0,bins*3,3)].ravel().max(),points)
+    age = nu.linspace(param[str(bins)][:,range(1,bins*3,3)].ravel().min(),
+                          param[str(bins)][:,range(1,bins*3,3)].ravel().max(),points)
+    chi_plot = lab.griddata(param[str(bins)][:,range(0,bins*3,3)].ravel(),
+                            param[str(bins)][:,range(1,bins*3,3)].ravel(),
+                            nu.tile(chi[str(bins)],[bins,1]).T.ravel(),
+                            metal,age)
+                            
     #get min
-    vmin = nu.min(chi)
-    chi[nu.isnan(chi)] = 1
+    vmin = nu.min(chi[str(bins)].min())
+    chi_plot[nu.isnan(chi_plot)] = 1
     # start with a rectangular Figure
     plt.figure(1, figsize=(8,8))
     
@@ -842,9 +927,11 @@ def chi_squared_plot(param,chi,data,points):
     axHistx = plt.axes(rect_histx)
     axHisty = plt.axes(rect_histy)
 
-    axHistx.hist(lab.log10(param['2'][:,[0,3]].ravel()),200)
-    axHisty.hist(param['2'][:,[1,4]].ravel(),bins=200,orientation='horizontal')
-    axScatter.pcolor(metal,age,lab.log10(chi),vmin=lab.log10(vmin))
+    axHistx.hist(param[str(bins)][:,range(0,bins*3,3)].ravel(),200)
+    axHisty.hist(param[str(bins)][:,range(1,bins*3,3)].ravel(),
+                 bins=200,orientation='horizontal')
+    axScatter.pcolor(metal,age,lab.log10(chi_plot),vmin=lab.log10(vmin),
+                     cmap='gray')
 
     #set limits
     xlim,ylim = axScatter.get_xlim(),axScatter.get_ylim()
@@ -852,7 +939,7 @@ def chi_squared_plot(param,chi,data,points):
     axHisty.set_ylim(ylim)
 
 if __name__=='__main__':
-    import cProfile as pro
+    '''    import cProfile as pro
     lib_vals=get_fitting_info(lib_path)
     lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
     metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
@@ -879,3 +966,13 @@ if __name__=='__main__':
     pro.runctx('N_normalize(data,model,bins)'
                , globals(),{'data':data,'model':model,'bins':bins}
                ,filename='agedata.Profile')
+               '''
+
+    #LOSVD test
+    sigma = [50.]
+    chi = [nu.sum((fun.data[:,1] - ag.LOSVD(out,sigma[-1])[:,1])**2)]
+    for i in range(10**5):
+        sigma_new = sigma[-1] + nu.random.randn()*10.
+        if nu.exp(chi[-1] - nu.sum((fun.data[:,1] - ag.LOSVD(out,sigma_new)[:,1])**2))>nu.random.rand():
+            sigma.append( nu.copy(sigma_new))
+            chi.append(nu.sum((fun.data[:,1] - ag.LOSVD(out,sigma_new)[:,1])**2))
