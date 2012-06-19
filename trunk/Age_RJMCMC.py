@@ -162,7 +162,23 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
     attempt=False
     param,active_param,chi,sigma={},{},{},{}
     Nacept,Nreject,acept_rate,out_sigma={},{},{},{}
-    active_dust,sigma_dust=nu.random.rand(2)*4.,nu.identity(2)*nu.random.rand()*2
+    #set up dust if in use
+    if fun._dust:
+        active_dust = nu.random.rand(2)*4.
+        sigma_dust = nu.identity(2)*nu.random.rand()*2
+    else:
+        active_dust = nu.zeros(2)
+        sigma_dust = nu.zeros([2,2])
+    #set up LOSVD
+    if fun._losvd:
+        #only gaussian dispersion with no shift for now
+        active_losvd = nu.array([nu.random.rand()*150,0,0,0])
+        sigma_losvd = nu.zeros([4,4])
+        sigma_losvd[0,0] = nu.random.rand() * 10
+    else:
+        active_losvd = nu.zeros(4)
+        sigma_losvd = nu.zeros([4,4])
+ 
     bayes_fact={} #to calculate bayes factor
     #fun=MC_func(data)
     for i in range(1,k_max+1):
@@ -195,20 +211,24 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
         if len(chi[str(bins)])==1:
             chi[str(bins)].append(0.)
     #active_param[str(bins)]=fun[str(bins)].n_neg_lest(active_param[str(bins)])
-        chi[str(bins)][-1],active_param[str(bins)][range(2,bins*3,3)]=fun.lik(active_param[str(bins)],active_dust)
-    #check if starting off in bad place ie chi=inf
-        if nu.isinf(chi[str(bins)][-1]):
+        (chi[str(bins)][-1],
+         active_param[str(bins)][range(2,bins*3,3)]) = fun.lik(
+            active_param[str(bins)], active_dust, active_losvd)
+    #check if starting off in bad place ie chi=inf or nan
+        if not nu.isfinite(chi[str(bins)][-1]):
             continue
         else:
             break
-    param[str(bins)].append(nu.copy(nu.hstack((active_param[str(bins)],active_dust))))
+
+    param[str(bins)].append(nu.copy(nu.hstack((
+                    active_param[str(bins)], active_dust, active_losvd))))
     #set best chi and param
     if option.chibest.value>chi[str(bins)][-1]:
         option.chibest.value=chi[str(bins)][-1]+.0
-        for kk in range(k_max*3+2):
-            if kk<bins*3+2:
+        for kk in range(k_max*3+2+4):
+            if kk<bins*3+2+4:
                 option.parambest[kk]=nu.hstack((active_param[str(bins)],
-                                               active_dust))[kk]
+                                               active_dust,active_losvd))[kk]
             else:
                 option.parambest[kk]=nu.nan
         print ('%i has best fit with chi of %2.2f and %i bins' 
@@ -220,7 +240,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
     j,T,j_timeleft=1,9.,nu.random.exponential(100)
     T_start,T_stop=3*10**5.,0.9
     birth_rate=.5
-    out_dust_sig = []
+    out_dust_sig, out_losvd_sig = [sigma_dust], [sigma_losvd]
 
     while option.value:
         if option.iter.value%5000==0:
@@ -231,9 +251,13 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             #print active_param[str(bins)][range(2,bins*3,3)]
         #sample from distiburtion
         try:
-            active_param[str(bins)]= fun.proposal(active_param[str(bins)],
+            active_param[str(bins)] = fun.proposal(active_param[str(bins)],
                                                    sigma[str(bins)])
-            active_dust=fun.proposal(active_dust,sigma_dust)
+            if fun._dust:
+                active_dust = fun.proposal(active_dust,sigma_dust)
+            if fun._losvd:
+                active_losvd  = fun.proposal(active_losvd, sigma_losvd)
+                active_losvd[1:] = 0.
              #print birth_rate, rank
         except ValueError:
             print len(param[str(bins)]),j
@@ -241,7 +265,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
         #calculate new model and chi
         chi[str(bins)].append(0.)
         chi[str(bins)][-1],active_param[str(bins)][range(2,bins*3,3)]=fun.lik(
-            active_param[str(bins)],active_dust)
+            active_param[str(bins)], active_dust, active_losvd)
         #sort by age
         if not nu.all(active_param[str(bins)][range(1,bins*3,3)]==
                       nu.sort(active_param[str(bins)][range(1,bins*3,3)])):
@@ -249,73 +273,101 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             temp_index=[] #create sorting indcci
             for k in index:
                 for kk in range(3):
-                    temp_index.append(3*k+kk)
-            active_param[str(bins)]=active_param[str(bins)][temp_index]
+                    temp_index.append(3*k + kk)
+            active_param[str(bins)] = active_param[str(bins)][temp_index]
          
         #decide to accept or not
-        a=nu.exp((chi[str(bins)][-2]-chi[str(bins)][-1])/
+        a = nu.exp((chi[str(bins)][-2] - chi[str(bins)][-1])/
                  SA(T_cuurent,burnin,T_start,T_stop))
         #metropolis hastings
         if a > nu.random.rand(): #acepted
-            param[str(bins)].append(nu.copy(nu.hstack((active_param[str(bins)],active_dust))))
-            Nacept[str(bins)]+=1
+            param[str(bins)].append(nu.copy(nu.hstack((active_param[str(bins)]
+                                                       , active_dust,
+                                                       active_losvd))))
+            Nacept[str(bins)] += 1
             if not nu.isinf(min(chi[str(bins)])): #put temperature on order of chi calue
-                T_start=nu.round(min(chi[str(bins)]))+1.
+                T_start = nu.round(min(chi[str(bins)]))+1.
             #see if global best fit
             if option.chibest.value>chi[str(bins)][-1]:
                 #set global in sharred arrays
                 #option.chibest.acquire();option.parambest.acquire()
                 option.chibest.value=chi[str(bins)][-1]+.0
                 for kk in xrange(k_max*3):
-                    if kk<bins*3+2:
+                    if kk<bins*3+2+4:
                         option.parambest[kk]=nu.hstack((active_param[str(bins)],
-                                               active_dust))[kk]
+                                               active_dust, active_losvd))[kk]
                     else:
-                        option.parambest[kk]=nu.nan
+                        option.parambest[kk] = nu.nan
                 #option.chibest.release();option.parambest.release()
-                print '%i has best fit with chi of %2.2f and %i bins, %i steps left' %(rank,option.chibest.value,bins,j_timeleft-j)
+                print('%i has best fit with chi of %2.2f and %i bins, %i steps left' %(rank,option.chibest.value,bins,j_timeleft-j))
                 sys.stdout.flush()
                 #break
         else:
             param[str(bins)].append(nu.copy(param[str(bins)][-1]))
-            active_param[str(bins)]=nu.copy(param[str(bins)][-1][:-2])
-            active_dust=nu.copy(param[str(bins)][-1][-2:])
+            active_param[str(bins)] = nu.copy(param[str(bins)][-1][range(3*bins)])
+            if fun._dust:
+                active_dust = nu.copy(param[str(bins)][-1][-6:-4])
+            if fun._losvd:
+                active_losvd = nu.copy(param[str(bins)][-1][-4:])
+            if len(active_dust) != 2:
+                print 'best'
             chi[str(bins)][-1]=nu.copy(chi[str(bins)][-2])
             Nreject[str(bins)]+=1
 
         ###########################step stuff
-        #if len(param[str(bins)])<6000: #change sigma with acceptance rate
         if  (acept_rate[str(bins)][-1]<.234 and 
              all(sigma[str(bins)].diagonal()[nu.array([range(1,bins*3,3),range(0,bins*3,3)]).ravel()]<5.19)):
                #too few aceptnce decrease sigma
-            sigma[str(bins)]=sigma[str(bins)]/1.05
-            sigma_dust/=1.05
+            sigma[str(bins)] /= 1.05
+            if fun._dust:
+                sigma_dust/=1.05
+            if fun._losvd: 
+                sigma_losvd /= 1.05
+
         elif acept_rate[str(bins)][-1]>.40 and all(sigma[str(bins)].diagonal()>=10**-5): #not enough
-            sigma[str(bins)]=sigma[str(bins)]*1.05
-            sigma_dust*=1.05
+            sigma[str(bins)] *= 1.05
+            #dust step
+            if fun._dust:
+                sigma_dust *= 1.05
+            #losvd step
+            if fun._losvd:
+                sigma_losvd *= 1.05
             # else: #use covarnence matrix
         if j%100==0 and j != 0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
-            sigma[str(bins)]=Covarence_mat(nu.array(param[str(bins)])[:,:-2],len(param[str(bins)]))
-            
-            sigma_dust=Covarence_mat(nu.array(param[str(bins)])[:,-2:],len(param[str(bins)]))
+            t_param = nu.array(param[str(bins)])
+            try:
+                sigma[str(bins)]=Covarence_mat(t_param[:,range(3*bins)],
+                                           t_param.shape[0]-1)
+                if fun._dust:
+                    sigma_dust = Covarence_mat(t_param[:,-6:-4],t_param.shape[0]-1)
+                if fun._losvd:
+                    sigma_losvd = Covarence_mat(t_param[:,-4:],t_param.shape[0]-1)
+            except IndexError:
+                print t_param.shape
             #error handeling some time cov is nan
-            if not (nu.any(sigma[str(bins)]) or nu.any(sigma_dust)):
+            if not (nu.any(nu.isfinite(sigma[str(bins)])) or 
+                    nu.any(nu.isfinite(sigma_dust)) or 
+                    nu.any(nu.isfinite(sigma_losvd))):
                 #set equal to last cov matirx
                 sigma[str(bins)] = nu.copy(out_sigma[str(bins)][-1])
-                sigma_dust = nu.copy(out_sig_dust[-1])
+                if fun._dust:
+                    sigma_dust = nu.copy(out_sig_dust[-1])
+                if fun._losvd:
+                    sigma_losvd = nu.copy(out_losvd_sig[-1])
+
         #############################decide if birth or death
         if (birth_rate>nu.random.rand() and bins<k_max and j>j_timeleft ) or (j>j_timeleft and bins==1):
             #birth
             attempt=True #so program knows to attempt a new model
             rand_step,rand_index=nu.random.rand(3)*[metal_unq.ptp(), age_unq.ptp(),1.],nu.random.randint(bins)
-            temp_bins=1+bins
+            temp_bins = 1 + bins
             #criteria for this step
-            critera=1/2.**3 * birth_rate #(1/3.)**temp_bins
+            critera = 1/4.**3 * birth_rate #(1/3.)**temp_bins
             #new param step
             for k in range(len(active_param[str(bins)])):
                 active_param[str(temp_bins)][k]=active_param[str(bins)][k]
             #set last 3 and rand_index 3 to new
-            if .5>nu.random.rand(): #x'=x+-u
+            if .5 > nu.random.rand(): #x'=x+-u
                 active_param[str(temp_bins)][-3:]=active_param[str(bins)][rand_index*3:rand_index*3+3]+rand_step
                 active_param[str(temp_bins)][rand_index*3:rand_index*3+3]=active_param[str(bins)][rand_index*3:rand_index*3+3]-rand_step
                 k=0
@@ -336,10 +388,10 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             attempt=True #so program knows to attempt a new model
             temp_bins=bins-1
             #criteria for this step
-            critera = 2.**3 * (1 - birth_rate) #3.**temp_bins
+            critera = 4.**3 * (1 - birth_rate) #3.**temp_bins
             if .5>nu.random.rand():
                 #remove bins with 1-N/Ntot probablitiy
-                Ntot=nu.sum(active_param[str(bins)][range(2,bins*3,3)])
+                Ntot = nu.sum(active_param[str(bins)][range(2,bins*3,3)])
                 rand_index=rand_choice(active_param[str(bins)][range(2,bins*3,3)],active_param[str(bins)][range(2,bins*3,3)]/Ntot)
                 k=0
                 for ii in xrange(bins): #copy to lower dimestion
@@ -361,18 +413,20 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             #extract best fit from global array
             best_param = nu.array(option.parambest)
             best_param = best_param[~nu.isnan(best_param)]
-            temp_bins = (len(best_param)-2)/3
+            temp_bins = (len(best_param)-2-4)/3
             #calculate occam factor * model select prob
-            critera = 2. **(bins - temp_bins) * 0.01
-            active_param[str(temp_bins)] = nu.copy(best_param[:-2])
-            active_dust = nu.copy(best_param[-2:])
+            critera = 4. **(bins - temp_bins) * 0.01
+            active_param[str(temp_bins)] = nu.copy(best_param[range(3*temp_bins)])
+            active_dust = nu.copy(best_param[-6:-4])
+            active_losvd = nu.copy(best_param[-4:])
         #calc chi of new model
         if attempt:
             attempt=False
-            tchi,active_param[str(temp_bins)][range(2,temp_bins*3,3)]=fun.lik(active_param[str(temp_bins)],active_dust)
+            tchi,active_param[str(temp_bins)][range(2,temp_bins*3,3)]=fun.lik(
+                active_param[str(temp_bins)], active_dust, active_losvd)
             bayes_fact[str(bins)].append(nu.exp((chi[str(bins)][-1]-tchi)/2.)*critera) #save acceptance critera for later
             #rjmcmc acceptance critera ##############
-            if bayes_fact[str(bins)][-1]>nu.random.rand():
+            if bayes_fact[str(bins)][-1] > nu.random.rand():
                 #print '%i has changed from %i to %i' %(rank,bins,temp_bins)
                 #accept model change
                 bins=temp_bins+0
@@ -386,7 +440,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
                         for kk in range(3):
                             temp_index.append(3*k+kk)
                     active_param[str(bins)]=active_param[str(bins)][temp_index]
-                param[str(bins)].append(nu.copy((nu.hstack((active_param[str(bins)],active_dust)))))
+                param[str(bins)].append(nu.copy((nu.hstack((active_param[str(bins)],active_dust,active_losvd)))))
                 j,j_timeleft=0,nu.random.exponential(200)
                 continue
             if T_cuurent>=burnin:
@@ -418,31 +472,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             elif acept_rate[str(bins)][-1]<.25 and T_start<3*10**5:
                 T_start*=2.
                 #T_stop-=.1'''
-        ################go to best fit place if after burnin
-        '''if (T_cuurent>burnin-500 and 
-            bins!=(nu.sum(~nu.isnan(option.parambest))-2)/3 and 
-            nu.random.rand()<.01):
-            #get correct RJ factor
-            temp_bins=(nu.sum(~nu.isnan(option.parambest))-2)/3
-            if bins>temp_bins:
-                critera=(1/2.)**temp_bins
-            else:
-                critera=(2.)**temp_bins
-            if critera*nu.exp((chi[str(bins)][-1]-option.chibest.value)/2.)>nu.random.rand():
-                #accept change
-                #sigma[str(temp_bins)]=nu.i
-                bins=temp_bins+0
-                for kk in xrange(3*bins):
-                    active_param[str(bins)][kk]=nu.copy(option.parambest[kk])
-                for kk in xrange(3*bins,3*bins+2):
-                    active_dust[kk-3*bins]=nu.copy(option.parambest[kk])
-                chi[str(bins)].append(nu.copy(option.chibest.value))
-                param[str(bins)].append(nu.copy(option.parambest)[:3*bins+2])
-                print '%i is switching to best fit' %rank
-                j = 1
-                #print active_param[str(bins)].shape,sigma[str(bins)].shape,bins
-                '''
-        ##############################convergece assment
+     ##############################convergece assment
         '''size=dict_size(param)
         if size%999==0 and size>30000:
             q_talk.put((rank,size,param))
@@ -452,7 +482,10 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
         option.iter.value+=1
         acept_rate[str(bins)].append(nu.copy(Nacept[str(bins)]/(Nacept[str(bins)]+Nreject[str(bins)])))
         out_sigma[str(bins)].append(nu.copy(sigma[str(bins)].diagonal()))
-        out_dust_sig.append(nu.copy(sigma_dust))
+        if fun._dust:
+            out_dust_sig.append(nu.copy(sigma_dust))
+        if fun._losvd:
+            out_losvd_sig.append(nu.copy(sigma_losvd))
     #####################################return once finished 
     for i in param.keys():
         chi[i]=nu.array(chi[i])
@@ -645,7 +678,7 @@ def dic_data(temp,burnin):
     #grab chains with best fit and chech to see if mixed properly
     outparam,outchi={},{}
     for i in fac[:,0]:
-        outparam[str(int(i))],outchi[str(int(i))]=nu.zeros([2,3*i+2]),nu.array([nu.inf])
+        outparam[str(int(i))],outchi[str(int(i))]=nu.zeros([2,3*i+2+4]),nu.array([nu.inf])
     for i in temp:
         for j in fac[:,0]:
             try:
