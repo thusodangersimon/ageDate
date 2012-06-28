@@ -937,6 +937,7 @@ def chi_squared_plot(param,chi,bins,data,points=100):
     xlim,ylim = axScatter.get_xlim(),axScatter.get_ylim()
     axHistx.set_xlim(xlim)
     axHisty.set_ylim(ylim)
+    lab.show()
 
 if __name__=='__main__':
     '''    import cProfile as pro
