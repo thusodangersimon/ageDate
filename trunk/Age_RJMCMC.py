@@ -37,120 +37,6 @@ from anderson_darling import anderson_darling_k as ad_k
 from multiprocessing import *
 a=nu.seterr(all='ignore')
 
-def RJ_multi(data,burnin,max_itter=5*10**5,k_max=16,cpus=cpu_count()):
-    #does multiple chains for RJMCMC
-    #shares info about chain to other chains
-    option=Value('b',True)
-    option.cpu_tot=cpus
-    option.iter=Value('i',True)
-    option.chibest=Value('d',nu.inf)
-    option.parambest=Array('d',nu.ones(k_max*3+2)+nu.nan)
-
-    #interpolate spectra so it matches the data
-    #global spect
-    #spect=data_match_all(data)
-    work=[]
-    q_talk,q_final=Queue(),Queue()
-    #start multiprocess mcmc
-    for ii in range(cpus):
-        work.append(Process(target=rjmcmc,args=(data,burnin,k_max,option,ii,q_talk,q_final)))
-        work[-1].start()
-
-    rank,size,conver_test=-nu.ones(cpus),nu.zeros(cpus),[]
-    while option.iter.value<=max_itter+burnin*cpus and option.value: 
-        if q_talk.qsize()>=cpus:
-            conver_test=[]
-            for i in range(cpus):
-                try:
-                    rank[i],size[i],temp=q_talk.get(timeout=1)
-                except:
-                    break
-            '''
-                conver_test.append(temp)
-            #make sure recived chains are from different processes
-            if not all(nu.sort(rank)==range(cpus)):
-                pass#continue
-            else:
-                print 'Starting convergence test'
-            key_to_use=conver_test[0].keys()
-            for i in conver_test:
-                j=0
-                while j<len( key_to_use):
-                    if len(i[key_to_use[j]])<1000:
-                        key_to_use.remove(key_to_use[j])
-                    else:
-                        j+=1
-            if key_to_use and not len(nu.unique(rank))<=cpus/2.:
-                #do convergence calc
-                if Convergence_tests(conver_test,key_to_use):
-                    #make sure not all from same chain
-                    print 'Convergence! wrapping up'
-                    #tidy up and end
-                    sys.stdout.flush()
-                    option.value=False
-                else:
-                    print 'Convergence test failed'
-                pass
-            else:
-                print 'Convergence test failed'''''
-        else:
-            Time.sleep(5)
-            sys.stdout.flush()
-            print '%2.2f percent done' %((float(option.iter.value)/(max_itter+burnin*cpus))*100.)
-    option.value=False
-    #wait for proceses to finish
-    count=0
-    temp=[]
-    while count<cpus:
-        option.value=False
-        count+=1
-        try:
-            temp.append(q_final.get(timeout=5))
-        except:
-            print 'having trouble recieving data from queue please wait'
-            
-    if not temp:
-        print 'Recived no data from processes, exiting'
-        return False,False,False
-    for i in work:
-        i.terminate()
-
-    #post processing
-    #decides which model is the best and which one has best chi sqared
-    bayes_fac={}
-    for i in temp:
-        for j in i[2].keys():
-            try:
-                bayes_fac[j]=nu.concatenate((bayes_fac[j],i[2][j]))
-            except KeyError:
-                bayes_fac[j]=i[2][j]
-
-    fac=[]
-    for i in bayes_fac.keys():
-        if bayes_fac[i].shape[0]>0:
-            bayes_fac[i][bayes_fac[i]>1]=1. #accept critera is min(1,alpha)
-            fac.append([int(i),nu.mean(nu.nan_to_num(bayes_fac[i])),len(bayes_fac[i])])
-            #remove 1st bin for now#############
-    fac=nu.array(fac)
-    #grab chains with best fit and chech to see if mixed properly
-    outparam,outchi={},{}
-    for i in fac[:,0]:
-        outparam[str(int(i))],outchi[str(int(i))]=nu.zeros([2,3*i+2]),nu.array([nu.inf])
-    for i in temp:
-        for j in fac[:,0]:
-            try:
-                outparam[str(int(j))]=nu.concatenate((outparam[str(int(j))],i[0][str(int(j))][~nu.isinf(i[1][str(int(j))][1:]),:]),axis=0)
-                outchi[str(int(j))]=nu.concatenate((outchi[str(int(j))],i[1][str(int(j))][~nu.isinf(i[1][str(int(j))])]))
-            except ValueError: #if empty skip
-                pass
-    for j in nu.int64(fac[:,0]): #post processing
-        outparam[str(int(j))],outchi[str(int(j))]=outparam[str(int(j))][2+burnin:,:],outchi[str(int(j))][1+burnin:]
-        #outparam[str(int(j))][:,range(0,3*j,3)]=10**outparam[str(int(j))][:,range(0,3*j,3)]
-        #outparam[str(int(j))][:,range(2,3*j,3)]=outparam[str(int(j))][:,range(2,3*j,3)]
-    
-    return outparam,outchi,fac[fac[:,0].argsort(),:]
-
-
 def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=None,fun=None):
     #parallel worker program reverse jump mcmc program
     nu.random.seed(random_permute(current_process().pid))
@@ -171,10 +57,12 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
         sigma_dust = nu.zeros([2,2])
     #set up LOSVD
     if fun._losvd:
-        #only gaussian dispersion with no shift for now
+        '''#only gaussian dispersion with no shift for now
         active_losvd = nu.array([nu.random.rand()*150,0,0,0])
         sigma_losvd = nu.zeros([4,4])
-        sigma_losvd[0,0] = nu.random.rand() * 10
+        sigma_losvd[0,0] = nu.random.rand() * 10'''
+        active_losvd = nu.random.rand(4)*150
+        sigma_losvd = nu.random.rand(4,4)
     else:
         active_losvd = nu.zeros(4)
         sigma_losvd = nu.zeros([4,4])
@@ -257,7 +145,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
                 active_dust = fun.proposal(active_dust,sigma_dust)
             if fun._losvd:
                 active_losvd  = fun.proposal(active_losvd, sigma_losvd)
-                active_losvd[1:] = 0.
+                #active_losvd[1] = 0.
              #print birth_rate, rank
         except ValueError:
             print len(param[str(bins)]),j
@@ -334,7 +222,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
                 sigma_losvd *= 1.05
             # else: #use covarnence matrix
         if j%100==0 and j != 0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
-            t_param = nu.array(param[str(bins)])
+            t_param = nu.array(param[str(bins)][-2000:])
             try:
                 sigma[str(bins)]=Covarence_mat(t_param[:,range(3*bins)],
                                            t_param.shape[0]-1)
