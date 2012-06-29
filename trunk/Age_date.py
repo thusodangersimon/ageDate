@@ -405,6 +405,15 @@ def gauss_kernel(velscale,sigma=1, cz=0,h3=0,h4=0):
     '''
     if sigma < 1:
         sigma = 1.
+    if sigma > 10**4:
+        sigma = 10**4
+    if h3 < 0:
+        h3 = 0.
+    if h4 < 0:
+        h3 = 0.
+    #assume galaxy is close by and redshift corrected
+    if nu.abs(cz) > 10**4:
+        cz = 10**4 * nu.sign(cz)
     c = 299792.458
     logl_shift = nu.log(1. + cz/c) / velscale * c     #; shift in pixels
     logl_sigma = nu.log(1. + sigma/c) / velscale * c  #; sigma in pixels
@@ -786,6 +795,12 @@ class MC_func:
 
         model = get_model_fit_opt(param, self._lib_vals, self._age_unq,
                                   self._metal_unq, bins)
+        #don't bother with analysis if model isn't finite
+        temp = nu.copy(model.values())
+        if not nu.any(nu.isfinite(model.values())):
+            pik.dump((param,bins),open('error.pik','w'),2)
+            return nu.inf, nu.zeros(bins)
+
         #dust
         if nu.any(dust_param):
             model = dust(nu.hstack((param, dust_param)), model)
@@ -793,8 +808,13 @@ class MC_func:
         if nu.any(losvd_param):
             model = LOSVD(model,losvd_param,self._velocityscale)
         #Find normalization and chi squared value
-        N,chi = N_normalize(self.data, model, bins)
-    
+        try:
+            N,chi = N_normalize(self.data, model, bins)
+        except ValueError:
+            import cPickle as pik
+            pik.dump((temp,model['0'],losvd_param),open('error1.pik','w'),2)
+            print temp.shape,model['0'].shape,self.data.shape
+            raise
         return chi, N
 
     def min_bound(self, bins):
