@@ -84,7 +84,7 @@ def plot_SFR_age(param,chi,plot=True):
         if len(param[i]) >= 3 * 10**4:
             results[i] = {'age':[], 'SFR': [], 'metal':[]}
             #get age and norm chains
-            age = param[i][:,range(1,3*int(i),3)].ravel()
+            age = 10**param[i][:,range(1,3*int(i),3)].ravel()/10**9.
             norm = param[i][:,range(2,3*int(i),3)].ravel()
             metal = param[i][:,range(0,3*int(i),3)].ravel()
             #do kmeans clustering
@@ -120,7 +120,7 @@ def plot_SFR_age(param,chi,plot=True):
             if plot:
                 lab.figure()
                 lab.title('%s params' %i)
-                lab.xlabel('Age log(yrs)')
+                lab.xlabel('Age (Gyrs)')
                 lab.ylabel('SFR')
                 lab.errorbar(results[i]['age'][:,0],results[i]['SFR'][:,0],
                              xerr=results[i]['age'][:,1:].T,
