@@ -162,8 +162,7 @@ def worker_other(fun):
     pass
 
 
-<<<<<<< .mine
-def mult_single(data, fun, itter=10**5, burnin=5*10**3,  k_max=16):
+def mult_single(fun, itter=10**5, burnin=5*10**3,  k_max=16):
     '''test of how multi-try mcmc will work on a single processor'''
     lib_vals = fun._lib_vals
     metal_unq = fun._metal_unq
@@ -241,7 +240,9 @@ def mult_single(data, fun, itter=10**5, burnin=5*10**3,  k_max=16):
     #start multi-try
     #number of multi-trys
     N_try = 100
+    t = [ag.Time.time()]
     for i in xrange(itter):
+        print '%1.2f precent done, at %1.2f seconds per iteration' %(i/float(itter)*100, nu.median(t))
         #generate params
         send_param = nu.zeros((N_try, bins*3))
         if fun._dust:
@@ -279,38 +280,50 @@ def mult_single(data, fun, itter=10**5, burnin=5*10**3,  k_max=16):
         if fun._losvd:
             active_losvd = nu.copy(send_losvd[index])
         #generate new params for new and old test
-            send_param = nu.zeros((N_try*2, bins*3))
+        send_param = nu.zeros((N_try, bins*3))
         if fun._dust:
-            send_dust = nu.zeros((N_try*2, 2))
+            send_dust = nu.zeros((N_try, 2))
         if fun._losvd:
-            send_losvd = nu.zeros((N_try*2, 4))
-        for ii in xrange(N_try*2):
+            send_losvd = nu.zeros((N_try, 4))
+        for ii in xrange(N_try):
             #old param
-            if ii < N_try:
+            #if ii < N_try:
+            if ii == 0:
+                send_param[ii, :] = nu.copy(param[str(bins)][-1][range(bins*3)])
+                if fun._dust:
+                    send_dust[ii,:] = nu.copy(param[str(bins)][-1][-6:-4])
+                if fun._losvd:
+                    send_losvd[ii,:] = nu.copy(param[str(bins)][-1][-4:])
+                  
+            else:
                 send_param[ii, :] = fun.proposal(active_param[str(bins)],
                                                  sigma[str(bins)])
                 if fun._dust:
                     send_dust[ii,:]= fun.proposal(active_dust, sigma_dust)
                 if fun._losvd:
-                        send_losvd[ii,:]  = fun.proposal(active_losvd, sigma_losvd)
-            #new parms
+                    send_losvd[ii,:]  = fun.proposal(active_losvd, 
+                                                         sigma_losvd)
+            '''#new parms
             else:
                 send_param[ii, :] = fun.proposal(param[str(bins)][-1][range(3*bins)],
                                                  sigma[str(bins)])
                 if fun._dust:
                     send_dust[ii,:]= fun.proposal(param[str(bins)][-1][-6:-4],sigma_dust)
                 if fun._losvd:
-                        send_losvd[ii,:]  = fun.proposal(param[str(bins)][-1][-4:], sigma_losvd)
+                        send_losvd[ii,:]  = fun.proposal(param[str(bins)][-1][-4:], sigma_losvd)'''
  
         #calc chi
         recv= map(fun.lik, send_param,send_dust,send_losvd)
-        recv_chi, recv_N = nu.zeros(N_try*2), nu.zeros((N_try*2,bins))
-        for ii in range(N_try*2):
+        recv_chi, recv_N = nu.zeros(N_try), nu.zeros((N_try,bins))
+        for ii in range(N_try):
             recv_chi[ii], recv_N[ii,:] = recv[ii]
-
+        
         #acceptance criteria
-        a = nu.exp(-recv_chi[:N_try]/(recv_chi[nu.isfinite(recv_chi)]).max()).sum()
-        a /= nu.exp(-recv_chi[N_try:]/(recv_chi[nu.isfinite(recv_chi)]).max()).sum()
+        prob_old = nu.exp(-recv_chi[:]/(recv_chi[nu.isfinite(recv_chi)]).max())
+        prob_old = prob_old[0]/prob_old.sum()
+        prob_new = weight[index]/weight.sum()
+        a = (nu.exp(-(chi[str(bins)][-1] - chi[str(bins)][-2])/2.) * 
+             prob_old/prob_new)
         if a > nu.random.rand(): #acepted
             param[str(bins)].append(nu.copy(nu.hstack((active_param[str(bins)]
                                                        , active_dust,
@@ -331,11 +344,12 @@ def mult_single(data, fun, itter=10**5, burnin=5*10**3,  k_max=16):
             chi[str(bins)][-1]=nu.copy(chi[str(bins)][-2])
             Nreject[str(bins)]+=1
         #tune step size
-        step_ratio = nu.exp(-recv_chi[:N_try]/(recv_chi[nu.isfinite(recv_chi)]).max())
+        '''step_ratio = nu.exp(-recv_chi[:N_try]/(recv_chi[nu.isfinite(recv_chi)]).max())
         step_ratio /= nu.exp(-recv_chi[N_try:]/(recv_chi[nu.isfinite(recv_chi)]).max())
         step_ratio[nu.logical_or(nu.isinf(step_ratio),nu.isnan(step_ratio))] = 1
         step_ratio[step_ratio >1] = 1
-        step_ratio = step_ratio.sum() / float(step_ratio.shape[0])
+        step_ratio = step_ratio.sum() / float(step_ratio.shape[0])'''
+        step_ratio = Nacept[str(bins)]/float(Nacept[str(bins)] + Nreject[str(bins)])
         if step_ratio > .5:
             #too few aceptnce decrease sigma
             sigma[str(bins)] /= 1.05
@@ -344,14 +358,15 @@ def mult_single(data, fun, itter=10**5, burnin=5*10**3,  k_max=16):
             if fun._losvd: 
                 sigma_losvd /= 1.05
         elif step_ratio < .23:
-            sigma[str(bins)] *= 1.05
-            #dust step
-            if fun._dust:
-                sigma_dust *= 1.05
-            #losvd step
-            if fun._losvd:
-                sigma_losvd *= 1.05
-
+            if not nu.any(sigma[str(bins)][range(0,bins*3,3) +range(1,bins*3,3)].diagonal() >5):
+                sigma[str(bins)] *= 1.05
+                #dust step
+                if fun._dust:
+                    sigma_dust *= 1.05
+                #losvd step
+                if fun._losvd:
+                    sigma_losvd *= 1.05
+                
         #compute cov as step size
         if i%100==0 and i != 0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
             t_param = nu.array(param[str(bins)][-2000:])
@@ -376,6 +391,11 @@ def mult_single(data, fun, itter=10**5, burnin=5*10**3,  k_max=16):
                     sigma_losvd = nu.copy(out_losvd_sig[-1])
         
         #store params and chi values
+        t[-1] -= ag.Time.time()
+        t.append(ag.Time.time())
+        out_sigma[str(bins)].append(nu.copy(sigma[str(bins)].diagonal()))
+
+    return param,chi,out_sigma,Nacept,Nreject
 
 def Covarence_mat(param,j):
     #creates a covarence matrix for the step size 
@@ -393,132 +413,6 @@ def Covarence_mat(param,j):
         else:
             return cov
 
-=======
-def mult_single(data, fun, itter=10**5, burnin=5*10**3,  k_max=16):
-    '''test of how multi-try mcmc will work on a single processor'''
-    lib_vals = fun._lib_vals
-    metal_unq = fun._metal_unq
-    age_unq = fun._age_unq
-    #create fun for all number of bins
-    attempt=False
-    param,active_param,chi,sigma={},{},{},{}
-    Nacept,Nreject,acept_rate,out_sigma={},{},{},{}
-    #set up dust if in use
-    if fun._dust:
-        active_dust = nu.random.rand(2)*4.
-        sigma_dust = nu.identity(2)*nu.random.rand()*2
-    else:
-        active_dust = nu.zeros(2)
-        sigma_dust = nu.zeros([2,2])
-    #set up LOSVD
-    if fun._losvd:
-        '''#only gaussian dispersion with no shift for now
-        active_losvd = nu.array([nu.random.rand()*150,0,0,0])
-        sigma_losvd = nu.zeros([4,4])
-        sigma_losvd[0,0] = nu.random.rand() * 10'''
-        active_losvd = nu.random.rand(4)*150
-        sigma_losvd = nu.random.rand(4,4)
-    else:
-        active_losvd = nu.zeros(4)
-        sigma_losvd = nu.zeros([4,4])
- 
-    bayes_fact={} #to calculate bayes factor
-    #fun=MC_func(data)
-    for i in range(1,k_max+1):
-        param[str(i)]=[]
-        active_param[str(i)],chi[str(i)]=nu.zeros(3*i),[nu.inf]
-        sigma[str(i)]=nu.identity(3*i)*nu.tile(
-            [0.5,age_unq.ptp()*nu.random.rand(),1.],i)
-        #active_dust[str(i)]=nu.random.rand(2)*5.
-        #sigma_dust[str(i)]=nu.identity(2)*nu.random.rand()*2
-        Nacept[str(i)],Nreject[str(i)]=1.,0.
-        acept_rate[str(i)],out_sigma[str(i)]=[.35],[]
-        bayes_fact[str(i)]=[]
-    #bins to start with
-    bins=nu.random.randint(1,k_max)
-    while True:
-    #create starting active params
-        bin=nu.log10(nu.linspace(10**age_unq.min(),10**age_unq.max(),bins+1))
-        bin_index=0
-    #start in random place
-        for k in xrange(3*bins):
-            if any(nu.array(range(0,bins*3,3))==k):#metalicity
-                active_param[str(bins)][k]=(nu.random.random()*metal_unq.ptp()+metal_unq[0])
-            else:#age and normilization
-                if any(nu.array(range(1,bins*3,3))==k): #age
-                    active_param[str(bins)][k]=nu.random.random()*age_unq.ptp()+age_unq[0] #random place anywhere
-                    bin_index+=1
-                else: #norm
-                    active_param[str(bins)][k]=nu.random.random()*10000
-    #try leastquares fit
-        if len(chi[str(bins)])==1:
-            chi[str(bins)].append(0.)
-    #active_param[str(bins)]=fun[str(bins)].n_neg_lest(active_param[str(bins)])
-        (chi[str(bins)][-1],
-         active_param[str(bins)][range(2,bins*3,3)]) = fun.lik(
-            active_param[str(bins)], active_dust, active_losvd)
-    #check if starting off in bad place ie chi=inf or nan
-        if not nu.isfinite(chi[str(bins)][-1]):
-            continue
-        else:
-            break
-
-    param[str(bins)].append(nu.copy(nu.hstack((
-                    active_param[str(bins)], active_dust, active_losvd))))
-    #set best chi and param
-    chibest = chi[str(bins)][-1]+.0
-    parambest = nu.hstack((active_param[str(bins)],
-                           active_dust,active_losvd))
-    #start multi-try
-    #number of multi-trys
-    N_try = 100
-    for i in xrange(itter):
-        #generate params
-        send_param = nu.zeros((N_try, bins*3))
-        if fun._dust:
-            send_dust = nu.zeros((N_try, 2))
-        if fun._losvd:
-            send_losvd = nu.zeros((N_try, 4))
-        for ii in xrange(N_try):
-            send_param[ii, :] = fun.proposal(active_param[str(bins)],
-                                             sigma[str(bins)])
-            if fun._dust:
-                send_dust[ii,:]= fun.proposal(active_dust,sigma_dust)
-            if fun._losvd:
-                send_losvd[ii,:]  = fun.proposal(active_losvd, sigma_losvd)
-
-        #calculate chi
-        recv= map(fun.lik, send_param,send_dust,send_losvd)
-        recv_chi, recv_N = nu.zeros(N_try), nu.zeros((N_try,bins))
-        for ii in range(N_try):
-            recv_chi[ii], recv_N[ii,:] = recv[ii]
-        ##select param with best chi square with weighted prob
-        index = nu.isfinite(recv_chi)
-        send_param[:, range(2, bins*3,3)] = recv_N
-        recv_chi = recv_chi[index]
-        send_param = send_param[index]
-        if fun._dust:
-            send_dust = send_dust[index]
-        if fun._losvd:
-            send_losvd = send_losvd[index]
-        weight = nu.exp(-recv_chi/recv_chi.max())
-        index = nu.searchsorted(nu.cumsum(weight)/weight.sum(),nu.random.rand())
-        active_param[str(bins)]  = nu.copy(send_param[index])
-        if fun._dust:
-            active_dust = nu.copy(send_dust[index])
-        if fun._losvd:
-            active_losvd = nu.copy(send_losvd[index])
-        #generate new params
-
-        #calc chi
-
-        #acceptance criteria
-
-        #tune step size
-
-        #store params and chi values
-
->>>>>>> .r217
 if __name__ == '__main__':
     comm = mpi.COMM_WORLD
     if comm.Get_rank() == 0:
