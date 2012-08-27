@@ -759,12 +759,17 @@ class MC_func:
         if len(param) != bins * 3:
             return nu.nan
         #check if params are in correct range
+        if not nu.any(dust_param):
+            dust_param = nu.zeros(2)
+            Dust = False
+        else:
+            Dust = True
         if self.uniform_prior(nu.hstack((param,dust_param))) < 1:
             return nu.zeros_like(self.spect[:, 0])
         model = get_model_fit_opt(param, self._lib_vals, self._age_unq,
                                   self._metal_unq, bins) 
         #dust
-        if nu.any(dust_param):
+        if Dust:
             model = dust(nu.hstack((param, dust_param)), model)
         #line of sight velocity stuff
         if nu.any(losvd_param):
@@ -789,6 +794,13 @@ class MC_func:
         bins = param.shape[0] / 3
         if len(param) != bins * 3:
             return nu.nan
+        
+        if not nu.any(dust_param):
+            dust_param = nu.zeros(2)
+            Dust = False
+        else:
+            Dust = True
+
         #check if params are in correct range
         if self.uniform_prior(nu.hstack((param,dust_param))) < 1:
             return nu.inf, nu.zeros(bins)
@@ -797,12 +809,12 @@ class MC_func:
                                   self._metal_unq, bins)
         #don't bother with analysis if model isn't finite
         temp = nu.copy(model.values())
-        if not nu.any(nu.isfinite(model.values())):
+        if not nu.any(nu.isfinite(temp)):
             pik.dump((param,bins),open('error.pik','w'),2)
             return nu.inf, nu.zeros(bins)
 
         #dust
-        if nu.any(dust_param):
+        if Dust:
             model = dust(nu.hstack((param, dust_param)), model)
         #line of sight velocity despersion
         if nu.any(losvd_param):
