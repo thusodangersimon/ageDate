@@ -162,7 +162,7 @@ def worker_other(fun):
     pass
 
 
-def mult_single(fun, itter=10**5, burnin=5*10**3,  k_max=16):
+def mult_single(fun, N_try, itter=10**5, burnin=5*10**3,  k_max=16):
     '''test of how multi-try mcmc will work on a single processor'''
     lib_vals = fun._lib_vals
     metal_unq = fun._metal_unq
@@ -239,7 +239,12 @@ def mult_single(fun, itter=10**5, burnin=5*10**3,  k_max=16):
                            active_dust,active_losvd))
     #start multi-try
     #number of multi-trys
-    N_try = 100
+    
+    #simulated anneling vars
+    #T_cuurent,Nexchange_ratio=1.0,1.0
+    T_start,T_stop = chibest,0.
+    #save dust and losvd sigmas
+    out_dust_sig, out_losvd_sig = [sigma_dust], [sigma_losvd]
     t = [ag.Time.time()]
     for i in xrange(itter):
         print '%1.2f precent done, at %1.2f seconds per iteration' %(i/float(itter)*100, nu.median(t))
@@ -271,9 +276,13 @@ def mult_single(fun, itter=10**5, burnin=5*10**3,  k_max=16):
             send_dust = send_dust[index]
         if fun._losvd:
             send_losvd = send_losvd[index]
-        weight = nu.exp(-recv_chi/recv_chi.max())
-        index = nu.searchsorted(nu.cumsum(weight)/weight.sum(),nu.random.rand())
+        weight = nu.exp(-recv_chi/recv_chi.min())
+        index = weight.argsort()
+        recv_chi, weight, send_param = recv_chi[index], weight[index], send_param[index]
+        #index = nu.searchsorted(nu.cumsum(weight)/weight.sum(),nu.random.rand())
+        index = recv_chi.argmin()
         active_param[str(bins)]  = nu.copy(send_param[index])
+        print '%2.2f chosen, best is %2.2f' %(recv_chi[index],recv_chi.min())
         chi[str(bins)].append(nu.copy(recv_chi[index]))
         if fun._dust:
             active_dust = nu.copy(send_dust[index])
@@ -319,11 +328,11 @@ def mult_single(fun, itter=10**5, burnin=5*10**3,  k_max=16):
             recv_chi[ii], recv_N[ii,:] = recv[ii]
         
         #acceptance criteria
-        prob_old = nu.exp(-recv_chi[:]/(recv_chi[nu.isfinite(recv_chi)]).max())
+        '''prob_old = nu.exp(-recv_chi[:]/(recv_chi[nu.isfinite(recv_chi)]).max())
         prob_old = prob_old[0]/prob_old.sum()
-        prob_new = weight[index]/weight.sum()
-        a = (nu.exp(-(chi[str(bins)][-1] - chi[str(bins)][-2])/2.) * 
-             prob_old/prob_new)
+        prob_new = weight[index]/weight.sum()'''
+        a = (nu.exp(-(chi[str(bins)][-1] - chi[str(bins)][-2])/
+                     SA(i,burnin,T_start,T_stop)) )#* prob_old/prob_new)
         if a > nu.random.rand(): #acepted
             param[str(bins)].append(nu.copy(nu.hstack((active_param[str(bins)]
                                                        , active_dust,
@@ -333,6 +342,7 @@ def mult_single(fun, itter=10**5, burnin=5*10**3,  k_max=16):
             if chibest > chi[str(bins)][-1]:
                 chibest = nu.copy(chi[str(bins)][-1])
                 parambest = nu.copy(param[str(bins)][-1])
+                T_start = nu.round(min(chi[str(bins)]))+1.
                 print 'New best fit. With chi=%f and %i bins' %(chibest,bins)
         else:
             param[str(bins)].append(nu.copy(param[str(bins)][-1]))
@@ -344,28 +354,24 @@ def mult_single(fun, itter=10**5, burnin=5*10**3,  k_max=16):
             chi[str(bins)][-1]=nu.copy(chi[str(bins)][-2])
             Nreject[str(bins)]+=1
         #tune step size
-        '''step_ratio = nu.exp(-recv_chi[:N_try]/(recv_chi[nu.isfinite(recv_chi)]).max())
-        step_ratio /= nu.exp(-recv_chi[N_try:]/(recv_chi[nu.isfinite(recv_chi)]).max())
-        step_ratio[nu.logical_or(nu.isinf(step_ratio),nu.isnan(step_ratio))] = 1
-        step_ratio[step_ratio >1] = 1
-        step_ratio = step_ratio.sum() / float(step_ratio.shape[0])'''
         step_ratio = Nacept[str(bins)]/float(Nacept[str(bins)] + Nreject[str(bins)])
         if step_ratio > .5:
+            if not nu.any(sigma[str(bins)][range(0,bins*3,3) +range(1,bins*3,3)].diagonal() >
+                          [metal_unq.ptp(),age_unq.ptp()] * bins):
             #too few aceptnce decrease sigma
-            sigma[str(bins)] /= 1.05
-            if fun._dust:
-                sigma_dust/=1.05
-            if fun._losvd: 
-                sigma_losvd /= 1.05
-        elif step_ratio < .23:
-            if not nu.any(sigma[str(bins)][range(0,bins*3,3) +range(1,bins*3,3)].diagonal() >5):
                 sigma[str(bins)] *= 1.05
+                if fun._dust:
+                    sigma_dust *=1.05
+                if fun._losvd: 
+                    sigma_losvd *= 1.05
+        elif step_ratio < .23:
+                sigma[str(bins)] /= 1.05
                 #dust step
                 if fun._dust:
-                    sigma_dust *= 1.05
+                    sigma_dust /= 1.05
                 #losvd step
                 if fun._losvd:
-                    sigma_losvd *= 1.05
+                    sigma_losvd /= 1.05
                 
         #compute cov as step size
         if i%100==0 and i != 0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
@@ -412,6 +418,15 @@ def Covarence_mat(param,j):
             return False
         else:
             return cov
+
+def SA(i,i_fin,T_start,T_stop):
+    #temperature parameter for Simulated anneling (SA). 
+    #reduices false acceptance rate if a<60% as a function on acceptance rate
+    if i>i_fin:
+        return 1.0
+    else:
+        return (T_stop-T_start)/float(i_fin)*i+T_start
+
 
 if __name__ == '__main__':
     comm = mpi.COMM_WORLD
