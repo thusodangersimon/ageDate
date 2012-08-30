@@ -31,7 +31,7 @@
 import numpy as nu
 import mpi4py.MPI as mpi
 import Age_date as ag
-
+import os
 
 #123456789012345678901234567890123456789012345678901234567890123456789
 def worker_chi_cal(fun, N_try, root=0):
@@ -39,42 +39,81 @@ def worker_chi_cal(fun, N_try, root=0):
     comm = mpi.COMM_WORLD
     rank =  comm.Get_rank()
     size = comm.Get_size()
+    #get unique seed
+    seed =os.getpid()
+    if seed % 10 == 0:
+        seed += nu.random.randint(1,10)
+    seed = ag.random_permute(os.getpid())
+    nu.random.seed(seed)
     Quit = nu.array([0])
-    print 'Starting node on %s with rank %i' %(mpi.Get_processor_name(),rank)
+    print 'Starting node on %s with rank %i, with seed %i, pid %i' %(mpi.Get_processor_name(),rank,seed, os.getpid())
     #calculate incoming size of data
     recv_size = int(nu.ceil(N_try/size))
     bins = nu.array([1])
     none = nu.array([None])
     i = 0
+    #init params that don't change shape
+    if fun._dust:
+        active_dust = nu.zeros(2)
+        sigma_dust = nu.zeros((2,2))
+    else:
+        active_dust = None
+    if fun._losvd:
+        active_losvd = nu.zeros(4)
+        sigma_dust = nu.zeros((4,4))
+    else:
+        active_losvd = None
     while True:
         #get number of bins
+        
         if i == 0:
             comm.Bcast(bins, root)
-        #calculate incoming size of data
-        send_param = nu.zeros((recv_size, bins*3))
+            #get current position
+            active_param = nu.zeros(bins * 3)
+            sigma = nu.zeros((bins*3, bins*3))
+        #recive param
+        temp = comm.bcast(none, root =root)[0]
+        for ii in temp.keys():
+            exec(ii + '= temp["%s"]'%ii)
+        #generate trial params
+        send_param = nu.array(map(fun.proposal,[active_param]*N_try, [sigma]*N_try))
         if fun._dust:
-            send_dust = nu.zeros((recv_size, 2))
+            send_dust = nu.array(map(fun.proposal,[active_dust]*N_try, [sigma_dust]*N_try))
         else:
-            send_dust = nu.array([None] * recv_size)
+            send_dust = [None] * N_try
         if fun._losvd:
-            send_losvd = nu.zeros((recv_size, 2))
+            send_losvd = nu.array(map(fun.proposal,[active_losvd]*N_try, [sigma_losvd]*N_try))
         else:
-            send_losvd = nu.array([None] * recv_size)
-        #recive params
-        comm.Scatter(none, send_param, root = root)
-        if fun._dust:
-            comm.Scatter(none, send_dust, root = root)
-        if fun._losvd:
-            comm.Scatter(none,  send_losvd, root = root)
+            send_losvd = [None] * N_try
         #chi calc
         recv= map(fun.lik, send_param,send_dust,send_losvd)
-        recv_chi, recv_N = nu.zeros(recv_size), nu.zeros((recv_size,bins))
-        for ii in xrange(recv_size):
-            recv_chi[ii], recv_N[ii,:] = recv[ii]
-        #print 'worker %i has recived %i data' %(rank, recv_size)
+        recv_chi,recv_N = zip(*recv)        
+        recv_chi = nu.array(recv_chi)
+        send_param[:, range(2,bins*3,3)] = nu.array(recv_N)
+        
+        #remove non usefull chi values
+        index = nu.isfinite(recv_chi)
+        ratio = nu.array(index.sum() / float(N_try)/(size - 1))
+        recv_chi = recv_chi[index]
+        send_param = send_param[index]
+        if fun._dust:
+            send_dust = send_dust[index]
+        if fun._losvd:
+            send_losvd = send_losvd[index]
+        
         #return chi
-        comm.Gather(recv_chi, recv_chi, root = root)
-        comm.Gather(recv_N, recv_chi, root = root)
+        start2 = mpi.Wtime()
+        comm.Reduce(ratio, none, op=mpi.SUM, root=root)
+        temp_len = nu.array([index.sum(),rank])
+        comm.Gather(temp_len, none, root=root)
+        comm.Gatherv(recv_chi, none, root = root)
+        print rank,recv_chi
+        comm.Gatherv(send_param, none, root = root)
+        if fun._dust:
+            comm.Gatherv(send_dust, none, root = root)
+        if fun._losvd:
+            comm.Gatherv(send_losvd, none, root = root)
+        print mpi.Wtime() - start2
         #check if need to quit
         comm.Barrier()
         i += 1
@@ -177,33 +216,46 @@ def root_mc(fun, N_try, burnin=500 ,itter=500, k_max=2):
     t = [ag.Time.time()]
     recv_chi, recv_N = nu.zeros(N_try), nu.zeros((N_try,bins))
     for i in xrange(itter):
-        if i % 50 == 0:
-            print '%1.2f precent done, at %1.2f seconds per iteration' %(i/float(itter)*100, nu.median(t))
+        #if i % 50 == 0:
+        print '%1.2f precent done, at %1.2f seconds per iteration' %(i/float(itter)*100, nu.median(t))
         #send number of bins
         comm.Bcast(nu.array([bins]), root = rank)
-        #generate params
-        send_param = nu.zeros((N_try, bins*3))
-        send_dust = nu.zeros((N_try, 2))
-        send_losvd = nu.zeros((N_try, 4))
-        for ii in xrange(N_try):
-            send_param[ii, :] = fun.proposal(active_param[str(bins)],
-                                             sigma[str(bins)])
-            if fun._dust:
-                send_dust[ii,:]= fun.proposal(active_dust,sigma_dust)
-            if fun._losvd:
-                send_losvd[ii,:]  = fun.proposal(active_losvd, sigma_losvd)
-
+        #send active param
+        send_param ={'active_param':active_param[str(bins)], 'sigma': sigma[str(bins)]}
+        if fun._dust:
+            send_param['active_dust'] = active_dust
+            send_param['sigma_dust'] = sigma_dust
+        if fun._losvd:
+            send_param['active_losvd'] = active_losvd
+            send_param['sigma_losvd'] = sigma_losvd
         #calculate chi
         #mpi cal chi
-        comm.Scatter(send_param, send_param, root = rank)
-        if fun._dust:
-            comm.Scatter(send_dust,send_dust, root = rank)
-        if fun._losvd:
-            comm.Scatter(send_losvd,send_losvd, root = rank)
+        comm.bcast((send_param,mpi.DOUBLE), root = rank)
         #recv from nodes
-        comm.Gather(nu.zeros(recv_size)+nu.inf, recv_chi, root = rank)
-        comm.Gather(nu.zeros(recv_size), recv_N, root = rank)
+        ratio = nu.zeros(1)
+        temp_len = nu.zeros((size,2),dtype=int)
+        index = nu.array([0,rank])
+        comm.Reduce(nu.array(ratio/(size-1)), ratio, op=mpi.SUM, root=rank)
+        comm.Gather(index, temp_len, root=rank)
+        #make correct length arrays for recving
+        recv_chi, send_param = nu.zeros(temp_len[:,0].sum()), nu.zeros((temp_len[:,0].sum(),bins*3))
+        print rank, tuple(temp_len[:,0]),   tuple(temp_len[:,0].cumsum())
+        comm.Gatherv(temp_len, (recv_chi, tuple(temp_len[:,0]), 
+                                tuple(temp_len[:,0].cumsum()), mpi.DOUBLE), root = rank)
+        print rank, recv_chi
+        comm.Gatherv(send_param, (send_param, tuple(temp_len[:,0]),  
+                                  tuple(temp_len[:,1]), mpi.DOUBLE), root = rank)
+        print 'root', send_param
+        if fun._dust:
+            send_dust = nu.zeros((temp_len[:,0].sum(), 2))
+            comm.Gatherv( send_dust , (send_dust,tuple(temp_len[:,0]), 
+                                       tuple(temp_len[:,1]), mpi.DOUBLE), root = rank)
+        if fun._losvd:
+            send_losvd =  nu.zeros((temp_len[:,0].sum(), 4))
+            comm.Gatherv( send_dust , (send_losvd,tuple(nu.vstack((temp_len[:,0],[bins*3]*3)).T), 
+                                      tuple(nu.vstack((temp_len[:,1],[bins*3]*3)).T) , mpi.DOUBLE), root = rank)  
         comm.Barrier()
+        print 'recived files from workers'
         ##select param with best chi square with weighted prob
         index = nu.isfinite(recv_chi)
         try:
@@ -290,7 +342,7 @@ def root_mc(fun, N_try, burnin=500 ,itter=500, k_max=2):
                 chibest = nu.copy(chi[str(bins)][-1])
                 parambest = nu.copy(param[str(bins)][-1])
                 T_start = nu.round(min(chi[str(bins)]))+1.
-                print 'New best fit. With chi=%f and %i bins' %(chibest,bins)
+                print 'New best fit. With chi=%f and %i bins from %s' %(chibest,bins,mpi.Get_processor_name())
         else:
             param[str(bins)].append(nu.copy(param[str(bins)][-1]))
             active_param[str(bins)] = nu.copy(param[str(bins)][-1][range(3*bins)])
@@ -633,8 +685,9 @@ def SA(i,i_fin,T_start,T_stop):
 if __name__ == '__main__':
     comm = mpi.COMM_WORLD
     rank = comm.Get_rank()
+    size = comm.Get_size()
     #send data to other processors
-    N_try = 10000
+    N_try = 10
     if rank == 0:
         data,info1,dust,weight = ag.iterp_spec(1,lam_min=2000,lam_max=10000)
         dat_len = nu.array(data.shape[0])
@@ -647,7 +700,19 @@ if __name__ == '__main__':
         data = nu.zeros((dat_len, 2))
         comm.Bcast(data, root=0)
 
-    #create fun classes for everyone
+    '''test1, test2 = nu.zeros((4000,4)),nu.zeros((2,2))
+    if rank == 0:
+        test1,test2 = nu.random.rand(4000,4), nu.random.rand(2,2)
+        send = {'a':test1,'b':test2}
+    else:
+        send = None
+    start = mpi.Wtime()
+    
+    send = comm.bcast((send,mpi.DOUBLE),root=0)[0]
+    #comm.Gather(nu.zeros((4000/size,4)),test1,root=0)
+    print send['b']'''
+   
+     #create fun classes for everyone
     fun_temp = ag.MC_func(data)
     fun_temp.autosetup()
     fun = fun_temp.send_class
@@ -657,3 +722,4 @@ if __name__ == '__main__':
         param,chi,out_sigma,Nacept,Nreject = root_mc(fun, N_try)
     else:
         worker_chi_cal(fun, N_try)
+
