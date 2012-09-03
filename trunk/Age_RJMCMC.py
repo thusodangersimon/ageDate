@@ -37,7 +37,7 @@ from anderson_darling import anderson_darling_k as ad_k
 from multiprocessing import *
 a=nu.seterr(all='ignore')
 
-def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=None,fun=None):
+def rjmcmc(fun, burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=None):
     #parallel worker program reverse jump mcmc program
     nu.random.seed(random_permute(current_process().pid))
     #initalize boundaries
@@ -45,7 +45,8 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
     metal_unq = fun._metal_unq
     age_unq = fun._age_unq
     #create fun for all number of bins
-    attempt=False
+    #attempt=False
+    fun._k_max = k_max
     param,active_param,chi,sigma={},{},{},{}
     Nacept,Nreject,acept_rate,out_sigma={},{},{},{}
     #set up dust if in use
@@ -113,12 +114,12 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
     #set best chi and param
     if option.chibest.value>chi[str(bins)][-1]:
         option.chibest.value=chi[str(bins)][-1]+.0
-        for kk in range(k_max*3+2+4):
+        for kk in range(len(option.parambest)):
             if kk<bins*3+2+4:
                 option.parambest[kk]=nu.hstack((active_param[str(bins)],
                                                active_dust,active_losvd))[kk]
             else:
-                option.parambest[kk]=nu.nan
+                    option.parambest[kk]=nu.nan
         print ('%i has best fit with chi of %2.2f and %i bins' 
                %(rank,option.chibest.value,bins))
         sys.stdout.flush()
@@ -132,7 +133,7 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
 
     while option.value:
         if option.iter.value%5000==0:
-            print "hi, I'm at itter %i, chi %f from %s bins and for cpu %i" %(len(param[str(bins)]),chi[str(bins)][-1],bins,rank)
+            print "hi, I'm at itter %i, chi %f from %s bins and for accept %2.2f" %(len(param[str(bins)]),chi[str(bins)][-1],bins,acept_rate[str(bins)][-1]*100)
             sys.stdout.flush()
             #print sigma[str(bins)].diagonal()
             #print 'Acceptance %i reject %i' %(Nacept,Nreject)
@@ -203,138 +204,41 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             Nreject[str(bins)]+=1
 
         ###########################step stuff
-        if  (acept_rate[str(bins)][-1]<.234 and 
-             all(sigma[str(bins)].diagonal()[nu.array([range(1,bins*3,3),range(0,bins*3,3)]).ravel()]<5.19)):
-               #too few aceptnce decrease sigma
-            sigma[str(bins)] /= 1.05
-            if fun._dust:
-                sigma_dust/=1.05
-            if fun._losvd: 
-                sigma_losvd /= 1.05
+        sigma[str(bins)],sigma_dust,sigma_losvd = Step_func(acept_rate[str(bins)][-1],param[str(bins)][-2000:],
+                                                            sigma[str(bins)],sigma_dust,sigma_losvd, bins, j,fun._dust, fun._losvd)
 
-        elif acept_rate[str(bins)][-1]>.40 and all(sigma[str(bins)].diagonal()>=10**-5): #not enough
-            sigma[str(bins)] *= 1.05
-            #dust step
-            if fun._dust:
-                sigma_dust *= 1.05
-            #losvd step
-            if fun._losvd:
-                sigma_losvd *= 1.05
-            # else: #use covarnence matrix
-        if j%100==0 and j != 0: #and (Nacept/Nreject>.50 or Nacept/Nreject<.25):
-            t_param = nu.array(param[str(bins)][-2000:])
-            try:
-                sigma[str(bins)]=Covarence_mat(t_param[:,range(3*bins)],
-                                           t_param.shape[0]-1)
-                if fun._dust:
-                    sigma_dust = Covarence_mat(t_param[:,-6:-4],t_param.shape[0]-1)
-                if fun._losvd:
-                    sigma_losvd = Covarence_mat(t_param[:,-4:],t_param.shape[0]-1)
-            except IndexError:
-                print t_param.shape
-            #error handeling some time cov is nan
-            if not (nu.any(nu.isfinite(sigma[str(bins)])) or 
-                    nu.any(nu.isfinite(sigma_dust)) or 
-                    nu.any(nu.isfinite(sigma_losvd))):
-                #set equal to last cov matirx
-                sigma[str(bins)] = nu.copy(out_sigma[str(bins)][-1])
-                if fun._dust:
-                    sigma_dust = nu.copy(out_sig_dust[-1])
-                if fun._losvd:
-                    sigma_losvd = nu.copy(out_losvd_sig[-1])
 
         #############################decide if birth or death
-        if (birth_rate>nu.random.rand() and bins<k_max and j>j_timeleft ) or (j>j_timeleft and bins==1):
-            #birth
-            attempt=True #so program knows to attempt a new model
-            rand_step,rand_index=nu.random.rand(3)*[metal_unq.ptp(), age_unq.ptp(),1.],nu.random.randint(bins)
-            temp_bins = 1 + bins
-            #criteria for this step
-            critera = 1/4.**3 * birth_rate #(1/3.)**temp_bins
-            #new param step
-            for k in range(len(active_param[str(bins)])):
-                active_param[str(temp_bins)][k]=active_param[str(bins)][k]
-            #set last 3 and rand_index 3 to new
-            if .5 > nu.random.rand(): #x'=x+-u
-                active_param[str(temp_bins)][-3:]=active_param[str(bins)][rand_index*3:rand_index*3+3]+rand_step
-                active_param[str(temp_bins)][rand_index*3:rand_index*3+3]=active_param[str(bins)][rand_index*3:rand_index*3+3]-rand_step
-                k=0
-                #check to see if in bounds
-                while fun.prior(nu.hstack((active_param[str(temp_bins)],
-                                           active_dust))): 
-                    k+=1
-                    if k<100:
-                        rand_step=nu.random.rand(3)*[metal_unq.ptp(), age_unq.ptp(),1.]
-                    else:
-                        rand_step=rand_step/2.
-                    active_param[str(temp_bins)][-3:]=active_param[str(bins)][rand_index*3:rand_index*3+3]+rand_step
-                    active_param[str(temp_bins)][rand_index*3:rand_index*3+3]=active_param[str(bins)][rand_index*3:rand_index*3+3]-rand_step
-            else: #draw new values randomly from param space
-                active_param[str(temp_bins)][-3:]=nu.random.rand(3)*nu.array([metal_unq.ptp(),age_unq.ptp(),5.])+nu.array([metal_unq.min(),age_unq.min(),0])
-        elif j > j_timeleft and bins > 1 and  0.01 < nu.random.rand():
-            #death
-            attempt=True #so program knows to attempt a new model
-            temp_bins=bins-1
-            #criteria for this step
-            critera = 4.**3 * (1 - birth_rate) #3.**temp_bins
-            if .5>nu.random.rand():
-                #remove bins with 1-N/Ntot probablitiy
-                Ntot = nu.sum(active_param[str(bins)][range(2,bins*3,3)])
-                rand_index=rand_choice(active_param[str(bins)][range(2,bins*3,3)],active_param[str(bins)][range(2,bins*3,3)]/Ntot)
-                k=0
-                for ii in xrange(bins): #copy to lower dimestion
-                    if not ii==rand_index:
-                        active_param[str(temp_bins)][3*k:3*k+3]=nu.copy(active_param[str(bins)]
-                                                                        [3*ii:3*ii+3])
-                        k+=1
-            else: #average 2 componets together for new values
-                rand_index=nu.random.permutation(bins)[:2] #2 random indeci
-                k=0
-                for ii in xrange(bins):
-                    if not any(ii==rand_index):
-                        active_param[str(temp_bins)][3*k:3*k+3]=nu.copy(active_param[str(bins)]
-                                                                        [3*ii:3*ii+3])
-                        k+=1
-                active_param[str(temp_bins)][3*k:3*k+3]=(active_param[str(bins)][3*rand_index[0]:3*rand_index[0]+3]+active_param[str(bins)] [3*rand_index[1]:3*rand_index[1]+3])/2.
-        elif j>j_timeleft: #move to global bestfit
-            attempt=True
-            #extract best fit from global array
-            best_param = nu.array(option.parambest)
-            best_param = best_param[~nu.isnan(best_param)]
-            temp_bins = (len(best_param)-2-4)/3
-            #calculate occam factor * model select prob
-            critera = 4. **(bins - temp_bins) * 0.01
-            active_param[str(temp_bins)] = nu.copy(best_param[range(3*temp_bins)])
-            active_dust = nu.copy(best_param[-6:-4])
-            active_losvd = nu.copy(best_param[-4:])
+        active_param, temp_bins, attempt, critera = death_birth(fun, birth_rate, bins, j, j_timeleft, active_param)
         #calc chi of new model
         if attempt:
-            attempt=False
-            tchi,active_param[str(temp_bins)][range(2,temp_bins*3,3)]=fun.lik(
+            attempt = False
+            tchi, active_param[str(temp_bins)][range(2,temp_bins*3,3)] = fun.lik(
                 active_param[str(temp_bins)], active_dust, active_losvd)
             bayes_fact[str(bins)].append(nu.exp((chi[str(bins)][-1]-tchi)/2.)*critera) #save acceptance critera for later
             #rjmcmc acceptance critera ##############
-            if bayes_fact[str(bins)][-1] > nu.random.rand():
+            if bayes_fact[str(bins)][-1]  > nu.random.rand():
                 #print '%i has changed from %i to %i' %(rank,bins,temp_bins)
                 #accept model change
-                bins=temp_bins+0
+                bins = temp_bins + 0
                 chi[str(bins)].append(nu.copy(tchi))
                 #sort by age so active_param[bins*i+1]<active_param[bins*(i+1)+1]
-                if not nu.all(active_param[str(bins)][range(1,bins*3,3)]==
+                if not nu.all(active_param[str(bins)][range(1,bins*3,3)] ==
                           nu.sort(active_param[str(bins)][range(1,bins*3,3)])):
-                    index=nu.argsort(active_param[str(bins)][range(1,bins*3,3)])
-                    temp_index=[] #create sorting indcci
+                    index = nu.argsort(active_param[str(bins)][range(1,bins*3,3)])
+                    temp_index = [] #create sorting indcci
                     for k in index:
                         for kk in range(3):
                             temp_index.append(3*k+kk)
-                    active_param[str(bins)]=active_param[str(bins)][temp_index]
+                    active_param[str(bins)] = active_param[str(bins)][temp_index]
                 param[str(bins)].append(nu.copy((nu.hstack((active_param[str(bins)],active_dust,active_losvd)))))
-                j,j_timeleft=0,nu.random.exponential(200)
-                continue
-            if T_cuurent>=burnin:
-                j,j_timeleft=0,nu.random.exponential(200)
+                j, j_timeleft = 0, nu.random.exponential(200)
+                #continue
+            if T_cuurent >= burnin:
+                j, j_timeleft = 0, nu.random.exponential(200)
         else: #reset j and time till check for attempt jump
-            j,j_timeleft=0,nu.random.exponential(200)
+            j, j_timeleft = 0, nu.random.exponential(200)
+
         #########################################change temperature
         if nu.min([1,nu.exp((chi[str(bins)][-2]-chi[str(bins)][-1])/(2.*SA(T_cuurent+1,burnin,T_start,T_stop))-(chi[str(bins)][-2]+chi[str(bins)][-1])/(2.*SA(T_cuurent,burnin,T_start,T_stop)))/T])>nu.random.rand():
             if T_cuurent<burnin:
@@ -390,6 +294,86 @@ def rjmcmc(data,burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
     q_final.put((param,chi,bayes_fact,out_sigma))
     #return param,chi,sigma,acept_rate,out_sigma
 
+def death_birth(fun, birth_rate, bins, j,j_timeleft, active_param):
+    #does birth or death moved
+        attempt = False
+        if ((birth_rate > nu.random.rand() and bins < fun._k_max and 
+             j > j_timeleft ) or (j > j_timeleft and bins == 1)):
+            #birth
+            attempt = True #so program knows to attempt a new model
+            rand_step = nu.random.rand(3)*[fun._metal_unq.ptp(), fun._age_unq.ptp(),1.]
+            rand_index = nu.random.randint(bins)
+            temp_bins = 1 + bins
+            #criteria for this step
+            critera = 1/4.**3 * birth_rate #(1/3.)**temp_bins
+            #new param step
+            for k in range(len(active_param[str(bins)])):
+                active_param[str(temp_bins)][k]=active_param[str(bins)][k]
+            #set last 3 and rand_index 3 to new
+            if .5 > nu.random.rand(): #x'=x+-u
+                active_param[str(temp_bins)][-3:] = (active_param[str(bins)][rand_index*3:rand_index*3+3] + 
+                                                     rand_step)
+                active_param[str(temp_bins)][rand_index*3:rand_index*3+3] = (
+                    active_param[str(bins)][rand_index*3:rand_index*3+3] - rand_step)
+                k = 0
+                #check to see if in bounds
+                while fun.prior(nu.hstack((active_param[str(temp_bins)],
+                                           nu.zeros(2)))): 
+                    k += 1
+                    if k < 100:
+                        rand_step = nu.random.rand(3) * [fun._metal_unq.ptp(), fun._age_unq.ptp(),1.]
+                    else:
+                        rand_step /= 2.
+                    active_param[str(temp_bins)][-3:] = (
+                        active_param[str(bins)][rand_index*3:rand_index*3+3] + rand_step)
+                    active_param[str(temp_bins)][rand_index*3:rand_index*3+3]=(
+                        active_param[str(bins)][rand_index*3:rand_index*3+3]-rand_step)
+            else: #draw new values randomly from param space
+                active_param[str(temp_bins)][-3:] = (nu.random.rand(3) * 
+                                                     nu.array([fun._metal_unq.ptp(), fun._age_unq.ptp(),5.]) + 
+                                                     nu.array([fun._metal_unq.min(), fun._age_unq.min(), 0]))
+        elif j > j_timeleft and bins > 1 and  0.01 < nu.random.rand():
+            #death
+            attempt = True #so program knows to attempt a new model
+            temp_bins = bins - 1
+            #criteria for this step
+            critera = 4.**3 * (1 - birth_rate) #3.**temp_bins
+            if .5 > nu.random.rand():
+                #remove bins with 1-N/Ntot probablitiy
+                Ntot = nu.sum(active_param[str(bins)][range(2,bins*3,3)])
+                rand_index = (rand_choice(active_param[str(bins)][range(2,bins*3,3)],
+                                          active_param[str(bins)][range(2,bins*3,3)]/Ntot))
+                k = 0
+                for ii in xrange(bins): #copy to lower dimestion
+                    if not ii == rand_index:
+                        active_param[str(temp_bins)][3*k:3*k+3] = nu.copy(active_param[str(bins)]
+                                                                        [3*ii:3*ii+3])
+                        k += 1
+            else: #average 2 componets together for new values
+                rand_index = nu.random.permutation(bins)[:2] #2 random indeci
+                k = 0
+                for ii in xrange(bins):
+                    if not any(ii == rand_index):
+                        active_param[str(temp_bins)][3*k:3*k+3] = nu.copy(active_param[str(bins)]
+                                                                        [3*ii:3*ii+3])
+                        k += 1
+                active_param[str(temp_bins)][3*k:3*k+3] = (active_param[str(bins)][3*rand_index[0]:3*rand_index[0]+3]+active_param[str(bins)] [3*rand_index[1]:3*rand_index[1]+3])/2.
+        '''elif j > j_timeleft: #move to global bestfit
+            attempt = True
+            #extract best fit from global array
+            best_param = nu.array(option.parambest)
+            best_param = best_param[~nu.isnan(best_param)]
+            temp_bins = (len(best_param)-2-4)/3
+            #calculate occam factor * model select prob
+            critera = 4. **(bins - temp_bins) * 0.01
+            active_param[str(temp_bins)] = nu.copy(best_param[range(3*temp_bins)])
+            active_dust = nu.copy(best_param[-6:-4])
+            active_losvd = nu.copy(best_param[-4:])'''
+        if attempt:
+            return active_param, temp_bins, attempt, critera
+        else:
+            return active_param, None, attempt, None
+
 def is_send(N1,N2,N_prev): 
     #counds the number of values in a list inside of a dict
     val_N=0
@@ -420,6 +404,50 @@ def random_permute(seed):
         c = (a * seed + c) / b
         seed = str(seed)
     return int(seed)
+
+def Step_func(acept_rate, param, sigma, sigma_dust, sigma_losvd, bins, j, isdust, islosvd):
+    #changes step size if needed
+    if  (acept_rate < 0.234 and 
+         all(sigma.diagonal()[nu.array([range(1,bins*3,3),range(0,bins*3,3)]).ravel()] < 5.19)):
+               #too few aceptnce decrease sigma
+        sigma  /= 1.05
+        if isdust:
+            sigma_dust /= 1.05
+        if islosvd: 
+            sigma_losvd /= 1.05
+
+    elif acept_rate > .040 and all(sigma.diagonal() >= 10**-5): #not enough
+        sigma *= 1.05
+            #dust step
+        if isdust:
+            sigma_dust *= 1.05
+            #losvd step
+        if islosvd:
+            sigma_losvd *= 1.05
+    #use covarnence matrix
+    if j %100 == 0 and j != 0: 
+        t_param = nu.array(param)
+        try:
+            tsigma = Covarence_mat(t_param[:,range(3*bins)],
+                                  t_param.shape[0]-1)
+            if isdust:
+                tsigma_dust = Covarence_mat(t_param[:,-6:-4],t_param.shape[0]-1)
+            if islosvd:
+                tsigma_losvd = Covarence_mat(t_param[:,-4:],t_param.shape[0]-1)
+        except IndexError:
+            print t_param.shape
+            #error handeling some time cov is nan
+        if  (nu.all(nu.isfinite(tsigma)) or 
+             nu.all(nu.isfinite(tsigma_dust)) or 
+             nu.all(nu.isfinite(tsigma_losvd))):
+                #set equal to last cov matirx
+            sigma = tsigma
+            if isdust:
+                sigma_dust = tsigma_dust
+            if islosvd:
+                sigma_losvd = tsigma_losvd
+
+    return sigma, sigma_dust, sigma_losvd
 
 def swarm_func(param,dust_param,chi,parambest,chibest,bins):
     #pushes current chain towards global best fit with streangth
@@ -609,8 +637,8 @@ if __name__=='__main__':
     assert fun.send_class.__dict__.has_key('_lib_vals')
     rank=1
     q_talk,q_final=Queue(),Queue()
-    pro.runctx('rjmcmc(data,burnin,k_max,option,rank,q_talk,q_final,fun)'
-               , globals(),{'data':data,'burnin':burnin,'k_max':k_max,
+    pro.runctx('rjmcmc(fun,burnin,k_max,option,rank,q_talk,q_final)'
+               , globals(),{'fun': fun.send_class, 'burnin':burnin,'k_max':k_max,
                             'rank':1,'q_talk':q_talk,'q_final':q_final
-                            ,'option':option,'fun': fun.send_class}
+                            ,'option':option}
                ,filename='agedata1.Profile')
