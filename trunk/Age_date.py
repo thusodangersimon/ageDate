@@ -46,6 +46,26 @@ import Age_MCMC as mc
 import Age_RJMCMC as rjmc
 
 #123456789012345678901234567890123456789012345678901234567890123456789
+###decorators
+class memoized(object):
+   '''Decorator. Caches a function's return value each time it is called.
+   If called later with the same arguments, the cached value is returned
+   (not reevaluated).
+   '''
+   def __init__(self, func):
+      self.func = func
+      self.cache = {}
+   def __call__(self, *args):
+      if args in self.cache:
+         return self.cache[args]
+      else:
+         value = self.func(*args)
+         self.cache[args] = value
+         return value
+   def __repr__(self):
+      '''Return the function's docstring.'''
+      return self.func.__doc__
+                  
 
 ###spectral lib stuff####
 global lib_path,spect
@@ -186,6 +206,22 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins):
 
    #exit program
     return out
+
+def random_permute(seed):
+    #does random sequences to produice a random seed for parallel programs
+    ##middle squared method
+    seed = str(seed**2)
+    while len(seed) < 7:
+        seed=str(int(seed)**2)
+    #do more randomization
+    ##multiply with carry
+    a,b,c = int(seed[-1]), 2**32, int(seed[-3])
+    j = nu.random.random_integers(4, len(seed))
+    for i in range(int(seed[-j:-j+3])):
+        seed = (a*int(seed) + c) % b
+        c = (a * seed + c) / b
+        seed = str(seed)
+    return int(seed)
 
 def data_match_all(data, spect):
     '''makes sure data and model have same 
@@ -454,7 +490,6 @@ def LOSVD(model,param,velscale=None):
     return model
 
 
-
 #####classes############# 
 class MC_func:
     '''Does everything the is required for and Age_date mcmc sampler'''
@@ -510,8 +545,8 @@ class MC_func:
 
         for ii in range(self._cpus):
             work.append(Process(target=self.samp,
-                                args=(self.data,self._burnin,self._k_max,
-                                      option,ii,q_talk,q_final,self.send_class)))
+                                args=(self.send_class, self._burnin, self._k_max,
+                                      option, ii, q_talk, q_final,)))
             work[-1].start()
         while (option.iter.value <= self._iter + self._burnin * self._cpus 
                and option.value):  
@@ -702,12 +737,18 @@ class MC_func:
         self.autosetup(int(best_fit[0]))
         print 'Use run() method to start new run'
             
+    
     def uniform_prior(self, param, bol=True):
         #calculates prior probablity for a value 
         #(sort of, if not in range returns 0 else 1
         
         #need to add non bool output, doesn't catch holes in param space
-
+        #sees if ages are too close together
+        self.bins = (len(param) - 2) / 3
+        age =param[:-2][range(1,self.bins*3,3)]
+        age.sort()
+        if nu.any(nu.diff(age) < 0.001):
+            return 0
         #check to see if no bins or some type of binning
         self.bins = (len(param) - 2) / 3
         temp = self.age_bound(self._age_unq, self.bins)
@@ -802,7 +843,7 @@ class MC_func:
             Dust = True
 
         #check if params are in correct range
-        if self.uniform_prior(nu.hstack((param,dust_param))) < 1:
+        if self.uniform_prior(nu.hstack((param,dust_param)), True) < 1:
             return nu.inf, nu.zeros(bins)
 
         model = get_model_fit_opt(param, self._lib_vals, self._age_unq,
@@ -902,6 +943,7 @@ class MC_func:
             self._metal_unq = metal_unq
 
 
+############plotting
 def plot_model(param, data, bins, plot=True):
     import pylab as lab
     #takes parameters and returns spectra associated with it
