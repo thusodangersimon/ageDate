@@ -28,7 +28,6 @@
 #
 ''' all moduals asociated with reverse jump mcmc'''
 
-#from Age_date import *
 import numpy as nu
 import sys
 from scipy.cluster import vq as sci
@@ -139,18 +138,12 @@ def rjmcmc(fun, burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             #print 'Acceptance %i reject %i' %(Nacept,Nreject)
             #print active_param[str(bins)][range(2,bins*3,3)]
         #sample from distiburtion
-        try:
-            active_param[str(bins)] = fun.proposal(active_param[str(bins)],
-                                                   sigma[str(bins)])
-            if fun._dust:
-                active_dust = fun.proposal(active_dust,sigma_dust)
-            if fun._losvd:
-                active_losvd  = fun.proposal(active_losvd, sigma_losvd)
-                #active_losvd[1] = 0.
-             #print birth_rate, rank
-        except ValueError:
-            print len(param[str(bins)]),j
-            raise
+        active_param[str(bins)] = fun.proposal(active_param[str(bins)],
+                                               sigma[str(bins)])
+        if fun._dust:
+            active_dust = fun.proposal(active_dust,sigma_dust)
+        if fun._losvd:
+            active_losvd  = fun.proposal(active_losvd, sigma_losvd)
         #calculate new model and chi
         chi[str(bins)].append(0.)
         chi[str(bins)][-1],active_param[str(bins)][range(2,bins*3,3)]=fun.lik(
@@ -407,8 +400,7 @@ def random_permute(seed):
 
 def Step_func(acept_rate, param, sigma, sigma_dust, sigma_losvd, bins, j, isdust, islosvd):
     #changes step size if needed
-    if  (acept_rate < 0.234 and 
-         all(sigma.diagonal()[nu.array([range(1,bins*3,3),range(0,bins*3,3)]).ravel()] < 5.19)):
+    if  (acept_rate < 0.234 and all(sigma.diagonal() >= 10**-5)):
                #too few aceptnce decrease sigma
         sigma  /= 1.05
         if isdust:
@@ -416,7 +408,8 @@ def Step_func(acept_rate, param, sigma, sigma_dust, sigma_losvd, bins, j, isdust
         if islosvd: 
             sigma_losvd /= 1.05
 
-    elif acept_rate > .040 and all(sigma.diagonal() >= 10**-5): #not enough
+    elif (acept_rate > .040 and 
+          all(sigma.diagonal()[nu.array([range(1,bins*3,3),range(0,bins*3,3)]).ravel()] < 5.19)): #not enough
         sigma *= 1.05
             #dust step
         if isdust:
