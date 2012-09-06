@@ -55,13 +55,25 @@ class memoized(object):
    def __init__(self, func):
       self.func = func
       self.cache = {}
+
    def __call__(self, *args):
-      if args in self.cache:
-         return self.cache[args]
+      #works different for different functions
+      if self.func.__name__ == 'redshift':
+         arg = str(args[1])
+         if arg in self.cache:
+            return self.cache[arg]
+         else:
+            value = self.func(*args)
+            self.cache[arg] = value
+            return value
       else:
-         value = self.func(*args)
-         self.cache[args] = value
-         return value
+         if args in self.cache:
+            return self.cache[args]
+         else:
+            value = self.func(*args)
+            self.cache[args] = value
+            return value
+
    def __repr__(self):
       '''Return the function's docstring.'''
       return self.func.__doc__
@@ -256,7 +268,7 @@ def data_match_all(data, spect):
                                             out_data[:,0]) <
                             model['wave'].shape[0], :]
     #interpolate spectra lib so it has same wavelength axis as data 
-    model = data_match_new(out_data, model,spect[0, :].shape[0] - 1)
+    model = data_match(out_data, model,spect[0, :].shape[0] - 1)
     out = nu.zeros([model['0'].shape[0], len(model.keys()) + 1])
     out[:, 0] = nu.copy(out_data[:, 0])
     for i in model.keys():
@@ -264,21 +276,28 @@ def data_match_all(data, spect):
     spect = nu.copy(out)
     return spect, out_data
 
-def data_match_new(data, model, bins):
-    #makes sure data and model have same wavelength range 
-    #and points but with a dictionary
-    #assumes spect_lib is longer than data
-    out = {}
+def data_match(data, model, bins, keep_wave=False):
+   #makes sure data and model have same wavelength range 
+   #and points but with a dictionary
+   #assumes spect_lib is longer than data
+   ####add resolution downgrading!!!
+   out = {}
     #if they have the same x-axis
-    if nu.all(model['wave'] == data[:, 0]):
-        for i in xrange(bins):
-            out[str(i)] = model[str(i)]
-    else: #not same shape, interp 
-        for i in xrange(bins):
-            out[str(i)] = spectra_lin_interp(model['wave'],
-                                             model[str(i)], data[:,0])
-    return out
+   if nu.all(model['wave'] == data[:, 0]):
+      for i in xrange(bins):
+         out[str(i)] = model[str(i)]
+   else: #not same shape, interp 
+      for i in xrange(bins):
+         out[str(i)] = spectra_lin_interp(model['wave'],
+                                          model[str(i)], data[:,0])
+   if keep_wave:
+      out['wave'] = nu.copy(data[:,0])
+   return out
 
+@memoized
+def redshift(wave, redshift):
+   #changes redshift of models
+   return wave/(1. + redshift)
 
 def normalize(data, model):
     #normalizes the model spectra so it is closest to the data
@@ -494,21 +513,25 @@ def LOSVD(model,param,velscale=None):
 class MC_func:
     '''Does everything the is required for and Age_date mcmc sampler'''
     def __init__(self, data,option='rjmc', burnin=10**4, itter=5*10**5,
-                 cpus=cpu_count(), use_dust=True, use_lovsd=True,bins=None):
-        #match spectra for use in class
+                 cpus=cpu_count(), fit_redshift=False, use_dust=True, use_lovsd=True,bins=None):
+        #match spectra for use in class /Turned off due to redshift fitting
         global spect
-        self.spect, self.data=data_match_all(data,spect)
-        spect = self.spect
+        if not fit_redshift:
+           self.spect, self.data=data_match_all(data,spect)
+           spect = nu.copy(self.spect)
+        else:
+           self.spect = nu.copy(spect)
+           self.data = nu.copy(data)
         #normalized so area under curve is 1 to keep chi 
         #values resonalble
         #need to properly handel uncertanty
-        self.norms=self.area_under_curve(data) * 10 ** -5 #need to turn off
+        self.norms = self.area_under_curve(data) * 10 ** -5 #need to turn off
         self.data[:,1] = self.data[:, 1] / self.norms
 
         #initalize bound varables
-        lib_vals=get_fitting_info(lib_path)
+        lib_vals = get_fitting_info(lib_path)
         #to keep roundoff error constistant
-        lib_vals[0][:,0]= nu.log10(lib_vals[0][:, 0]) 
+        lib_vals[0][:,0] = nu.log10(lib_vals[0][:, 0]) 
         metal_unq = nu.unique(lib_vals[0][:, 0])
         #get boundary of parameters
         self.hull = bound.find_boundary(lib_vals[0])
@@ -531,6 +554,9 @@ class MC_func:
         self._losvd = use_lovsd
         self._velocityscale = (nu.diff(self.data[:,0]).mean()
                                / self.data[:,0].mean() * 299792.458)
+        #redshift fitting
+        self._redshift = fit_redshift
+        self.redshift_bounds = nu.array([0., 13.])
 
     def run(self,verbose=True):
         'starts run of Age_date using configuation files'
@@ -793,7 +819,7 @@ class MC_func:
         #gives area under curve of the data spectra
         return nu.trapz(data[:, 1], data[:, 0])
 
-    def func(self,param, dust_param=None,losvd_param=None, N=None):
+    def func(self,param, dust_param=None, losvd_param=None, Redshift=None, N=None):
         '''returns y axis of ssp from parameters
         if no N value, then does least squares for normallization params'''
         bins = param.shape[0] / 3
@@ -809,6 +835,13 @@ class MC_func:
             return nu.zeros_like(self.spect[:, 0])
         model = get_model_fit_opt(param, self._lib_vals, self._age_unq,
                                   self._metal_unq, bins) 
+        #redshift and make len(model['wave']) == len(data)
+        if Redshift:
+           model['wave'] = redshift(model['wave'], Redshift)
+        if nu.all(model['wave'] == self.data[:,0]):
+           #make model wavelength match data
+           model = data_match_new(self.data, model, bins)
+
         #dust
         if Dust:
             model = dust(nu.hstack((param, dust_param)), model)
@@ -817,7 +850,7 @@ class MC_func:
             model = LOSVD(model, losvd_param, self._velocityscale)
         #if no N use N_norm to find nnls best fit
         if not N: 
-            N, chi = N_normalize(self.data, model, bins)
+            N, chi = N_normalize(self.data, model, bins, True)
         else:
             #otherwise use from param array
             model.pop('wave')
@@ -830,8 +863,8 @@ class MC_func:
                       N[nu.int64(model.keys())], 1)'''
         return out
         
-    def func_N_norm(self, param, dust_param=None,losvd_param=None):
-        '''returns chi and N norm best fit params'''
+    def func_N_norm(self, param, dust_param=None, losvd_param=None, Redshift=None,N=None):
+        '''returns chi and N norm best fit params if N==None'''
         bins = param.shape[0] / 3
         if len(param) != bins * 3:
             return nu.nan
@@ -853,7 +886,17 @@ class MC_func:
         if not nu.any(nu.isfinite(temp)):
             pik.dump((param,bins),open('error.pik','w'),2)
             return nu.inf, nu.zeros(bins)
-
+        #redshift and make len(model['wave']) == len(data)
+        if Redshift:
+           if (Redshift < self.redshift_bounds.min() or 
+               Redshift > self.redshift_bounds.max():
+                  #check bounds
+               return nu.inf, nu.array([0.]*bins)
+           model['wave'] = redshift(model['wave'], Redshift)
+        if (nu.all(model['wave'] == self.data[:,0]) or 
+            len(model['wave']) != len(self.data)):
+           #make model wavelength match data
+           model = data_match(self.data, model, bins,True)
         #dust
         if Dust:
             model = dust(nu.hstack((param, dust_param)), model)
@@ -861,13 +904,28 @@ class MC_func:
         if nu.any(losvd_param):
             model = LOSVD(model,losvd_param,self._velocityscale)
         #Find normalization and chi squared value
-        try:
-            N,chi = N_normalize(self.data, model, bins)
-        except ValueError:
-            import cPickle as pik
-            pik.dump((temp,model['0'],losvd_param),open('error1.pik','w'),2)
-            print temp.shape,model['0'].shape,self.data.shape
-            raise
+        if not N:
+           try:
+              N,chi = N_normalize(self.data, model, bins)
+           except ValueError:
+              import cPickle as pik
+              pik.dump((temp,model['0'],losvd_param),open('error1.pik','w'),2)
+              print temp.shape,model['0'].shape,self.data.shape
+              raise
+        else:
+           #model.pop('wave')
+           N = param[range(2, bins * 3, 3)]
+           #check if N is greater than 0
+           if nu.any(N < 0):
+              return nu.inf, N
+           out = nu.zeros_like(model['0'])
+           for i in model.keys():
+              out += N[int(i)] * model[i]
+           if self.data.shape[1] == 2:
+              chi = ((self.data[:,1] - out)**2).sum()
+           else: 
+              #if data has uncertanty
+              chi = nu.sum((self.data[:,1] - out)**2 / self.data[:,2])
         return chi, N
 
     def min_bound(self, bins):
