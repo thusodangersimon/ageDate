@@ -452,8 +452,8 @@ def f_dust(tau):
     return out
 
 
-def gauss_kernel(velscale,sigma=1, cz=0,h3=0,h4=0):
-    '''cz:        Systemic cz in km/s
+def gauss_kernel(velscale,sigma=1, Z=0,h3=0,h4=0):
+    '''Z:         Redshift
     sigma:        Dispersion velocity in km/s. Defaulted to 1.
     h3, h4:       Gauss-Hermite coefficients. Defaulted to 0.
     resol:        Size (in km/s) of each pixel of the output array
@@ -462,14 +462,9 @@ def gauss_kernel(velscale,sigma=1, cz=0,h3=0,h4=0):
         sigma = 1.
     if sigma > 10**4:
         sigma = 10**4
-    if h3 < 0:
-        h3 = 0.
-    if h4 < 0:
-        h3 = 0.
-    #assume galaxy is close by and redshift corrected
-    if nu.abs(cz) > 10**4:
-        cz = 10**4 * nu.sign(cz)
+   #make sure redshift is positve    
     c = 299792.458
+    cz = Z * c
     logl_shift = nu.log(1. + cz/c) / velscale * c     #; shift in pixels
     logl_sigma = nu.log(1. + sigma/c) / velscale * c  #; sigma in pixels
 
@@ -479,9 +474,8 @@ def gauss_kernel(velscale,sigma=1, cz=0,h3=0,h4=0):
     #normal terms
     slitout = nu.exp(-y*y/2.) / logl_sigma / nu.sqrt(2.*nu.pi) 
     #hemite terms
-    if h3 != 0 or h4 != 0:
-        slitout = slitout*(( 1. + h3*((2 * y**3 - 3 * y) /3.**.5) + 
-                             h4*((4*y**4 - 12*y**2 + 3)/24.**.5)))
+    slitout = slitout*( 1.+ h3 * 2**.5 / (6.**.5) * (2 * y**3 - 3 * y) +
+                        h4 / (24**.5) * (4 * y**4 - 12 * y**2 + 3))
     #normalize
     slitout /= nu.sum(slitout)
     return slitout
@@ -513,15 +507,11 @@ def LOSVD(model,param,velscale=None):
 class MC_func:
     '''Does everything the is required for and Age_date mcmc sampler'''
     def __init__(self, data,option='rjmc', burnin=10**4, itter=5*10**5,
-                 cpus=cpu_count(), fit_redshift=False, use_dust=True, use_lovsd=True,bins=None):
+                 cpus=cpu_count(), use_dust=True, use_lovsd=True,bins=None):
         #match spectra for use in class /Turned off due to redshift fitting
         global spect
-        if not fit_redshift:
-           self.spect, self.data=data_match_all(data,spect)
-           spect = nu.copy(self.spect)
-        else:
-           self.spect = nu.copy(spect)
-           self.data = nu.copy(data)
+        self.spect = nu.copy(spect)
+        self.data = nu.copy(data)
         #normalized so area under curve is 1 to keep chi 
         #values resonalble
         #need to properly handel uncertanty
@@ -646,7 +636,6 @@ class MC_func:
         self.send_class._losvd = self._losvd
         self.send_class._velocityscale = self._velocityscale
 
-
     def sampler(self,option):
         '''puts samplers for use'''
         if option == 'rjmc':
@@ -764,19 +753,28 @@ class MC_func:
         print 'Use run() method to start new run'
             
     
-    def uniform_prior(self, param, bol=True):
+    def uniform_prior(self, param, dust=None, losvd=None, bol=True):
         #calculates prior probablity for a value 
         #(sort of, if not in range returns 0 else 1
         
         #need to add non bool output, doesn't catch holes in param space
         #sees if ages are too close together
-        self.bins = (len(param) - 2) / 3
-        age =param[:-2][range(1,self.bins*3,3)]
+        self.bins = (len(param)) / 3
+        age = param[range(1,self.bins*3,3)]
         age.sort()
-        if nu.any(nu.diff(age) < 0.001):
+        if nu.any(nu.diff(age) < 0.01):
             return 0
+        #check losvd
+        if nu.any(losvd):
+           #[sigma,Z,h3,h4]
+           if losvd[0] <= 0 or losvd[0] > 10**4:
+              #sigma can't be negitive or too large
+              return 0
+           if nu.any(nu.abs(losvd[1:]) > 10):
+              #redshift can't be too high
+              #skewness and kurtosis can't be too high
+              return 0
         #check to see if no bins or some type of binning
-        self.bins = (len(param) - 2) / 3
         temp = self.age_bound(self._age_unq, self.bins)
         out = 1.
         if len(temp) <= 2:
@@ -810,37 +808,38 @@ class MC_func:
             if not bound.pinp_wbounds(param[index[i]], self.hull):
                 return 0
         #check dust
-        if (nu.any(param[-2:] > self.dust_bound.max()) or 
-            nu.any(param[-2:] < self.dust_bound.min())):
-            return 0
+        if nu.any(dust):
+           if (nu.any(dust > self.dust_bound.max()) or 
+               nu.any(dust < self.dust_bound.min())):
+              return 0
+        
+        #check losvd
+        if nu.any(losvd):
+           if nu.any(losvd < 0) or nu.any(losvd > 10**4) or losvd[1] > 13:
+              return 0
+
         return out
         
     def area_under_curve(self, data):
         #gives area under curve of the data spectra
         return nu.trapz(data[:, 1], data[:, 0])
 
-    def func(self,param, dust_param=None, losvd_param=None, Redshift=None, N=None):
+    def func(self,param, dust_param=None, losvd_param=None, N=None):
         '''returns y axis of ssp from parameters
         if no N value, then does least squares for normallization params'''
         bins = param.shape[0] / 3
         if len(param) != bins * 3:
             return nu.nan
         #check if params are in correct range
-        if not nu.any(dust_param):
-            dust_param = nu.zeros(2)
-            Dust = False
-        else:
-            Dust = True
-        if self.uniform_prior(nu.hstack((param,dust_param))) < 1:
+        if self.uniform_prior(param, dust_param, losvd_param) < 1:
             return nu.zeros_like(self.spect[:, 0])
         model = get_model_fit_opt(param, self._lib_vals, self._age_unq,
                                   self._metal_unq, bins) 
         #redshift and make len(model['wave']) == len(data)
-        if Redshift:
-           model['wave'] = redshift(model['wave'], Redshift)
-        if nu.all(model['wave'] == self.data[:,0]):
+        if (nu.all(model['wave'] == self.data[:,0]) or 
+            len(model['wave']) != len(self.data)):
            #make model wavelength match data
-           model = data_match_new(self.data, model, bins)
+           model = data_match(self.data, model, bins,True)
 
         #dust
         if Dust:
@@ -853,32 +852,27 @@ class MC_func:
             N, chi = N_normalize(self.data, model, bins, True)
         else:
             #otherwise use from param array
-            model.pop('wave')
-            N = param[range(2, bins * 3, 3)]
+           wave = model['wave']
+           model.pop('wave')
+           N = param[range(2, bins * 3, 3)]
         out = nu.zeros_like(model['0'])
         for i in model.keys():
             out += N[int(i)] * model[i]
         '''return nu.sum(nu.array(model.values()).T[:,
                 nu.argsort(nu.int64(model.keys()))] * 
                       N[nu.int64(model.keys())], 1)'''
-        return out
+        return nu.vstack((wave,out)).T
         
-    def func_N_norm(self, param, dust_param=None, losvd_param=None, Redshift=None,N=None):
+    def func_N_norm(self, param, dust_param=None, losvd_param=None, N=None):
         '''returns chi and N norm best fit params if N==None'''
         bins = param.shape[0] / 3
         if len(param) != bins * 3:
             return nu.nan
         
-        if not nu.any(dust_param):
-            dust_param = nu.zeros(2)
-            Dust = False
-        else:
-            Dust = True
-
-        #check if params are in correct range
-        if self.uniform_prior(nu.hstack((param,dust_param)), True) < 1:
+       #check if params are in correct range
+        if self.uniform_prior(param, dust_param, losvd_param) < 1:
             return nu.inf, nu.zeros(bins)
-
+        
         model = get_model_fit_opt(param, self._lib_vals, self._age_unq,
                                   self._metal_unq, bins)
         #don't bother with analysis if model isn't finite
@@ -903,6 +897,11 @@ class MC_func:
         #line of sight velocity despersion
         if nu.any(losvd_param):
             model = LOSVD(model,losvd_param,self._velocityscale)
+        #make sure wavelength match up and have same range
+        if (nu.all(model['wave'] == self.data[:,0]) or 
+            len(model['wave']) != len(self.data)):
+           model = data_match(self.data, model, bins,True)
+
         #Find normalization and chi squared value
         if not N:
            try:
