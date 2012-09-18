@@ -36,7 +36,7 @@ from anderson_darling import anderson_darling_k as ad_k
 from multiprocessing import *
 a=nu.seterr(all='ignore')
 
-def rjmcmc(fun, burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=None):
+def rjmcmc(fun, burnin=5*10**3, k_max=16, option=True, rank=0, q_talk=None, q_final=None):
     #parallel worker program reverse jump mcmc program
     nu.random.seed(random_permute(current_process().pid))
     #initalize boundaries
@@ -50,6 +50,7 @@ def rjmcmc(fun, burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
     Nacept,Nreject,acept_rate,out_sigma={},{},{},{}
     #set up dust if in use
     if fun._dust:
+        #[tau_ism, tau_BC ]
         active_dust = nu.random.rand(2)*4.
         sigma_dust = nu.identity(2)*nu.random.rand()*2
     else:
@@ -57,16 +58,13 @@ def rjmcmc(fun, burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
         sigma_dust = nu.zeros([2,2])
     #set up LOSVD
     if fun._losvd:
-        '''#only gaussian dispersion with no shift for now
-        active_losvd = nu.array([nu.random.rand()*150,0,0,0])
-        sigma_losvd = nu.zeros([4,4])
-        sigma_losvd[0,0] = nu.random.rand() * 10'''
-        active_losvd = nu.random.rand(4)*150
+        #[sigma, redshift, h3, h4]
+        active_losvd = nu.random.rand(4)*10
+        active_losvd[1] = 0.
         sigma_losvd = nu.random.rand(4,4)
     else:
         active_losvd = nu.zeros(4)
         sigma_losvd = nu.zeros([4,4])
- 
     bayes_fact={} #to calculate bayes factor
     #fun=MC_func(data)
     for i in range(1,k_max+1):
@@ -78,7 +76,8 @@ def rjmcmc(fun, burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
         #sigma_dust[str(i)]=nu.identity(2)*nu.random.rand()*2
         Nacept[str(i)],Nreject[str(i)]=1.,0.
         acept_rate[str(i)],out_sigma[str(i)]=[.35],[]
-        bayes_fact[str(i)]=[]
+        bayes_fact[str(i)]=[]       
+
     #bins to start with
     bins=nu.random.randint(1,k_max)
     while True:
@@ -132,11 +131,9 @@ def rjmcmc(fun, burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
 
     while option.value:
         if option.iter.value%5000==0:
-            print "hi, I'm at itter %i, chi %f from %s bins and for accept %2.2f" %(len(param[str(bins)]),chi[str(bins)][-1],bins,acept_rate[str(bins)][-1]*100)
+            print "hi, I'm at itter %i, chi %f from %s bins and from %i redshift of %1.2f" %(len(param[str(bins)]),chi[str(bins)][-1],bins, rank, active_losvd[1])
             sys.stdout.flush()
-            #print sigma[str(bins)].diagonal()
-            #print 'Acceptance %i reject %i' %(Nacept,Nreject)
-            #print active_param[str(bins)][range(2,bins*3,3)]
+
         #sample from distiburtion
         active_param[str(bins)] = fun.proposal(active_param[str(bins)],
                                                sigma[str(bins)])
@@ -144,6 +141,7 @@ def rjmcmc(fun, burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
             active_dust = fun.proposal(active_dust,sigma_dust)
         if fun._losvd:
             active_losvd  = fun.proposal(active_losvd, sigma_losvd)
+
         #calculate new model and chi
         chi[str(bins)].append(0.)
         chi[str(bins)][-1],active_param[str(bins)][range(2,bins*3,3)]=fun.lik(
@@ -151,7 +149,7 @@ def rjmcmc(fun, burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
         #sort by age
         if not nu.all(active_param[str(bins)][range(1,bins*3,3)]==
                       nu.sort(active_param[str(bins)][range(1,bins*3,3)])):
-            index=nu.argsort(active_param[str(bins)][range(1,bins*3,3)])
+            index = nu.argsort(active_param[str(bins)][range(1,bins*3,3)])
             temp_index=[] #create sorting indcci
             for k in index:
                 for kk in range(3):
@@ -191,14 +189,17 @@ def rjmcmc(fun, burnin=5*10**3,k_max=16,option=True,rank=0,q_talk=None,q_final=N
                 active_dust = nu.copy(param[str(bins)][-1][-6:-4])
             if fun._losvd:
                 active_losvd = nu.copy(param[str(bins)][-1][-4:])
-            if len(active_dust) != 2:
-                print 'best'
             chi[str(bins)][-1]=nu.copy(chi[str(bins)][-2])
             Nreject[str(bins)]+=1
 
         ###########################step stuff
-        sigma[str(bins)],sigma_dust,sigma_losvd = Step_func(acept_rate[str(bins)][-1],param[str(bins)][-2000:],
-                                                            sigma[str(bins)],sigma_dust,sigma_losvd, bins, j,fun._dust, fun._losvd)
+        sigma[str(bins)],sigma_dust,sigma_losvd = Step_func(acept_rate[str(bins)][-1]
+                                                            ,param[str(bins)][-2000:]
+                                                            ,sigma[str(bins)],
+                                                            sigma_dust,
+                                                            sigma_losvd,
+                                                            bins, j,fun._dust, 
+                                                            fun._losvd)
 
 
         #############################decide if birth or death
@@ -398,7 +399,8 @@ def random_permute(seed):
         seed = str(seed)
     return int(seed)
 
-def Step_func(acept_rate, param, sigma, sigma_dust, sigma_losvd, bins, j, isdust, islosvd):
+def Step_func(acept_rate, param, sigma, sigma_dust, sigma_losvd,
+              bins, j, isdust, islosvd):
     #changes step size if needed
     if  (acept_rate < 0.234 and all(sigma.diagonal() >= 10**-5)):
                #too few aceptnce decrease sigma
@@ -417,6 +419,7 @@ def Step_func(acept_rate, param, sigma, sigma_dust, sigma_losvd, bins, j, isdust
             #losvd step
         if islosvd:
             sigma_losvd *= 1.05
+
     #use covarnence matrix
     if j %100 == 0 and j != 0: 
         t_param = nu.array(param)
