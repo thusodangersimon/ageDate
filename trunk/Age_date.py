@@ -54,6 +54,7 @@ class memoized(object):
    '''
    def __init__(self, func):
       self.func = func
+      self.__doc__ = func.__doc__
       self.cache = {}
 
    def __call__(self, *args):
@@ -833,7 +834,9 @@ class MC_func:
         model = get_model_fit_opt(param, self._lib_vals, self._age_unq,
                                   self._metal_unq, bins) 
         #redshift and make len(model['wave']) == len(data)
-        if nu.allclose(model['wave'], self.data[:,0]):
+        if not len(model['wave']) == len(self.data[:,0]):
+           model = data_match(self.data, model, bins,True)
+        elif nu.allclose(model['wave'], self.data[:,0]):
            #make model wavelength match data
            model = data_match(self.data, model, bins,True)
 
@@ -877,7 +880,9 @@ class MC_func:
             pik.dump((param,bins),open('error.pik','w'),2)
             return nu.inf, nu.zeros(bins)
 
-        if nu.allclose(model['wave'], self.data[:,0]):
+        if not len(model['wave']) == len(self.data[:,0]):
+           model = data_match(self.data, model, bins,True)
+        elif nu.allclose(model['wave'], self.data[:,0]):
            #make model wavelength match data
            model = data_match(self.data, model, bins,True)
         #dust
