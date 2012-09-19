@@ -544,9 +544,6 @@ class MC_func:
         self._losvd = use_lovsd
         self._velocityscale = (nu.diff(self.data[:,0]).mean()
                                / self.data[:,0].mean() * 299792.458)
-        #redshift fitting
-        self._redshift = fit_redshift
-        self.redshift_bounds = nu.array([0., 13.])
 
     def run(self,verbose=True):
         'starts run of Age_date using configuation files'
@@ -836,13 +833,12 @@ class MC_func:
         model = get_model_fit_opt(param, self._lib_vals, self._age_unq,
                                   self._metal_unq, bins) 
         #redshift and make len(model['wave']) == len(data)
-        if (nu.all(model['wave'] == self.data[:,0]) or 
-            len(model['wave']) != len(self.data)):
+        if nu.allclose(model['wave'], self.data[:,0]):
            #make model wavelength match data
            model = data_match(self.data, model, bins,True)
 
         #dust
-        if Dust:
+        if nu.any(dust_param):
             model = dust(nu.hstack((param, dust_param)), model)
         #line of sight velocity stuff
         if nu.any(losvd_param):
@@ -880,19 +876,12 @@ class MC_func:
         if not nu.any(nu.isfinite(temp)):
             pik.dump((param,bins),open('error.pik','w'),2)
             return nu.inf, nu.zeros(bins)
-        #redshift and make len(model['wave']) == len(data)
-        if Redshift:
-           if (Redshift < self.redshift_bounds.min() or 
-               Redshift > self.redshift_bounds.max():
-                  #check bounds
-               return nu.inf, nu.array([0.]*bins)
-           model['wave'] = redshift(model['wave'], Redshift)
-        if (nu.all(model['wave'] == self.data[:,0]) or 
-            len(model['wave']) != len(self.data)):
+
+        if nu.allclose(model['wave'], self.data[:,0]):
            #make model wavelength match data
            model = data_match(self.data, model, bins,True)
         #dust
-        if Dust:
+        if nu.any(dust_param):
             model = dust(nu.hstack((param, dust_param)), model)
         #line of sight velocity despersion
         if nu.any(losvd_param):
