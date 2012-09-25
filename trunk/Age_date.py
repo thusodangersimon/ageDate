@@ -39,7 +39,8 @@ from scipy.optimize import nnls
 from scipy.optimize.minpack import leastsq
 from scipy.optimize import fmin_l_bfgs_b as fmin_bound
 from scipy.special import exp1 
-from scipy import weave
+#from scipy import weave
+from scipy.signal import fftconvolve
 import time as Time
 import boundary as bound
 import Age_MCMC as mc
@@ -298,7 +299,7 @@ def data_match(data, model, bins, keep_wave=False):
 @memoized
 def redshift(wave, redshift):
    #changes redshift of models
-   return wave/(1. + redshift)
+   return wave * (1. + redshift)
 
 def normalize(data, model):
     #normalizes the model spectra so it is closest to the data
@@ -453,9 +454,8 @@ def f_dust(tau):
     return out
 
 
-def gauss_kernel(velscale,sigma=1, Z=0,h3=0,h4=0):
-    '''Z:         Redshift
-    sigma:        Dispersion velocity in km/s. Defaulted to 1.
+def gauss_kernel(velscale,sigma=1,h3=0,h4=0):
+    '''sigma:        Dispersion velocity in km/s. Defaulted to 1.
     h3, h4:       Gauss-Hermite coefficients. Defaulted to 0.
     resol:        Size (in km/s) of each pixel of the output array
     '''
@@ -465,20 +465,24 @@ def gauss_kernel(velscale,sigma=1, Z=0,h3=0,h4=0):
         sigma = 10**4
    #make sure redshift is positve    
     c = 299792.458
-    cz = Z * c
-    logl_shift = nu.log(1. + cz/c) / velscale * c     #; shift in pixels
+    #v_red = (c *Z * (Z + 2.)) / (Z**2. + 2 * Z + 2)
+    #logl_shift = nu.log(1. + Z) / velscale * c     #; shift in pixels
     logl_sigma = nu.log(1. + sigma/c) / velscale * c  #; sigma in pixels
-
-    N = nu.ceil((nu.abs(logl_shift) + 5.*logl_sigma))
-    x = N - nu.arange(2*N+1)
-    y = (x-logl_shift)/logl_sigma
+    #shift = v_red / float(velscale)
+    #sigma = sigma / float(velscale)
+    N = nu.ceil( 5.*logl_sigma)
+    #N = nu.ceil(shift + 6. * sigma)
+    x = nu.arange(2*N+1) - N
+    y = (x)/logl_sigma
+    #y = (x - shift) / sigma
     #normal terms
-    slitout = nu.exp(-y*y/2.) / logl_sigma / nu.sqrt(2.*nu.pi) 
+    slitout = nu.exp(-y**2/2.) / logl_sigma / nu.sqrt(2.*nu.pi) 
     #hemite terms
     slitout = slitout*( 1.+ h3 * 2**.5 / (6.**.5) * (2 * y**3 - 3 * y) +
                         h4 / (24**.5) * (4 * y**4 - 12 * y**2 + 3))
     #normalize
-    slitout /= nu.sum(slitout)
+    if not slitout.sum() == 0:
+       slitout /= nu.sum(slitout)
     return slitout
 
 def LOSVD(model,param,velscale=None):
@@ -489,20 +493,63 @@ def LOSVD(model,param,velscale=None):
     if not nu.any(velscale):
         velscale = (nu.mean(nu.diff(model['wave']))/model['wave'].mean() 
                     * 299792.458)
-    kernel = gauss_kernel(velscale,param[0],param[1],param[2],param[3])
-    if kernel.shape[0] == 0:
+    kernel = gauss_kernel(velscale,param[0],param[2],param[3])
+    if kernel.shape[0] == 0 or kernel.shape[0] > model['wave'].shape[0]:
         return model
     #convolve individual spectra
     for i in model.keys():
         if i == 'wave':
             continue
-        model[i] = nu.convolve(kernel, model[i],'same')
+        model[i] = fftconvolve(kernel, model[i],'same')
+    #apply redshift
+    model['wave'] = redshift(model['wave'],param[1])
     #uncertanty convolve
     #if data.shape[1] == 3:
     #    out[:,2] = nu.sqrt(nu.convolve(kernel**2, data[:,2]**2,'same'))
 
     return model
 
+def get_velscale(data):
+   '''Uses redshift to calculate velocity scale of spectra
+   input is spectra with axis=0 wavelength and axis=1 is flux'''
+   class Vel_func(object):
+      def __init__(self,data,Z):
+         self.data = nu.copy(data)
+         self.Z = Z
+         import pylab as lab
+         self._lab=lab
+      def __call__(self,vel_scale,plot=False):
+         #known shift
+         data_known = nu.copy(self.data)
+         data_known[:,0] = redshift(data_known[:,0], self.Z)
+         #shift by convolution
+         data_unkno = nu.copy(self.data)
+         try:
+            kernel,shift = gauss_kernel(vel_scale,1.,self.Z,0,0)
+         except ValueError:
+            return nu.inf
+         #data_unkno[:,0] = nu.log10(data_unkno[:,0])
+         #data_unkno[:,0] += shift[0] 
+         #data_unkno[:,0] = 10**data_unkno[:,0]
+         self.data_known = data_known #nu.vstack((data_known['wave'],data_known['0'])).T
+         self.data_unkno = data_unkno
+         data_unkno[:,1] = sci.fftconvolve(kernel, data_unkno[:,1],'same')
+         #data_unkno = data_unkno[data_unkno[:,0] > .9,:]
+         data_known = data_match(data_unkno, {'wave':data_known[:,0],'0':data_known[:,1]},1,True)
+         if data_known['0'].shape[0] == 0:
+            return nu.inf
+         penalty =  self.data.shape[0]/float(data_known['0'].shape[0])
+         index = nu.searchsorted(data_known[:,0],data_known[:,0].mean())
+         chi = nu.sum((data_known['0'][index-10:index+10] - data_unkno[index-10:index+10,1])**2) * penalty
+         #chi = nu.sum((data_known['0'] - data_unkno[:,1])**2) * penalty *10**3.
+         if plot:
+            self._lab.figure()
+            self._lab.plot(data_known['wave'],data_known['0'],data_unkno[:,0],data_unkno[:,1])
+         #lab.plot(data_known[:,0],data_known[:,1],data_unkno[:,0],data_unkno[:,1])
+         return chi
+
+
+      
 
 #####classes############# 
 class MC_func:
@@ -880,11 +927,7 @@ class MC_func:
             pik.dump((param,bins),open('error.pik','w'),2)
             return nu.inf, nu.zeros(bins)
 
-        if not len(model['wave']) == len(self.data[:,0]):
-           model = data_match(self.data, model, bins,True)
-        elif nu.allclose(model['wave'], self.data[:,0]):
-           #make model wavelength match data
-           model = data_match(self.data, model, bins,True)
+        
         #dust
         if nu.any(dust_param):
             model = dust(nu.hstack((param, dust_param)), model)
@@ -892,10 +935,24 @@ class MC_func:
         if nu.any(losvd_param):
             model = LOSVD(model,losvd_param,self._velocityscale)
         #make sure wavelength match up and have same range
-        if (nu.all(model['wave'] == self.data[:,0]) or 
-            len(model['wave']) != len(self.data)):
-           model = data_match(self.data, model, bins,True)
+        if not len(model['wave']) == len(self.data[:,0]):
+           try:
+              model = data_match(self.data, model, bins,True)
+           except ValueError:
+              import cPickle as pik
+              pik.dump((self.data, model,temp,losvd_param, bins),open('error2.pik','w'),2)
+              raise
 
+        elif nu.allclose(model['wave'], self.data[:,0]):
+           #make model wavelength match data
+           try:
+              model = data_match(self.data, model, bins,True)
+           except ValueError:
+              print 'here'
+
+              import cPickle as pik
+              pik.dump((self.data, model, bins),open('error2.pik','w'),2)
+              raise
         #Find normalization and chi squared value
         if not N:
            try:
