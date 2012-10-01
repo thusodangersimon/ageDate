@@ -45,6 +45,7 @@ import time as Time
 import boundary as bound
 import Age_MCMC as mc
 import Age_RJMCMC as rjmc
+from downgrade_res import convolve
 
 #123456789012345678901234567890123456789012345678901234567890123456789
 ###decorators
@@ -490,17 +491,18 @@ def LOSVD(model,param,velscale=None):
     of h3 and h4'''
     
     #mean pix scale * speed of light
-    if not nu.any(velscale):
+    '''if not nu.any(velscale):
         velscale = (nu.mean(nu.diff(model['wave']))/model['wave'].mean() 
                     * 299792.458)
     kernel = gauss_kernel(velscale,param[0],param[2],param[3])
     if kernel.shape[0] == 0 or kernel.shape[0] > model['wave'].shape[0]:
-        return model
+        return model'''
     #convolve individual spectra
     for i in model.keys():
         if i == 'wave':
             continue
-        model[i] = fftconvolve(kernel, model[i],'same')
+        #model[i] = fftconvolve(kernel, model[i],'same')
+        model[i] = convolve(model['wave'] , model[i], param)
     #apply redshift
     model['wave'] = redshift(model['wave'],param[1])
     #uncertanty convolve
@@ -509,47 +511,56 @@ def LOSVD(model,param,velscale=None):
 
     return model
 
-def get_velscale(data):
-   '''Uses redshift to calculate velocity scale of spectra
-   input is spectra with axis=0 wavelength and axis=1 is flux'''
-   class Vel_func(object):
-      def __init__(self,data,Z):
-         self.data = nu.copy(data)
-         self.Z = Z
-         import pylab as lab
-         self._lab=lab
-      def __call__(self,vel_scale,plot=False):
-         #known shift
-         data_known = nu.copy(self.data)
-         data_known[:,0] = redshift(data_known[:,0], self.Z)
-         #shift by convolution
-         data_unkno = nu.copy(self.data)
-         try:
-            kernel,shift = gauss_kernel(vel_scale,1.,self.Z,0,0)
-         except ValueError:
-            return nu.inf
-         #data_unkno[:,0] = nu.log10(data_unkno[:,0])
-         #data_unkno[:,0] += shift[0] 
-         #data_unkno[:,0] = 10**data_unkno[:,0]
-         self.data_known = data_known #nu.vstack((data_known['wave'],data_known['0'])).T
-         self.data_unkno = data_unkno
-         data_unkno[:,1] = sci.fftconvolve(kernel, data_unkno[:,1],'same')
-         #data_unkno = data_unkno[data_unkno[:,0] > .9,:]
-         data_known = data_match(data_unkno, {'wave':data_known[:,0],'0':data_known[:,1]},1,True)
-         if data_known['0'].shape[0] == 0:
-            return nu.inf
-         penalty =  self.data.shape[0]/float(data_known['0'].shape[0])
-         index = nu.searchsorted(data_known[:,0],data_known[:,0].mean())
-         chi = nu.sum((data_known['0'][index-10:index+10] - data_unkno[index-10:index+10,1])**2) * penalty
-         #chi = nu.sum((data_known['0'] - data_unkno[:,1])**2) * penalty *10**3.
-         if plot:
-            self._lab.figure()
-            self._lab.plot(data_known['wave'],data_known['0'],data_unkno[:,0],data_unkno[:,1])
-         #lab.plot(data_known[:,0],data_known[:,1],data_unkno[:,0],data_unkno[:,1])
-         return chi
+def convolve_python( data, losvd_param, option='rebin'):
+   '''convolve(array, kernel)
+	 does convoluton useing input kernel '''
+   #alocate parameters
+   #start covloution
+   x, y =  data[:,0], data[:,1]
+   xs, ys = nu.zeros_like(x), nu.zeros_like(y)
+   diff_wave = nu.mean(nu.diff(x))
+   Len_data = len(x)
+   for  i in xrange(Len_data):   
+      kernel = gauss1(diff_wave, x[i], losvd_param[0], losvd_param[2], losvd_param[3])
+      Len = len(kernel)  
+      m2 = i + (Len - 1)/2 + 1
+      m1 = i - (Len - 1)/2 
+      if m1 < 0:
+         m1 = 0
+         i1 = (Len - 1)/2 - i
+         i2 = Len 
+         k = kernel[i1:i2] / kernel[i1:i2].sum()
+      elif m2 > Len_data - 1:
+         m2 = Len_data - 1
+         i1 = 0
+         i2 = kernel.shape[0] - ((Len - 1)/2 - m2 + i) - 1
+         k = kernel[i1:i2] / kernel[i1:i2].sum()
+      else:
+         i1, i2 = 0, kernel.shape[0] - 1
+         k = kernel
+      #u, g = nu.zeros(m2 - m1), nu.zeros(m2 - m1)
+      u = x[m1:m2]
+      g = y[m1:m2] * k
+      ys[i] = nu.trapz(g, u, dx=diff_wave)
+      xs[i] = x[i]
+   return nu.vstack((xs,  ys)).T
 
+def gauss1(diff_wave,  wave_current,  sigma,  h3,  h4):
+   '''inline gauss(nu.ndarray diff_wave, float wave_current float sigma, float h3, float h4)
+	Returns value of gaussian-hermite function normalized to area = 1'''
+   c = 299792.458
+   vel_scale = diff_wave / wave_current * c
+   logl_sigma = nu.log(1. + sigma/c) / vel_scale * c
+   N = nu.ceil( 5.*logl_sigma)
+   x = nu.arange(2*N+1) - N
+   y = x / logl_sigma
+   slitout = nu.exp(-y**2/2.) / logl_sigma #/ nu.sqrt(2.*nu.pi)
+   slitout *= ( 1.+ h3 * 2**.5 / (6.**.5) * (2 * y**3 - 3 * y) + 
+                h4 / (24**.5) * (4 * y**4 - 12 * y**2 + 3))
+   if not slitout.sum() == 0:
+      slitout /= nu.sum(slitout)
 
-      
+   return slitout      
 
 #####classes############# 
 class MC_func:
@@ -875,38 +886,73 @@ class MC_func:
         bins = param.shape[0] / 3
         if len(param) != bins * 3:
             return nu.nan
-        #check if params are in correct range
+        
+       #check if params are in correct range
         if self.uniform_prior(param, dust_param, losvd_param) < 1:
-            return nu.zeros_like(self.spect[:, 0])
+            return nu.inf, nu.zeros(bins)
+        
         model = get_model_fit_opt(param, self._lib_vals, self._age_unq,
-                                  self._metal_unq, bins) 
-        #redshift and make len(model['wave']) == len(data)
-        if not len(model['wave']) == len(self.data[:,0]):
-           model = data_match(self.data, model, bins,True)
-        elif nu.allclose(model['wave'], self.data[:,0]):
-           #make model wavelength match data
-           model = data_match(self.data, model, bins,True)
+                                  self._metal_unq, bins)
+        #don't bother with analysis if model isn't finite
+        temp = nu.copy(model.values())
+        if not nu.any(nu.isfinite(temp)):
+            pik.dump((param,bins),open('error.pik','w'),2)
+            return nu.inf, nu.zeros(bins)
 
+        
+       #line of sight velocity despersion
+        if nu.any(losvd_param):
+            model = LOSVD(model,losvd_param,self._velocityscale)
         #dust
         if nu.any(dust_param):
             model = dust(nu.hstack((param, dust_param)), model)
-        #line of sight velocity stuff
-        if nu.any(losvd_param):
-            model = LOSVD(model, losvd_param, self._velocityscale)
-        #if no N use N_norm to find nnls best fit
-        if not N: 
-            N, chi = N_normalize(self.data, model, bins, True)
+ 
+        #make sure wavelength match up and have same range
+        if not len(model['wave']) == len(self.data[:,0]):
+           try:
+              model = data_match(self.data, model, bins,True)
+           except ValueError:
+              import cPickle as pik
+              pik.dump((self.data, model,temp,losvd_param, bins),open('error2.pik','w'),2)
+              raise
+
+        elif nu.allclose(model['wave'], self.data[:,0]):
+           #make model wavelength match data
+           try:
+              model = data_match(self.data, model, bins,True)
+           except ValueError:
+              print 'here'
+
+              import cPickle as pik
+              pik.dump((self.data, model, bins),open('error2.pik','w'),2)
+              raise
+        wave = model['wave']
+        #Find normalization and chi squared value
+        if not N:
+           try:
+              N,chi = N_normalize(self.data, model, bins)
+           except ValueError:
+              import cPickle as pik
+              pik.dump((temp,model['0'],losvd_param),open('error1.pik','w'),2)
+              print temp.shape,model['0'].shape,self.data.shape
+              raise
         else:
-            #otherwise use from param array
-           wave = model['wave']
-           model.pop('wave')
+           #model.pop('wave')
            N = param[range(2, bins * 3, 3)]
+           #check if N is greater than 0
+        if nu.any(N < 0):
+           return nu.inf, N
         out = nu.zeros_like(model['0'])
         for i in model.keys():
-            out += N[int(i)] * model[i]
-        '''return nu.sum(nu.array(model.values()).T[:,
-                nu.argsort(nu.int64(model.keys()))] * 
-                      N[nu.int64(model.keys())], 1)'''
+           if i == 'wave':
+              continue
+           out += N[int(i)] * model[i]
+        if self.data.shape[1] == 2:
+           chi = ((self.data[:,1] - out)**2).sum()
+        else: 
+              #if data has uncertanty
+           chi = nu.sum((self.data[:,1] - out)**2 / self.data[:,2])
+            #otherwise use from param array
         return nu.vstack((wave,out)).T
         
     def func_N_norm(self, param, dust_param=None, losvd_param=None, N=None):
