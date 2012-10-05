@@ -40,12 +40,12 @@ from scipy.optimize.minpack import leastsq
 from scipy.optimize import fmin_l_bfgs_b as fmin_bound
 from scipy.special import exp1 
 #from scipy import weave
-from scipy.signal import fftconvolve
+#from scipy.signal import fftconvolve
 import time as Time
 import boundary as bound
 import Age_MCMC as mc
 import Age_RJMCMC as rjmc
-from downgrade_res import convolve
+from losvd_convolve import convolve
 
 #123456789012345678901234567890123456789012345678901234567890123456789
 ###decorators
@@ -502,7 +502,7 @@ def LOSVD(model,param,velscale=None):
         if i == 'wave':
             continue
         #model[i] = fftconvolve(kernel, model[i],'same')
-        model[i] = convolve(model['wave'] , model[i], param)
+        convolve(model['wave'] , model[i], param ,model[i])
     #apply redshift
     model['wave'] = redshift(model['wave'],param[1])
     #uncertanty convolve
