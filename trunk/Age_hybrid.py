@@ -33,8 +33,9 @@ from Age_RJMCMC import *
 from mpi4py import MPI as mpi
 import time as Time
 import csv
+import pylab as lab
 
-def root_run(fun, topology, burnin=10000, itter=10**6, k_max=16):
+def root_run(fun, topology, burnin=5000, itter=10**5, k_max=16):
     '''From MPI start, starts workers doing RJMCMC and coordinates comunication 
     topologies'''
     #start multiprocess need to make work with mpi
@@ -176,11 +177,11 @@ def vanila_swarm(fun, option, burnin=5*10**3, k_max=16, rank=0, q_talk=None, q_f
 
     while option.iter_stop.value:
         if option.current.value % 500==0:
-            print "hi, I'm at itter %i, chi %f from %s bins and from %i acceptance rate %2.2f" %(len(param[str(bins)]),chi[str(bins)][-1],bins, rank, acept_rate[str(bins)][-1]*100)
+            print "hi, I'm at itter %i, chi %f from %s bins and from %i birth rate %2.2f" %(len(param[str(bins)]),chi[str(bins)][-1],bins, rank, birth_rate)
             sys.stdout.flush()
 
         #sample from distiburtion
-        file.writerow(nu.hstack(( active_param[str(bins)], active_dust, active_losvd, chi[str(bins)][-1])))
+        #file.writerow(nu.hstack(( active_param[str(bins)], active_dust, active_losvd, chi[str(bins)][-1])))
         active_param[str(bins)] = fun.proposal(active_param[str(bins)],
                                                sigma[str(bins)])
         if fun._dust:
@@ -188,8 +189,13 @@ def vanila_swarm(fun, option, burnin=5*10**3, k_max=16, rank=0, q_talk=None, q_f
         if fun._losvd:
             active_losvd  = fun.proposal(active_losvd, sigma_losvd)
             active_losvd[1:] = 0.
-        active_param[str(bins)], active_dust, active_losvd, birth_rate = (
-            swarm_vect(active_param[str(bins)], active_dust, active_losvd, rank, birth_rate, option))
+        if T_cuurent<burnin or T_cuurent % 100 == 0:
+            active_param[str(bins)], active_dust, active_losvd, birth_rate = (
+                swarm_vect(active_param[str(bins)], active_dust, active_losvd, rank, birth_rate, option))
+        if birth_rate > .8:
+            birth_rate = .8
+        elif birth_rate < .2:
+            birth_rate = .2
         #calculate new model and chi
         chi[str(bins)].append(0.)
         chi[str(bins)][-1],active_param[str(bins)][range(2,bins*3,3)]=fun.lik(
@@ -321,6 +327,15 @@ def vanila_swarm(fun, option, burnin=5*10**3, k_max=16, rank=0, q_talk=None, q_f
             out_dust_sig.append(nu.copy(sigma_dust))
         if fun._losvd:
             out_losvd_sig.append(nu.copy(sigma_losvd))
+        #swarm update
+        for kk in range(len(option.swarm[rank])):
+            if kk<bins*3+2+4:
+                option.swarm[rank][kk] = nu.hstack((active_param[str(bins)],
+                                                    active_dust,active_losvd))[kk]
+            else:
+                option.swarm[rank][kk] = nu.nan
+        option.swarmChi[rank].value = chi[str(bins)][-1]
+
     #####################################return once finished 
     for i in param.keys():
         chi[i]=nu.array(chi[i])
@@ -334,7 +349,7 @@ def vanila_swarm(fun, option, burnin=5*10**3, k_max=16, rank=0, q_talk=None, q_f
         #acept_rate[i]=nu.array(acept_rate[i])
         #out_sigma[i]=nu.array(out_sigma[i])
         bayes_fact[i]=nu.array(bayes_fact[i])
-
+    q_final.put((param,chi,bayes_fact,out_sigma))
 def tuning_swarm():
     '''uses aceptance rate to tune how strong to allow
     swarm param'''
@@ -367,8 +382,13 @@ def swarm_vect(pam, active_dust, active_losvd, rank, birth_rate, option):
         temp_pam = temp_array[:-6]
         temp_dust,temp_losvd = temp_array[-6:-4], temp_array[-4:]
         #get direction to other in swarm
-        if temp_array.shape[0] == pam.shape[0]:
-            swarm_param.append(pam - temp_array)
+        if temp_pam.shape[0] == pam.shape[0]:
+            swarm_param.append(pam - temp_pam)
+        elif temp_pam.shape[0] > pam.shape[0]:
+            #if not in same number of param take closest one or one with most weight
+            bins = temp_pam.shape[0]/3
+            index = temp_pam[range(2,bins*3,3)].argmax()
+            swarm_param.append(pam[:3] - temp_pam[index*3:index*3+3])
         else:
             swarm_param.append(False)
         try:
@@ -384,7 +404,8 @@ def swarm_vect(pam, active_dust, active_losvd, rank, birth_rate, option):
     for i in xrange(len(swarm_param)):
         try:
             weight = 1/option.swarmChi[i].value / tot_chi
-            if swarm_param[i]:
+            if nu.any(swarm_param[i]):
+                #plot for testing
                 out_param = out_param - weight * swarm_param[i] * u
             else:
             #change birth_rate
@@ -401,13 +422,12 @@ def swarm_death_birth(fun, birth_rate, bins, j,j_timeleft, active_param):
         if ((birth_rate > nu.random.rand() and bins < len(active_param.keys()) and 
              j > j_timeleft ) or (j > j_timeleft and bins == 1 and bins < len(active_param.keys()))):
             #birth
-            print len(active_param.keys())>bins
             attempt = True #so program knows to attempt a new model
             rand_step = nu.random.rand(3)*[fun._metal_unq.ptp(), fun._age_unq.ptp(),1.]
             rand_index = nu.random.randint(bins)
             temp_bins = 1 + bins
             #criteria for this step
-            critera = 1/4.**3 * birth_rate #(1/3.)**temp_bins
+            critera = 1/6.**3 * birth_rate #(1/3.)**temp_bins
             #new param step
             for k in range(len(active_param[str(bins)])):
                 active_param[str(temp_bins)][k]=active_param[str(bins)][k]
@@ -437,20 +457,30 @@ def swarm_death_birth(fun, birth_rate, bins, j,j_timeleft, active_param):
         elif j > j_timeleft and bins > 1 and  0.01 < nu.random.rand():
             #death
             attempt = True #so program knows to attempt a new model
-            temp_bins = bins - 1
-            #criteria for this step
-            critera = 4.**3 * (1 - birth_rate) #3.**temp_bins
-            #if .5 > nu.random.rand():
-                #remove bins with 1-N/Ntot probablitiy
-            Ntot = nu.sum(active_param[str(bins)][range(2,bins*3,3)])
-            rand_index = (rand_choice(active_param[str(bins)][range(2,bins*3,3)],
+            Num_zeros = active_param[str(bins)][range(2,bins*3,3)] == 0
+            if Num_zeros.sum() > 1:
+                #remove all parts with zeros
+                temp_bins = bins - Num_zeros.sum()
+                #criteria for this step
+                critera = 4.**(3*temp_bins) * (1 - birth_rate) 
+                k = 0
+                for ii in range(bins):
+                    if not active_param[str(bins)][ii*3+2] == 0:
+                        active_param[str(temp_bins)][k*3:k*3+3] = active_param[str(bins)][ii*3:ii*3+3].copy()
+                        k += 1
+            else:
+                #choose randomly
+                critera = 4.**3 * (1 - birth_rate)
+                temp_bins = bins - 1
+                Ntot = nu.sum(active_param[str(bins)][range(2,bins*3,3)])
+                rand_index = (rand_choice(active_param[str(bins)][range(2,bins*3,3)],
                                       active_param[str(bins)][range(2,bins*3,3)]/Ntot))
-            k = 0
-            for ii in xrange(bins): #copy to lower dimestion
-                if not ii == rand_index:
-                    active_param[str(temp_bins)][3*k:3*k+3] = nu.copy(active_param[str(bins)]
-                                                                      [3*ii:3*ii+3])
-                    k += 1
+                k = 0
+                for ii in xrange(bins): #copy to lower dimestion
+                    if not ii == rand_index:
+                        active_param[str(temp_bins)][3*k:3*k+3] = nu.copy(active_param[str(bins)]
+                                                                          [3*ii:3*ii+3])
+                        k += 1
             '''else: #average 2 componets together for new values
                 rand_index = nu.random.permutation(bins)[:2] #2 random indeci
                 k = 0
@@ -529,13 +559,14 @@ if __name__ == '__main__':
     rank = comm.Get_rank()
     size = comm.Get_size()
     #if rank == 0:
-    data,info,weight,dust = ag.iterp_spec(1,lam_min=4000, lam_max=8000)
+    data,info,weight,dust = ag.iterp_spec(3,lam_min=4000, lam_max=8000)
     Top = Topologies(comm)
     fun = MC_func(data)
     fun.autosetup()
     Top.cpu_tot=5
     try:
-        root_run(fun.send_class, Top, itter=10**6, k_max=1)
+        print info
+        root_run(fun.send_class, Top, itter=5*10**4, k_max=16)
     finally:
         lis = []
         for i in range(Top.cpu_tot):
@@ -550,4 +581,5 @@ if __name__ == '__main__':
             for i in range(len(lis)):
                 lab.plot(lis[i][:,j[0]],label=str(i))
         lab.legend()
+        print info
         lab.show()
