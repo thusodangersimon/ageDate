@@ -35,6 +35,7 @@ import time as Time
 import cPickle as pik
 #import csv
 #import pylab as lab
+import os
 
 def root_run(fun, topology, func, burnin=5000, itter=10**5, k_max=16):
     '''From MPI start, starts workers doing RJMCMC and coordinates comunication 
@@ -77,7 +78,7 @@ def root_run(fun, topology, func, burnin=5000, itter=10**5, k_max=16):
     count=0
     temp=[]
     rank_out =[]
-    while count < len(topology._rank_list):
+    while count < 2*len(topology._rank_list):
         try:
             count += 1
             temp.append(q_final.get(timeout=5))
@@ -88,18 +89,18 @@ def root_run(fun, topology, func, burnin=5000, itter=10**5, k_max=16):
                 q_talk.put(rank_out[-1])
             
         except:
-            print 'having trouble recieving data from queue please wait'
-    print len(temp),rank
+            pass
     if len(temp) < len(topology._rank_list):
         #make trouble processes write data to file and load it in
-        for i in range(len(topology._rank_list)):
+        for i in range(3*len(topology._rank_list)):
             q_talk.put(-1)
-        #look for .asdfg files to load in
-        import os
+        #wait for processes to end
+        for i in work:
+            i.join()
+    if rank == 0:
+    #look for .asdfg files to load in
         import cPickle as pik
         files = os.listdir('.')
-        while len(active_children()) > 0:
-            print 'waiting for processes to end'
         for i in files:
             if i.endswith('asdfg'):
                 temp.append(pik.load(open(i)))
@@ -107,9 +108,11 @@ def root_run(fun, topology, func, burnin=5000, itter=10**5, k_max=16):
     for i in work:
         i.terminate()
     #send data to root for post processing
+    comm.barrier()
     if rank ==0:
         for i in xrange(1, size):
             count = comm.recv(source = i)
+            print 'getting data from %i and has %i workers'%(i,count)
             for j in xrange(count):
                  t=[]
                  for k in xrange(len(temp[0])):
@@ -118,15 +121,22 @@ def root_run(fun, topology, func, burnin=5000, itter=10**5, k_max=16):
         try:
             param, chi, bayes = dic_data(temp, burnin)
         except IndexError:
-            import cPickle as pik
-            pik.dump(temp, open('index_error.pik', 'w'),2)
-            raise
+            #nothing recived quit
+            print os.popen('hostname').read()[:-1]
+            comm.barrier()
+            return None, None, None
+        print os.popen('hostname').read()[:-1]
+        comm.barrier()
         return param, chi, bayes 
     else:
-        comm.send(count,dest=0)
-        for i in xrange(count):
-            for j in xrange(len(temp[i])):
-                comm.send(temp[i][j], dest=0)
+        if len(temp) > 0:
+            count = len(temp)
+            print 'sending %i workers'%(count)
+            comm.send(len(temp), dest=0)
+            for i in xrange(len(temp)):
+                for j in xrange(len(temp[i])):
+                    comm.send(temp[i][j], dest=0)
+        comm.barrier()
         return None,None,None
 
  #===========================================
@@ -447,8 +457,8 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, 
     while True:
         #make sure param have been transpored before ending
         try:
-            print end_rank 
             end_rank = q_talk.get(timeout=2)
+            print end_rank ,global_rank
         except:
             pass
         if nu.any(end_rank == rank):
