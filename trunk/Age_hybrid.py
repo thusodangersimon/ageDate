@@ -68,9 +68,11 @@ def root_run(fun, topology, func, burnin=5000, itter=10**5, k_max=16):
         #get total iterations
         global_iter  = comm.reduce(topology.current.value, root=0)
         global_iter = comm.bcast(global_iter , root=0)
+        #get find global best fit
+        topology.chibest.value = comm.allreduce(topology.chibest.value,op=mpi.MIN)
         #print current iterations
         if rank == 0 :
-            print '%2.2f percent done' %((float(global_iter) / stop_iter) * 100.)
+            print '%2.2f percent done at %i' %((float(global_iter) / stop_iter) * 100., global_iter )
             sys.stdout.flush()
     #put in convergence diagnosis
     topology.iter_stop.value = False
@@ -106,7 +108,10 @@ def root_run(fun, topology, func, burnin=5000, itter=10**5, k_max=16):
                 temp.append(pik.load(open(i)))
                 os.popen('rm -f %s'%i)
     for i in work:
-        i.terminate()
+        try:
+            i.terminate()
+        except OSError:
+            pass
     #send data to root for post processing
     comm.barrier()
     if rank ==0:
@@ -127,7 +132,12 @@ def root_run(fun, topology, func, burnin=5000, itter=10**5, k_max=16):
             return None, None, None
         print os.popen('hostname').read()[:-1]
         comm.barrier()
-        return param, chi, bayes 
+        #save accept rate and sigma for output
+        t=[]
+        for i in temp:
+            t.append((i[3],i[4]))
+        #return param, chi, bayes 
+        return param, chi, t
     else:
         if len(temp) > 0:
             count = len(temp)
@@ -158,7 +168,7 @@ def hybrid(active_param, active_dust, active_losvd, rank, birth_rate, option,T_c
     '''chooses weather current possiotion or swarm is better and passes it on'''
     Tactive_param, Tactive_dust, Tactive_losvd, Tbirth_rate = swarm_vect(active_param, active_dust, 
                                                                          active_losvd, rank, birth_rate, option)
-    if fun.lik(Tactive_param, Tactive_dust, Tactive_losvd) < fun.lik(active_param, active_dust, active_losvd):
+    if fun.lik(Tactive_param, Tactive_dust, Tactive_losvd)[0] < fun.lik(active_param, active_dust, active_losvd)[0]:
         #if swarm is better than current possition
         if birth_rate > .8:
             Tbirth_rate = .8
@@ -169,6 +179,14 @@ def hybrid(active_param, active_dust, active_losvd, rank, birth_rate, option,T_c
         return active_param, active_dust, active_losvd, birth_rate
 
 def tuning(active_param, active_dust, active_losvd, rank, birth_rate, option,T_cuurent, burnin,fun, accept_rate):
+    '''uses swarm more likely when the acceptance rate is not optimal '''
+    if accept_rate < .235 or accept_rate > .5:
+        active_param, active_dust, active_losvd, birth_rate = swarm_vect(active_param, active_dust, 
+                                                                         active_losvd, rank, birth_rate, option)
+    if birth_rate > .8:
+        birth_rate = .8
+    elif birth_rate < .2:
+        birth_rate = .2
     return active_param, active_dust, active_losvd, birth_rate
 
 #+===================================
@@ -273,24 +291,28 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, 
     T_cuurent,Nexchange_ratio = 0.0,1.0
     size = 0
     j,T,j_timeleft = 1,9.,nu.random.exponential(100)
-    T_start,T_stop = 3*10**5., 0.9
+    T_start,T_stop = 3*10**5., 1.
     birth_rate = 0.5
     out_dust_sig, out_losvd_sig = [sigma_dust], [sigma_losvd]
 
     while option.iter_stop.value:
         if option.current.value % 5000==0:
-            print "hi, I'm at itter %i, chi %f from %s bins and from %i burnin %2.2f" %(len(param[str(bins)]),chi[str(bins)][-1],bins, global_rank,T_cuurent )
+            print "hi, I'm at itter %i, chi %f from %s bins and from %i SA %2.2f" %(len(param[str(bins)]),chi[str(bins)][-1],bins, global_rank,SA_polymodal(T_cuurent,burnin,T_start,T_stop))
             sys.stdout.flush()
 
         #sample from distiburtion
         #file.writerow(nu.hstack(( active_param[str(bins)], active_dust, active_losvd, chi[str(bins)][-1])))
-        active_param[str(bins)] = fun.proposal(active_param[str(bins)],
-                                               sigma[str(bins)])
+        try:
+            active_param[str(bins)] = fun.proposal(active_param[str(bins)],
+                                                   sigma[str(bins)])
+        except TypeError:
+            pik.dump((active_param[str(bins)], sigma[str(bins)]),open('rand_error.pik','w'),2)
+            raise
         if fun._dust:
             active_dust = fun.proposal(active_dust,sigma_dust)
         if fun._losvd:
             active_losvd  = fun.proposal(active_losvd, sigma_losvd)
-            active_losvd[1:] = 0.
+            #active_losvd[1:] = 0.
         #swarm stuff
         active_param[str(bins)], active_dust, active_losvd, birth_rate = swarm_function(active_param[str(bins)],
                                                                                         active_dust, active_losvd, rank, birth_rate,
@@ -312,7 +334,7 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, 
         
         #decide to accept or not
         a = nu.exp((chi[str(bins)][-2] - chi[str(bins)][-1])/
-                 SA(T_cuurent,burnin,T_start,T_stop))
+                 SA_polymodal(T_cuurent,burnin,T_start,T_stop))
         #metropolis hastings
         if a > nu.random.rand(): #acepted
             param[str(bins)].append(nu.copy(nu.hstack((active_param[str(bins)]
@@ -355,8 +377,9 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, 
                                                             sigma_losvd,
                                                             bins, j,fun._dust, 
                                                             fun._losvd)
-
-
+        ############################determine if chain stuck and shake it out of it
+        sigma[str(bins)],sigma_dust,sigma_losvd = unstick(acept_rate[str(bins)],param[str(bins)][-2000:],
+                                                          sigma[str(bins)],sigma_dust, sigma_losvd, j, fun._dust, fun._losvd)
         #############################decide if birth or death
         active_param, temp_bins, attempt, critera = swarm_death_birth(fun, birth_rate, bins, j, j_timeleft, active_param)
         #calc chi of new model
@@ -389,13 +412,13 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, 
             j, j_timeleft = 0, nu.random.exponential(200)
 
         #########################################change temperature
-        if nu.min([1,nu.exp((chi[str(bins)][-2]-chi[str(bins)][-1])/(2.*SA(T_cuurent+1,burnin,T_start,T_stop))-(chi[str(bins)][-2]+chi[str(bins)][-1])/(2.*SA(T_cuurent,burnin,T_start,T_stop)))/T])>nu.random.rand():
-            '''if T_cuurent<burnin:
+        '''if nu.min([1,nu.exp((chi[str(bins)][-2]-chi[str(bins)][-1])/(2.*SA(T_cuurent+1,burnin,T_start,T_stop))-(chi[str(bins)][-2]+chi[str(bins)][-1])/(2.*SA(T_cuurent,burnin,T_start,T_stop)))/T])>nu.random.rand():
+            if T_cuurent<burnin:
                 T_cuurent += 1
                 #print T_cuurent,burnin,rank
             if T_cuurent==round(burnin):
                 print 'done with cooling'
-                T_cuurent += 1'''
+                T_cuurent += 1
             Nexchange_ratio+=1   
         #make sure the change temp rate is aroudn 20%
         if Nexchange_ratio/(nu.sum(Nacept.values())+nu.sum(Nreject.values()))>.25:
@@ -404,25 +427,15 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, 
             T=T/1.05
         #change current temperature with size of param[bin]
         if len(param[str(bins)])<burnin:
-            T_cuurent=len(param[str(bins)])
-        #keep on order with chi squared
-        '''if j%20==0:
-            if acept_rate[str(bins)][-1]>.5 and T_start<10**-5:
-                T_start/=2.
-                #T_stop+=.1
-            elif acept_rate[str(bins)][-1]<.25 and T_start<3*10**5:
-                T_start*=2.
-                #T_stop-=.1'''
-     ##############################convergece assment
-        '''size=dict_size(param)
-        if size%999==0 and size>30000:
-            q_talk.put((rank,size,param))
-           ''' 
-        ##############################house keeping
-        j+=1
+            T_cuurent=len(param[str(bins)])'''
         T_cuurent += 1
         if T_cuurent==round(burnin):
-            print 'done with cooling' 
+            print 'done with cooling from %i' %global_rank 
+
+    ##############################convergece assment
+
+        ##############################house keeping
+        j+=1
         option.current.value+=1
         acept_rate[str(bins)].append(nu.copy(Nacept[str(bins)]/(Nacept[str(bins)]+Nreject[str(bins)])))
         out_sigma[str(bins)].append(nu.copy(sigma[str(bins)].diagonal()))
@@ -431,7 +444,7 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, 
         if fun._losvd:
             out_losvd_sig.append(nu.copy(sigma_losvd))
         #swarm update
-        for kk in range(len(option.swarm[rank])):
+        for kk in xrange(len(option.swarm[rank])):
             if kk<bins*3+2+4:
                 option.swarm[rank][kk] = nu.hstack((active_param[str(bins)],
                                                     active_dust,active_losvd))[kk]
@@ -452,7 +465,7 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, 
         #acept_rate[i]=nu.array(acept_rate[i])
         #out_sigma[i]=nu.array(out_sigma[i])
         bayes_fact[i]=nu.array(bayes_fact[i])
-    q_final.put((param, chi, bayes_fact, rank))
+    q_final.put((param, chi, bayes_fact,acept_rate, out_sigma,rank))
     end_rank = 9999999
     while True:
         #make sure param have been transpored before ending
@@ -467,7 +480,7 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, 
         elif nu.any(end_rank < 0):
                 #problem sending data write out
             import cPickle as pik
-            pik.dump((param, chi, bayes_fact, global_rank),open('error_writout_%i.asdfg'%global_rank,'w'),2)
+            pik.dump((param, chi, bayes_fact, acept_rate, out_sigma,global_rank),open('error_writout_%i.asdfg'%global_rank,'w'),2)
             break
         Time.sleep(2)
 
@@ -595,6 +608,42 @@ def swarm_death_birth(fun, birth_rate, bins, j,j_timeleft, active_param):
             return active_param, temp_bins, attempt, critera
         else:
             return active_param, None, attempt, None
+
+def SA_polymodal(i,length,T_start,T_stop, modes=4):
+    ''' Does anneling with few nodes using a cos**2 function'''
+    if modes % 2. == 0 and modes != 1:
+        modes += 1
+    elif modes == 1:
+        pass
+    else:
+        modes += 2
+    if i < length:
+        out = (T_start - T_stop)*nu.cos(i/float(length)*modes*nu.pi/2.)**2 + T_stop
+        if out > 1.:
+            return out
+        else:
+            return 1.
+    else:
+        return 1.
+
+def  unstick(acept_rate, param, sigma, sigma_dust, sigma_losvd, iteration, is_dust, is_losvd):
+    '''checks to see if worker is stick and injects a temperature into worker to get it out'''
+    if not iteration % 50 == 0:
+        #only check every once in a while
+        return sigma ,sigma_dust, sigma_losvd
+    rate = nu.array(acept_rate)
+    Param = nu.array(param)[:,1]
+    if nu.mean(rate[-2000:]) < .1 and len(nu.unique(Param)) < 200 and len(Param) > 1999:
+        print 'worker is stuck'
+        if nu.any(sigma.diagonal() < 10**-10):
+            sigma = nu.zeros_like(sigma) + .1
+            sigma_dust = nu.ones((2,2))/1.
+            sigma_losvd=nu.ones((4,4))/1.
+            return sigma ,sigma_dust, sigma_losvd
+        else:
+            return sigma*10 ,sigma_dust*10, sigma_losvd*10
+    else:
+        return sigma ,sigma_dust, sigma_losvd
 
 #====================================================
 class Topologies(object):
