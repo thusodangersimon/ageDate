@@ -297,7 +297,6 @@ def data_match(data, model, bins, keep_wave=False):
       out['wave'] = nu.copy(data[:,0])
    return out
 
-@memoized
 def redshift(wave, redshift):
    #changes redshift of models
    return wave * (1. + redshift)
@@ -489,22 +488,17 @@ def gauss_kernel(velscale,sigma=1,h3=0,h4=0):
 def LOSVD(model,param,velscale=None):
     '''convolves data with a gausian with dispersion of sigma, and hermite poly
     of h3 and h4'''
-    
-    #mean pix scale * speed of light
-    '''if not nu.any(velscale):
-        velscale = (nu.mean(nu.diff(model['wave']))/model['wave'].mean() 
-                    * 299792.458)
-    kernel = gauss_kernel(velscale,param[0],param[2],param[3])
-    if kernel.shape[0] == 0 or kernel.shape[0] > model['wave'].shape[0]:
-        return model'''
+    #unlog sigma
+    tparam = param.copy()
+    tparam[0] = 10**tparam[0]
     #convolve individual spectra
     for i in model.keys():
         if i == 'wave':
             continue
         #model[i] = fftconvolve(kernel, model[i],'same')
-        convolve(model['wave'] , model[i], param ,model[i])
+        convolve(model['wave'] , model[i], tparam ,model[i])
     #apply redshift
-    model['wave'] = redshift(model['wave'],param[1])
+    model['wave'] = redshift(model['wave'],tparam[1])
     #uncertanty convolve
     #if data.shape[1] == 3:
     #    out[:,2] = nu.sqrt(nu.convolve(kernel**2, data[:,2]**2,'same'))
@@ -823,7 +817,8 @@ class MC_func:
         #check losvd
         if nu.any(losvd):
            #[sigma,Z,h3,h4]
-           if losvd[0] <= 0 or losvd[0] > 10**4:
+           #sigma is in log scale
+           if losvd[0] <= 10**-3 or losvd[0] > 4:
               #sigma can't be negitive or too large
               return 0
            if nu.any(nu.abs(losvd[1:]) > 10):
