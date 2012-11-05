@@ -46,6 +46,7 @@ import boundary as bound
 import Age_MCMC as mc
 import Age_RJMCMC as rjmc
 from losvd_convolve import convolve
+#import Age_hybrid as hy
 
 #123456789012345678901234567890123456789012345678901234567890123456789
 ###decorators
@@ -485,37 +486,46 @@ def gauss_kernel(velscale,sigma=1,h3=0,h4=0):
        slitout /= nu.sum(slitout)
     return slitout
 
-def LOSVD(model,param,velscale=None):
+def LOSVD(model,param,wave_range):
     '''convolves data with a gausian with dispersion of sigma, and hermite poly
     of h3 and h4'''
     #unlog sigma
     tparam = param.copy()
     tparam[0] = 10**tparam[0]
+    #resample specturm so resolution is same at all places
+    wave_range = nu.array(wave_range)/(1. + tparam[1]) - [100, -100]
+    index = nu.searchsorted(model['wave'], [wave_range[0], wave_range[1]])
+    wave_diff = nu.diff(model['wave'][index[0]:index[1]]).min()
+    wave = nu.arange(model['wave'][index[0]], model['wave'][index[1]], wave_diff)
+    print wave.min(),wave.max(),redshift(wave[[0,-1]],tparam[1])
     #convolve individual spectra
     for i in model.keys():
         if i == 'wave':
             continue
-        #model[i] = fftconvolve(kernel, model[i],'same')
-        convolve(model['wave'] , model[i], tparam ,model[i])
+        model[i] = spectra_lin_interp(model['wave'], model[i], wave)
+        #model[i]=convolve_python(model['wave'] , model[i], param)
+        convolve(wave, model[i], tparam ,model[i])
     #apply redshift
-    model['wave'] = redshift(model['wave'],tparam[1])
+    model['wave'] = redshift(wave,tparam[1])
     #uncertanty convolve
     #if data.shape[1] == 3:
     #    out[:,2] = nu.sqrt(nu.convolve(kernel**2, data[:,2]**2,'same'))
 
     return model
 
-def convolve_python( data, losvd_param, option='rebin'):
+def convolve_python(x, y, losvd_param, option='rebin'):
    '''convolve(array, kernel)
 	 does convoluton useing input kernel '''
    #alocate parameters
    #start covloution
-   x, y =  data[:,0], data[:,1]
+   #x, y =  data[:,0], data[:,1]
    xs, ys = nu.zeros_like(x), nu.zeros_like(y)
    diff_wave = nu.mean(nu.diff(x))
    Len_data = len(x)
+   #t=[]
    for  i in xrange(Len_data):   
       kernel = gauss1(diff_wave, x[i], losvd_param[0], losvd_param[2], losvd_param[3])
+      kernel[kernel < 0] = 0
       Len = len(kernel)  
       m2 = i + (Len - 1)/2 + 1
       m1 = i - (Len - 1)/2 
@@ -537,7 +547,10 @@ def convolve_python( data, losvd_param, option='rebin'):
       g = y[m1:m2] * k
       ys[i] = nu.trapz(g, u, dx=diff_wave)
       xs[i] = x[i]
-   return nu.vstack((xs,  ys)).T
+      #t.append((min(k),x[i]))
+   #t=nu.array(t)
+      #t.append(len(k))
+   return  ys
 
 def gauss1(diff_wave,  wave_current,  sigma,  h3,  h4):
    '''inline gauss(nu.ndarray diff_wave, float wave_current float sigma, float h3, float h4)
@@ -897,7 +910,7 @@ class MC_func:
         
        #line of sight velocity despersion
         if nu.any(losvd_param):
-            model = LOSVD(model,losvd_param,self._velocityscale)
+            model = LOSVD(model,losvd_param,[self.data[:,0].min(), self.data[:,0].max()])
         #dust
         if nu.any(dust_param):
             model = dust(nu.hstack((param, dust_param)), model)
@@ -923,7 +936,7 @@ class MC_func:
               raise
         wave = model['wave']
         #Find normalization and chi squared value
-        if not N:
+        if not nu.any(N):
            try:
               N,chi = N_normalize(self.data, model, bins)
            except ValueError:
@@ -974,7 +987,7 @@ class MC_func:
             model = dust(nu.hstack((param, dust_param)), model)
         #line of sight velocity despersion
         if nu.any(losvd_param):
-            model = LOSVD(model,losvd_param,self._velocityscale)
+            model = LOSVD(model,losvd_param, [self.data[:,0].min(), self.data[:,0].max()])
         #make sure wavelength match up and have same range
         if not len(model['wave']) == len(self.data[:,0]):
            try:
@@ -995,7 +1008,7 @@ class MC_func:
               pik.dump((self.data, model, bins),open('error2.pik','w'),2)
               raise
         #Find normalization and chi squared value
-        if not N:
+        if not nu.any(N):
            try:
               N,chi = N_normalize(self.data, model, bins)
            except ValueError:
@@ -1011,6 +1024,8 @@ class MC_func:
               return nu.inf, N
            out = nu.zeros_like(model['0'])
            for i in model.keys():
+              if i == 'wave':
+                 continue
               out += N[int(i)] * model[i]
            if self.data.shape[1] == 2:
               chi = ((self.data[:,1] - out)**2).sum()
