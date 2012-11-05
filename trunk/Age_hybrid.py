@@ -312,7 +312,7 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, 
             active_dust = fun.proposal(active_dust,sigma_dust)
         if fun._losvd:
             active_losvd  = fun.proposal(active_losvd, sigma_losvd)
-            #active_losvd[1:] = 0.
+            active_losvd[1] = 0.
         #swarm stuff
         active_param[str(bins)], active_dust, active_losvd, birth_rate = swarm_function(active_param[str(bins)],
                                                                                         active_dust, active_losvd, rank, birth_rate,
