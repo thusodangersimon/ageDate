@@ -73,6 +73,7 @@ def root_run(fun, topology, func, burnin=5000, itter=10**5, k_max=16):
         #print current iterations
         if rank == 0 :
             print '%2.2f percent done at %i' %((float(global_iter) / stop_iter) * 100., global_iter )
+            print nu.array(topology.parambest)
             sys.stdout.flush()
     #put in convergence diagnosis
     topology.iter_stop.value = False
@@ -609,7 +610,7 @@ def swarm_death_birth(fun, birth_rate, bins, j,j_timeleft, active_param):
         else:
             return active_param, None, attempt, None
 
-def SA_polymodal(i,length,T_start,T_stop, modes=4):
+def SA_polymodal(i,length,T_start,T_stop, modes=1):
     ''' Does anneling with few nodes using a cos**2 function'''
     if modes % 2. == 0 and modes != 1:
         modes += 1
@@ -633,7 +634,7 @@ def  unstick(acept_rate, param, sigma, sigma_dust, sigma_losvd, iteration, is_du
         return sigma ,sigma_dust, sigma_losvd
     rate = nu.array(acept_rate)
     Param = nu.array(param)[:,1]
-    if nu.mean(rate[-2000:]) < .1 and len(nu.unique(Param)) < 200 and len(Param) > 1999:
+    if nu.median(rate[-2000:]) < .1 and len(nu.unique(Param)) < 200 and len(Param) > 999:
         print 'worker is stuck'
         if nu.any(sigma.diagonal() < 10**-10):
             sigma = nu.zeros_like(sigma) + .1
@@ -719,7 +720,7 @@ class Topologies(object):
             self._cpus = total
             rank_list = nu.arange(total)
             #try iterative way of creating list
-            self._rank_list = rank_list.reshape(size,8)
+            self._rank_list = rank_list.reshape(size,cpu_count())
         else:
             self._rank_list = None
         self._rank_list = comm.scatter(self._rank_list, root=0)
