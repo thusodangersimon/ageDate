@@ -490,28 +490,36 @@ def LOSVD(model,param,wave_range):
     '''convolves data with a gausian with dispersion of sigma, and hermite poly
     of h3 and h4'''
     #unlog sigma
+    import pylab as lab
     tparam = param.copy()
     tparam[0] = 10**tparam[0]
+    tmodel = model.copy()
     #resample specturm so resolution is same at all places
     wave_range = nu.array(wave_range)/(1. + tparam[1]) - [100, -100]
     index = nu.searchsorted(model['wave'], [wave_range[0], wave_range[1]])
     wave_diff = nu.diff(model['wave'][index[0]:index[1]]).min()
     wave = nu.arange(model['wave'][index[0]], model['wave'][index[1]], wave_diff)
-    print wave.min(),wave.max(),redshift(wave[[0,-1]],tparam[1])
+    #print wave.min(),wave.max(),redshift(wave[[0,-1]],tparam[1])
     #convolve individual spectra
     for i in model.keys():
         if i == 'wave':
             continue
-        model[i] = spectra_lin_interp(model['wave'], model[i], wave)
-        #model[i]=convolve_python(model['wave'] , model[i], param)
-        convolve(wave, model[i], tparam ,model[i])
+        tmodel[i] = spectra_lin_interp(tmodel['wave'], tmodel[i], wave)
+        #model[i] = spectra_lin_interp(model['wave'], model[i], wave)
+        #model[i] = convolve_python(wave, model[i], tparam)
+        #print 'between'
+        #lab.plot(wave,tmodel[i])
+        convolve(wave, tmodel[i], tparam ,tmodel[i])
+        #lab.plot(wave,tmodel[i])
+        #lab.ylim((0,nu.median(tmodel[i])*5))
+        #lab.show()
     #apply redshift
-    model['wave'] = redshift(wave,tparam[1])
+    tmodel['wave'] = redshift(wave,tparam[1])
     #uncertanty convolve
     #if data.shape[1] == 3:
     #    out[:,2] = nu.sqrt(nu.convolve(kernel**2, data[:,2]**2,'same'))
 
-    return model
+    return tmodel
 
 def convolve_python(x, y, losvd_param, option='rebin'):
    '''convolve(array, kernel)
@@ -537,12 +545,11 @@ def convolve_python(x, y, losvd_param, option='rebin'):
       elif m2 > Len_data - 1:
          m2 = Len_data - 1
          i1 = 0
-         i2 = kernel.shape[0] - ((Len - 1)/2 - m2 + i) - 1
+         i2 = Len - ((Len - 1)/2 - m2 + i) - 1
          k = kernel[i1:i2] / kernel[i1:i2].sum()
       else:
-         i1, i2 = 0, kernel.shape[0] - 1
+         #i1, i2 = 0, Len - 1
          k = kernel
-      #u, g = nu.zeros(m2 - m1), nu.zeros(m2 - m1)
       u = x[m1:m2]
       g = y[m1:m2] * k
       ys[i] = nu.trapz(g, u, dx=diff_wave)
@@ -565,6 +572,7 @@ def gauss1(diff_wave,  wave_current,  sigma,  h3,  h4):
    slitout *= ( 1.+ h3 * 2**.5 / (6.**.5) * (2 * y**3 - 3 * y) + 
                 h4 / (24**.5) * (4 * y**4 - 12 * y**2 + 3))
    if not slitout.sum() == 0:
+      #print nu.sum(slitout)
       slitout /= nu.sum(slitout)
 
    return slitout      
