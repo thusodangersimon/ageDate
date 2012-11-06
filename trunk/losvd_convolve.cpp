@@ -11,11 +11,19 @@ void convolve(py::object  x, py::object y ,py::object losvd,py::object out){
   //convolution params
   int  i1, i2, m1, m2, KernelLen, j,HalfKernelLen ;
   int SignalLen = py::extract<int>(y.attr("__len__")());
-  float Signal[SignalLen], Kernel[SignalLen], Result[SignalLen], param[4], temp_kern[SignalLen];
+  float *Signal,*Kernel, *param, *temp_kern;
+  Signal = (float *) malloc(SignalLen * sizeof(float));
+  Kernel = (float *) malloc(SignalLen * sizeof(float));
+  param = (float *) malloc(4 * sizeof(float));
+  temp_kern = (float *) malloc(SignalLen * sizeof(float));
+  float Result[SignalLen];
   // gauss kernel params
-  float vel_scale, c, logl_simga, norm, diff_wave;
-  float Y[SignalLen], wave[SignalLen], temp_con[SignalLen] ;
-  c = 299792.458;
+  const float c = 299792.458;
+  float vel_scale, logl_simga, norm, diff_wave;
+  float *Y, *wave, *temp_con ;
+  Y = (float *) malloc(SignalLen * sizeof(float));
+  wave = (float *) malloc(SignalLen * sizeof(float));
+  temp_con = (float *) malloc(SignalLen * sizeof(float));
   KernelLen = -99999;
   //turn python params into c arrays
   for (int i = 0 ;i<SignalLen;i++){
@@ -31,27 +39,29 @@ void convolve(py::object  x, py::object y ,py::object losvd,py::object out){
       //calculate new kernel
       if (n == 0){
 	diff_wave = (wave[n + 1] - wave[n]);
-	vel_scale = c * diff_wave / wave[n] ;
-      } else {
-	diff_wave = (wave[n] - wave[n - 1]);
-	vel_scale = c * diff_wave / wave[n] ;
-      } 
+      }
+      
+      vel_scale = c * diff_wave / wave[n] ;
+      //} else {
+      //	diff_wave = (wave[n] - wave[n - 1]);
+      //	vel_scale = c * diff_wave / wave[n] ;
+      // } 
       logl_simga = std::log(1 + param[0]/c) / vel_scale * c;
       norm = 0;
-      if (KernelLen != 2 * std::ceil(  5 * logl_simga) + 1){
-	HalfKernelLen = std::ceil(  5 * logl_simga);
-	KernelLen = 2 * HalfKernelLen + 1;
-      //do calculation
-	j = 0;
-	for (int i = - HalfKernelLen  ; i <  KernelLen - HalfKernelLen; i++){
-	  Y[j] = i/logl_simga;
-	  Kernel[j] = std::exp(-Y[j] * Y[j]/2.);
-	  //if (param[2] != 0){
+      //if (KernelLen != 2 * std::ceil(  5 * logl_simga) + 1){
+      HalfKernelLen = std::ceil(  5 * logl_simga);
+      KernelLen = 2 * HalfKernelLen + 1;
+	//do calculation
+      j = 0;
+      for (int i = - HalfKernelLen  ; i <  KernelLen - HalfKernelLen; i++){
+	Y[j] = i/logl_simga;
+	Kernel[j] = std::exp(-Y[j] * Y[j]/2.);
+	if (param[2] != 0 and param[3]!= 0){
 	  Kernel[j] *= (1.+ param[2] * pow(2,0.5) / pow(6,0.5) * (2 * pow(Y[j],3) - 3 * Y[j]) + param[3] / pow(24,.5) * (4 * pow(Y[j],4) - 12 * pow(Y[j],2) + 3));
-	  //norm +=
-	  j++;
 	}
-      }
+	j++;
+	}
+	//}
 	
       //do convolution
       Result[n] = 0;
@@ -72,24 +82,34 @@ void convolve(py::object  x, py::object y ,py::object losvd,py::object out){
       }
       j=0;
       for (int i = i1; i <= i2; i++){
+	if (Kernel[i] < 0){
+	  Kernel[i] = 0;
+	}
 	temp_kern[j] = Kernel[i];
 	norm += Kernel[i];
+	std:: cout << temp_kern[j]/norm << "\t";
 	j++;
-	}
+      }
+      std:: cout << "\n";
       j=0;
       for (int k = m1; k < m2; k++){
+	//std:: cout << temp_kern[j]/norm << "\t";
 	temp_con[j] = Signal[k] * temp_kern[j]/norm;
 	j++;
 	
       }
+      //std:: cout << "\n";
      //do trapizode to integrate
       j = 0;
       for (int k = m1; k < m2; k++){
 	Result[n] += (wave[k + 1] - wave[k]) * (temp_con[j+1] + temp_con[j])/2.;
 	j++;
 	}
+      std::cout <<norm << "\n";
       out.attr("__setitem__")(n,Result[n]);
     }
+  //free mem
+  free(Kernel);  free(Signal); free(Y); free(wave); free(temp_con); free(param);free(temp_kern);
   return ;
 }
 
