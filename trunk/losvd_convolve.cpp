@@ -48,20 +48,20 @@ void convolve(py::object  x, py::object y ,py::object losvd,py::object out){
       // } 
       logl_simga = std::log(1 + param[0]/c) / vel_scale * c;
       norm = 0;
-      //if (KernelLen != 2 * std::ceil(  5 * logl_simga) + 1){
-      HalfKernelLen = std::ceil(  5 * logl_simga);
-      KernelLen = 2 * HalfKernelLen + 1;
+      if (KernelLen != 2 * std::ceil(  5 * logl_simga) + 1){
+	HalfKernelLen = std::ceil(  5 * logl_simga);
+	KernelLen = 2 * HalfKernelLen + 1;
 	//do calculation
-      j = 0;
-      for (int i = - HalfKernelLen  ; i <  KernelLen - HalfKernelLen; i++){
-	Y[j] = i/logl_simga;
-	Kernel[j] = std::exp(-Y[j] * Y[j]/2.);
-	if (param[2] != 0 and param[3]!= 0){
-	  Kernel[j] *= (1.+ param[2] * pow(2,0.5) / pow(6,0.5) * (2 * pow(Y[j],3) - 3 * Y[j]) + param[3] / pow(24,.5) * (4 * pow(Y[j],4) - 12 * pow(Y[j],2) + 3));
+	j = 0;
+	for (int i = - HalfKernelLen  ; i <  KernelLen - HalfKernelLen; i++){
+	  Y[j] = i/logl_simga;
+	  Kernel[j] = std::exp(-Y[j] * Y[j]/2.);
+	  if (param[2] != 0 and param[3]!= 0){
+	    Kernel[j] *= (1.+ param[2] * pow(2,0.5) / pow(6,0.5) * (2 * pow(Y[j],3) - 3 * Y[j]) + param[3] / pow(24,.5) * (4 * pow(Y[j],4) - 12 * pow(Y[j],2) + 3));
+	  }
+	  j++;
 	}
-	j++;
-	}
-	//}
+      }
 	
       //do convolution
       Result[n] = 0;
@@ -78,7 +78,7 @@ void convolve(py::object  x, py::object y ,py::object losvd,py::object out){
 	i2 = KernelLen - ((KernelLen  - 1)/2 - m2 + n) - 1;
       } else{
 	i1 = 0;
-	i2 = KernelLen - 1;
+	i2 = KernelLen ;
       }
       j=0;
       for (int i = i1; i <= i2; i++){
@@ -86,26 +86,22 @@ void convolve(py::object  x, py::object y ,py::object losvd,py::object out){
 	  Kernel[i] = 0;
 	}
 	temp_kern[j] = Kernel[i];
-	norm += Kernel[i];
-	std:: cout << temp_kern[j]/norm << "\t";
+	norm += temp_kern[j];
 	j++;
       }
-      std:: cout << "\n";
       j=0;
-      for (int k = m1; k < m2; k++){
-	//std:: cout << temp_kern[j]/norm << "\t";
+      for (int k = m1; k <= m2; k++){
+	//std:: cout << temp_kern[j] << "\t";
 	temp_con[j] = Signal[k] * temp_kern[j]/norm;
 	j++;
-	
       }
-      //std:: cout << "\n";
+      
      //do trapizode to integrate
       j = 0;
       for (int k = m1; k < m2; k++){
 	Result[n] += (wave[k + 1] - wave[k]) * (temp_con[j+1] + temp_con[j])/2.;
 	j++;
-	}
-      std::cout <<norm << "\n";
+      }
       out.attr("__setitem__")(n,Result[n]);
     }
   //free mem
