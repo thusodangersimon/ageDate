@@ -40,115 +40,64 @@ import os
 def root_run(fun, topology, func, burnin=5000, itter=10**5, k_max=16):
     '''From MPI start, starts workers doing RJMCMC and coordinates comunication 
     topologies'''
-    #start multiprocess need to make work with mpi
-    comm = mpi.COMM_WORLD
-    rank = comm.Get_rank()
-    size = comm.Get_size()
-    work=[]
-    q_talk,q_final=Queue(),Queue()
-    #get total iterations 
-    if rank == 0:
-        stop_iter = burnin * topology._cpus + itter
+   #start RJMCMC SWARM 
+    N = 3 #output number
+    if not rank == 0:
+        #output is: [param, chi, bayes_fact, acept_rate, out_sigma, rank]
+        print 'Starting rank %i on %s.'%(topology.rank_world,mpi.Get_processor_name())
+        temp = rjmcmc_swarm(fun, topology, func, burnin)
+        #temp = [param, chi, bayes_fact]
+        print 'rank %i on %s is complete'%(topology.rank_world,mpi.Get_processor_name())
+        comm.barrier()
+        for i in range(N):
+            comm.send(i, dest=0)
+        return None,None,None
     else:
-        stop_iter = 0
-    stop_iter = comm.bcast(stop_iter, root=0)
-    #start local workers
-    i = 0
-    for ii in topology._rank_list:
-        work.append(Process(target=rjmcmc_swarm,
-                            args=(fun, topology, func, burnin , k_max, i, ii, q_talk, q_final,)))
-        work[-1].start()
-        i += 1
-    #while rjmcmc is running update curent iterations and gather best fit for swarm
-    global_iter = 0
-    while (global_iter <= stop_iter and topology.iter_stop.value):  
-        Time.sleep(5)
-        #get swarm values from other workers depending on topology
-        topology.get_best()
-        #get total iterations
-        global_iter  = comm.reduce(topology.current.value, root=0)
-        global_iter = comm.bcast(global_iter , root=0)
+    #while rjmcmc is  root process is running update curent iterations and gather best fit for swarm
+        stop_iter = burnin * topology.size_world + itter
+        #dummy param for swarm
+        time = Time.time()
+        i = 1
+        while (topology.global_iter <= stop_iter and topology.iter_stop):  
+            #Time.sleep(5)
+            #get swarm values from other workers depending on topology
+            topology.swarm_update(topology.parambest,topology.chibest,1)
+            if i % 10 == 0:
+                topology.get_best()
+            #get total iterations
+        #global_iter  = comm.reduce(topology.current.value, root=0)
+        #global_iter = comm.bcast(global_iter , root=0)
         #get find global best fit
-        topology.chibest.value = comm.allreduce(topology.chibest.value,op=mpi.MIN)
+        #topology.chibest.value = comm.allreduce(topology.chibest.value,op=mpi.MIN)
         #print current iterations
-        if rank == 0 :
-            print '%2.2f percent done at %i' %((float(global_iter) / stop_iter) * 100., global_iter )
-            print nu.array(topology.parambest)
-            sys.stdout.flush()
-    #put in convergence diagnosis
-    topology.iter_stop.value = False
-    #wait for proceses to finish
-    count=0
-    temp=[]
-    rank_out =[]
-    while count < 2*len(topology._rank_list):
-        try:
-            count += 1
-            temp.append(q_final.get(timeout=5))
-            #if something goes wrong with sending write to file
-            #records which one has sent data
-            rank_out.append(temp[-1][-1])
-            for i in len(active_children()):
-                q_talk.put(rank_out[-1])
-            
-        except:
-            pass
-    if len(temp) < len(topology._rank_list):
-        #make trouble processes write data to file and load it in
-        for i in range(3*len(topology._rank_list)):
-            q_talk.put(-1)
-        #wait for processes to end
-        for i in work:
-            i.join()
-    if rank == 0:
-    #look for .asdfg files to load in
-        import cPickle as pik
-        files = os.listdir('.')
-        for i in files:
-            if i.endswith('asdfg'):
-                temp.append(pik.load(open(i)))
-                os.popen('rm -f %s'%i)
-    for i in work:
-        try:
-            i.terminate()
-        except OSError:
-            pass
-    #send data to root for post processing
-    comm.barrier()
-    if rank ==0:
-        for i in xrange(1, size):
-            count = comm.recv(source = i)
-            print 'getting data from %i and has %i workers'%(i,count)
-            for j in xrange(count):
-                 t=[]
-                 for k in xrange(len(temp[0])):
-                    t.append( comm.recv(source=i))
+            if Time.time() - time > 5:
+                print '%2.2f percent done at %i' %((float(topology.global_iter) / stop_iter) * 100., 
+                                                   topology.global_iter)
+                sys.stdout.flush()
+                time = Time.time()
+            i += 1
+        #put in convergence diagnosis
+        print 'Done sending stop signal'
+        for i in range(10):
+            topology.swarm_update(topology.parambest,topology.chibest,1)
+        topology.iter_stop = False
+        topology.get_best()
+        #get results from other processes
+        temp =[]
+        comm.barrier()
+        for i in xrange(1,topology.size_world):
+            print 'getting data from %i and has '%(i)
+            t=[]
+            for k in xrange(N):
+                t.append( comm.recv(source=i))
             temp.append(t)
-        try:
+        '''try:
             param, chi, bayes = dic_data(temp, burnin)
         except IndexError:
-            #nothing recived quit
-            print os.popen('hostname').read()[:-1]
-            comm.barrier()
-            return None, None, None
-        print os.popen('hostname').read()[:-1]
-        comm.barrier()
+            pass
         #save accept rate and sigma for output
-        t=[]
-        for i in temp:
-            t.append((i[3],i[4]))
-        #return param, chi, bayes 
-        return param, chi, t
-    else:
-        if len(temp) > 0:
-            count = len(temp)
-            print 'sending %i workers'%(count)
-            comm.send(len(temp), dest=0)
-            for i in xrange(len(temp)):
-                for j in xrange(len(temp[i])):
-                    comm.send(temp[i][j], dest=0)
-        comm.barrier()
-        return None,None,None
+        return param, chi, t'''
+        pik.dump(temp, open('test.pki','w'),2)
 
  #===========================================
 #swarm functions
@@ -192,16 +141,19 @@ def tuning(active_param, active_dust, active_losvd, rank, birth_rate, option,T_c
 
 #+===================================
 #main function  
-def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, rank=0, global_rank=0, q_talk=None, q_final=None):
+def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3):
     nu.random.seed(random_permute(current_process().pid))
     #file = csv.writer(open('out'+str(rank)+'txt','w'))
     #initalize boundaries
+    #option._k_max = k_max
     lib_vals = fun._lib_vals
     metal_unq = fun._metal_unq
     age_unq = fun._age_unq
+    global_rank = option.rank_world
+    rank = option.comm_world.rank
     #create fun for all number of bins
     #attempt=False
-    fun._k_max = k_max
+    #fun._k_max = k_max
     param,active_param,chi,sigma={},{},{},{}
     Nacept,Nreject,acept_rate,out_sigma={},{},{},{}
     #set up dust if in use
@@ -215,7 +167,7 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, 
     #set up LOSVD
     if fun._losvd:
         #[sigma, redshift, h3, h4]
-        active_losvd = nu.random.rand(4)*4
+        active_losvd = nu.random.rand(4)*2
         active_losvd[1] = 0.
         sigma_losvd = nu.random.rand(4,4)
     else:
@@ -223,7 +175,7 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, 
         sigma_losvd = nu.zeros([4,4])
     bayes_fact={} #to calculate bayes factor
     #fun=MC_func(data)
-    for i in range(1,k_max+1):
+    for i in range(1,option._k_max+1):
         param[str(i)]=[]
         active_param[str(i)],chi[str(i)]=nu.zeros(3*i),[nu.inf]
         sigma[str(i)]=nu.identity(3*i)*nu.tile(
@@ -233,10 +185,10 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, 
         Nacept[str(i)],Nreject[str(i)]=1.,0.
         acept_rate[str(i)],out_sigma[str(i)]=[.35],[]
         bayes_fact[str(i)]=[]       
-
+    
     #bins to start with
     try:
-        bins = nu.random.randint(1,k_max)
+        bins = nu.random.randint(1,option._k_max)
     except ValueError:
         bins = 1
     while True:
@@ -257,20 +209,19 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, 
         if len(chi[str(bins)])==1:
             chi[str(bins)].append(0.)
     #active_param[str(bins)]=fun[str(bins)].n_neg_lest(active_param[str(bins)])
-        (chi[str(bins)][-1],
-         active_param[str(bins)][range(2,bins*3,3)]) = fun.lik(
+        (chi[str(bins)][-1],active_param[str(bins)][range(2,bins*3,3)]) = fun.lik(
             active_param[str(bins)], active_dust, active_losvd)
     #check if starting off in bad place ie chi=inf or nan
         if not nu.isfinite(chi[str(bins)][-1]):
             continue
         else:
             break
-
+    
     param[str(bins)].append(nu.copy(nu.hstack((
                     active_param[str(bins)], active_dust, active_losvd))))
     #set best chi and param
-    if option.chibest.value>chi[str(bins)][-1]:
-        option.chibest.value=chi[str(bins)][-1]+.0
+    if option.chibest > chi[str(bins)][-1]:
+        option.chibest = chi[str(bins)][-1]+.0
         for kk in range(len(option.parambest)):
             if kk<bins*3+2+4:
                 option.parambest[kk] = nu.hstack((active_param[str(bins)],
@@ -278,7 +229,7 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, 
             else:
                     option.parambest[kk] = nu.nan
         print ('%i has best fit with chi of %2.2f and %i bins' 
-               %(global_rank, option.chibest. value, bins))
+               %(global_rank, option.chibest, bins))
         sys.stdout.flush()
         #set current swarm value
     for kk in range(len(option.swarm[rank])):
@@ -287,7 +238,7 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, 
                                                 active_dust,active_losvd))[kk]
         else:
             option.swarm[rank][kk] = nu.nan
-    option.swarmChi[rank].value = chi[str(bins)][-1]
+    option.swarmChi[rank]= chi[str(bins)][-1]
     #start rjMCMC
     T_cuurent,Nexchange_ratio = 0.0,1.0
     size = 0
@@ -296,8 +247,8 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, 
     birth_rate = 0.5
     out_dust_sig, out_losvd_sig = [sigma_dust], [sigma_losvd]
 
-    while option.iter_stop.value:
-        if option.current.value % 5000==0:
+    while option.iter_stop:
+        if option.current% 1000 == 0:
             print "hi, I'm at itter %i, chi %f from %s bins and from %i SA %2.2f" %(len(param[str(bins)]),chi[str(bins)][-1],bins, global_rank,SA_polymodal(T_cuurent,burnin,T_start,T_stop))
             sys.stdout.flush()
 
@@ -345,18 +296,18 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, 
             if not nu.isinf(min(chi[str(bins)])): #put temperature on order of chi calue
                 T_start = nu.round(min(chi[str(bins)]))+1.
             #see if global best fit
-            if option.chibest.value>chi[str(bins)][-1]:
+            if option.chibest > chi[str(bins)][-1]:
                 #set global in sharred arrays
                 #option.chibest.acquire();option.parambest.acquire()
-                option.chibest.value=chi[str(bins)][-1]+.0
-                for kk in xrange(k_max*3):
+                option.chibest = chi[str(bins)][-1]+.0
+                for kk in xrange(option._k_max*3):
                     if kk<bins*3+2+4:
                         option.parambest[kk]=nu.hstack((active_param[str(bins)],
                                                active_dust, active_losvd))[kk]
                     else:
                         option.parambest[kk] = nu.nan
                 #option.chibest.release();option.parambest.release()
-                print('%i has best fit with chi of %2.2f and %i bins, %i steps left' %(global_rank,option.chibest.value,bins,j_timeleft-j))
+                print('%i has best fit with chi of %2.2f and %i bins, %i steps left' %(global_rank,option.chibest,bins,j_timeleft-j))
                 sys.stdout.flush()
                 #break
         else:
@@ -437,22 +388,19 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, 
 
         ##############################house keeping
         j+=1
-        option.current.value+=1
+        option.current += 1
         acept_rate[str(bins)].append(nu.copy(Nacept[str(bins)]/(Nacept[str(bins)]+Nreject[str(bins)])))
-        out_sigma[str(bins)].append(nu.copy(sigma[str(bins)].diagonal()))
+        #out_sigma[str(bins)].append(nu.copy(sigma[str(bins)].diagonal()))
         if fun._dust:
             out_dust_sig.append(nu.copy(sigma_dust))
         if fun._losvd:
             out_losvd_sig.append(nu.copy(sigma_losvd))
         #swarm update
-        for kk in xrange(len(option.swarm[rank])):
-            if kk<bins*3+2+4:
-                option.swarm[rank][kk] = nu.hstack((active_param[str(bins)],
-                                                    active_dust,active_losvd))[kk]
-            else:
-                option.swarm[rank][kk] = nu.nan
-        option.swarmChi[rank].value = chi[str(bins)][-1]
-        
+        option.swarm_update(nu.hstack((active_param[str(bins)],active_dust,active_losvd)),
+                            chi[str(bins)][-1],bins)
+        #get other wokers param
+        if  option.current % 10 == 0:
+            option.get_best()
     #####################################return once finished 
     for i in param.keys():
         chi[i]=nu.array(chi[i])
@@ -466,8 +414,9 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, 
         #acept_rate[i]=nu.array(acept_rate[i])
         #out_sigma[i]=nu.array(out_sigma[i])
         bayes_fact[i]=nu.array(bayes_fact[i])
-    q_final.put((param, chi, bayes_fact,acept_rate, out_sigma,rank))
-    end_rank = 9999999
+    return param, chi, bayes_fact,acept_rate, out_sigma,rank
+    #q_final.put((param, chi, bayes_fact,acept_rate, out_sigma,rank))
+    '''end_rank = 9999999
     while True:
         #make sure param have been transpored before ending
         try:
@@ -483,7 +432,7 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3, k_max=16, 
             import cPickle as pik
             pik.dump((param, chi, bayes_fact, acept_rate, out_sigma,global_rank),open('error_writout_%i.asdfg'%global_rank,'w'),2)
             break
-        Time.sleep(2)
+        Time.sleep(2)'''
 
 #########swarm functions only in this program######
 def swarm_vect(pam, active_dust, active_losvd, rank, birth_rate, option):
@@ -497,7 +446,7 @@ def swarm_vect(pam, active_dust, active_losvd, rank, birth_rate, option):
     u = nu.random.rand()
     swarm_param,swarm_dust,swarm_losvd = [],[],[]
     for i in xrange(len(option.swarmChi)):
-        tot_chi += 1/option.swarmChi[i].value
+        tot_chi += 1/option.swarmChi[i]
         temp_array = nu.array(option.swarm[i])
         temp_array = temp_array[nu.isfinite(temp_array)]
         if len(temp_array) == 0:
@@ -523,13 +472,13 @@ def swarm_vect(pam, active_dust, active_losvd, rank, birth_rate, option):
         #except ValueError:
             
         if len(temp_array) > len(pam):
-            up_chance += 1/option.swarmChi[i].value
+            up_chance += 1/option.swarmChi[i]
     up_chance /= tot_chi
     #make out array
     out_param, out_dust, out_losvd = pam, active_dust, active_losvd
     for i in xrange(len(swarm_param)):
         try:
-            weight = 1/option.swarmChi[i].value / tot_chi
+            weight = 1/option.swarmChi[i]/ tot_chi
             if nu.any(swarm_param[i]):
                 out_param = out_param - weight * swarm_param[i] * u
                 out_dust = out_dust - weight * swarm_dust[i] * u
@@ -660,14 +609,94 @@ class Topologies(object):
     cpus is number of cpus (max or number) to run chains on, k_max is max number of ssps to combine"""
 
     def All(self):
-        pass
+        self.comm = mpi.COMM_WORLD
+        self._size = self.comm.Get_size()
+        self._rank = self.comm.Get_rank()
+        #setup comunication arrays to other workers + 1 from world
+        self.swarm, self.swarmChi = [],[]
+        for i in xrange(self._cpus):
+            self.swarm.append(nu.ones(self._k_max * 3 + 2 + 4) + nu.nan)
+            self.swarmChi.append(nu.inf)
+
+        def get_best():
+            pass
+        def update(param, chi, bins, rank, global_rank):
+            '''Updates positions of swarm using topology'''
+            #sets local workers param
+            for kk in xrange(len(self.swarm[global_rank])):
+                if kk<bins*3+2+4:
+                    self.swarm[global_rank][kk] = param[kk]
+                else:
+                    self.swarm[global_rank][kk] = nu.nan
+            self.swarmChi[global_rank].value = chi
+            #recives other workers values
+            
+        self.swarm_update = update
+        self.get_best = get_best
+
     def Ring(self):
-        pass
+        '''makes ring topology'''
+        self.comm_world = mpi.COMM_WORLD
+        self.rank_world = self.comm_world.Get_rank()
+        self.size_world = self.comm_world.Get_size()
+        r_index = range(2,2 * self.size_world+2,2)
+        index = range(self.size_world)
+        edges = []
+        for i in index:
+            if i - 1 < 0:
+                edges.append(max(index))
+            else:
+                edges.append( i-1)
+            if i + 1 > max(index):
+                edges.append(min(index))
+            else:
+                edges.append( i + 1)
+        self.comm = self.comm_world.Create_graph(r_index, edges, True)
+        self.rank = self.comm.Get_rank()
+        self.size = self.comm.Get_size()
+        #makes large array for sending and reciving
+        self.swarm = nu.zeros([self.size, self._k_max * 3 + 2 + 4]) + nu.nan
+        self.swarmChi = nu.zeros(self.size) + nu.inf
+
+        def thuso_min(x,y):
+            if x[0] >y[0]:
+                return y
+            else:
+                return x
+
+        def get_best():
+            #updates info
+           self.chibest ,self.parambest= self.comm_world.allreduce( 
+               (self.chibest,self.parambest), op = self.thuso_min)
+           #self.parambest = self.comm_world.bcast( self.parambest,root=
+           self.global_iter = self.comm_world.allreduce(self.current,op = mpi.SUM)
+           self.iter_stop = self.comm_world.bcast(self.iter_stop,root=0)
+
+        def update(param, chi,bins):
+            '''Updates positions of swarm using topology'''
+            for kk in xrange(len(self.swarm[self.rank])):
+                if kk<bins*3+2+4:
+                    self.swarm[self.rank][kk] = param[kk]
+                else:
+                    self.swarm[self.rank][kk] = nu.nan
+            self.swarmChi[self.rank] = chi
+            #update from other processes
+            self.swarm = self.comm.alltoall(self.swarm)
+            self.swarmChi = self.comm.alltoall(self.swarmChi)
+        
+        self.swarm_update = update
+        self.get_best = get_best
+        self.thuso_min = thuso_min
 
     def Cliques(self):
         self.comm = mpi.COMM_WORLD
         self._size = self.comm.Get_size()
         self._rank = self.comm.Get_rank()
+        #setup comunication arrays to other workers + 1 from world
+        self.swarm, self.swarmChi = [],[]
+        for i in xrange(self.cpu_tot+1):
+            self.swarm.append(Array('d',nu.ones(self._k_max * 3 + 2 + 4) + nu.nan))
+            self.swarmChi.append(Value('d',nu.inf))
         #get best function for cliques
         def get_best():
             size = self._size
@@ -691,49 +720,42 @@ class Topologies(object):
             self.swarmChi[-1].value = global_best[best_chi_index,-1]
             for i in xrange(len(self.swarm[-1])):
                 self.swarm[-1][i] = global_best[best_chi_index, i]
-
-
+        
+        def update(param, chi, bins, rank, global_rank):
+            '''Updates positions of swarm using topology'''
+            for kk in xrange(len(self.swarm[rank])):
+                if kk<bins*3+2+4:
+                    self.swarm[rank][kk] = param[kk]
+                else:
+                    self.swarm[rank][kk] = nu.nan
+            self.swarmChi[rank].value = chi
+        
+        self.swarm_update = update
         self.get_best = get_best
 
     def Square(self):
-        pass
+        def get_best():
+            pass
+        def update(param, chi, bins, rank, global_rank):
+            pass
+        self.swarm_update = update
+        self.get_best = get_best
+
     
-    def __init__(self, cpus, top = 'cliques', k_max=16):
+    def __init__(self, top = 'cliques', k_max=16):
         self._k_max = k_max
         #number of iterations done
-        self.current = Value('i',0)
+        self.current = 0
+        self.global_iter = 0
         #number of workers to create
-        local_cpu = cpu_count()
+        #local_cpu = cpu_count()
         comm = mpi.COMM_WORLD
         size = comm.Get_size()
         rank = comm.Get_rank()
         #simple manager just devides total processes up
-        total = 0
-        total = comm.reduce(local_cpu, root=0)
-        if rank == 0:
-            if not cpus == 'max':
-                if cpus > total:
-                    print 'more workers requested than avalible using %d instead' %total
-                else:
-                    total = cpus
-            #split and send rank list to workers
-            self._cpus = total
-            rank_list = nu.arange(total)
-            #try iterative way of creating list
-            self._rank_list = rank_list.reshape(size,cpu_count())
-        else:
-            self._rank_list = None
-        self._rank_list = comm.scatter(self._rank_list, root=0)
-        self.cpu_tot = len(self._rank_list)
-        #tells workers to stop
-        self.iter_stop = Value('b',True)
-        self.chibest = Value('d',nu.inf)
-        self.parambest = Array('d',nu.ones(k_max * 3 + 2 + 4) + nu.nan)
-        #setup comunication arrays to other workers + 1 from world
-        self.swarm, self.swarmChi = [],[]
-        for i in range(self.cpu_tot+1):
-            self.swarm.append(Array('d',nu.ones(k_max * 3 + 2 + 4) + nu.nan))
-            self.swarmChi.append(Value('d',nu.inf))
+        self.iter_stop = True
+        self.chibest = nu.inf
+        self.parambest = nu.ones(k_max * 3 + 2 + 4) + nu.nan
         #check if topology is in list
         if not top in ['all', 'ring', 'cliques', 'square']:
             raise ValueError('Topology is not in list.')
@@ -761,12 +783,12 @@ if __name__ == '__main__':
         comm.bcast(data_len,0)
         data = nu.zeros(data_len)
     data = comm.bcast(data, 0)
-    Top = Topologies('max')
+    Top = Topologies('ring')
     fun = MC_func(data)
     fun.autosetup()
     if rank == 0:
         print info
-    param,chi,bayes = root_run(fun.send_class, Top, itter=10**6, k_max=16, func=vanilla)
+    param,chi,bayes = root_run(fun.send_class, Top, itter=10**4, burnin=500 , k_max=16, func=vanilla)
     if rank == 0:
         pik.dump((param,chi,data),open('vanila_'+info[0]+'.pik','w'),2)
         print info
