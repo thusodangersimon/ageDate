@@ -50,7 +50,7 @@ def root_run(fun, topology, func, burnin=5000, itter=10**5, k_max=16):
         print 'rank %i on %s is complete'%(topology.rank_world,mpi.Get_processor_name())
         comm.barrier()
         for i in range(N):
-            comm.send(i, dest=0)
+            comm.send(temp[i], dest=0)
         return None,None,None
     else:
     #while rjmcmc is  root process is running update curent iterations and gather best fit for swarm
@@ -91,13 +91,12 @@ def root_run(fun, topology, func, burnin=5000, itter=10**5, k_max=16):
             for k in xrange(N):
                 t.append( comm.recv(source=i))
             temp.append(t)
-        '''try:
+        try:
             param, chi, bayes = dic_data(temp, burnin)
         except IndexError:
             pass
         #save accept rate and sigma for output
-        return param, chi, t'''
-        pik.dump(temp, open('test.pki','w'),2)
+        return param, chi, t
 
  #===========================================
 #swarm functions
@@ -609,30 +608,17 @@ class Topologies(object):
     cpus is number of cpus (max or number) to run chains on, k_max is max number of ssps to combine"""
 
     def All(self):
+        #all workers talk to eachother
         self.comm = mpi.COMM_WORLD
-        self._size = self.comm.Get_size()
-        self._rank = self.comm.Get_rank()
-        #setup comunication arrays to other workers + 1 from world
-        self.swarm, self.swarmChi = [],[]
-        for i in xrange(self._cpus):
-            self.swarm.append(nu.ones(self._k_max * 3 + 2 + 4) + nu.nan)
-            self.swarmChi.append(nu.inf)
+        self.size = self.comm.Get_size()
+        self.rank = self.comm.Get_rank()
+        self.comm_world = mpi.COMM_WORLD
+        self.rank_world = self.comm_world.Get_rank()
+        self.size_world = self.comm_world.Get_size()
+        #makes large array for sending and reciving
+        self.swarm = nu.zeros([self.size, self._k_max * 3 + 2 + 4]) + nu.nan
+        self.swarmChi = nu.zeros(self.size) + nu.inf
 
-        def get_best():
-            pass
-        def update(param, chi, bins, rank, global_rank):
-            '''Updates positions of swarm using topology'''
-            #sets local workers param
-            for kk in xrange(len(self.swarm[global_rank])):
-                if kk<bins*3+2+4:
-                    self.swarm[global_rank][kk] = param[kk]
-                else:
-                    self.swarm[global_rank][kk] = nu.nan
-            self.swarmChi[global_rank].value = chi
-            #recives other workers values
-            
-        self.swarm_update = update
-        self.get_best = get_best
 
     def Ring(self):
         '''makes ring topology'''
@@ -658,13 +644,139 @@ class Topologies(object):
         self.swarm = nu.zeros([self.size, self._k_max * 3 + 2 + 4]) + nu.nan
         self.swarmChi = nu.zeros(self.size) + nu.inf
 
-        def thuso_min(x,y):
+    def Cliques(self, N=3):
+        #N = 3
+        self.comm_world = mpi.COMM_WORLD
+        self.rank_world = self.comm_world.Get_rank()
+        self.size_world = self.comm_world.Get_size()
+        #setup comunication arrays to other workers + 1 from world
+        head_nodes = nu.arange(N)
+        workers = []
+        for i in xrange(N):
+            workers.append([i])
+        j = 0
+        for i in xrange(max(head_nodes) + 1, self.size_world):
+            workers[j].append(i)
+            j+=1
+            if j == N:
+                j=0
+        #make index and edges
+        index,edges = [],[]
+        #workers
+        j = 0
+        for i in range(self.size_world - len(head_nodes)):
+            if len(index) == 0:
+                index.append(len(workers[j]))
+            else:
+                index.append(index[-1] + len(workers[j]))
+            edges.append(workers[j])
+            if (i + 1) % (len(workers[j]) - 1) == 0:
+                j += 1
+        #head nodes
+        for i in head_nodes:
+            temp = nu.unique(nu.hstack((workers[i],head_nodes)))
+            edges.append(list(temp[temp != i]))
+            index.append(index[-1] + len(edges[-1]))
+        n_edge =[]
+        for i in edges:
+            for j in i:
+                n_edge.append(j)
+        self.comm = self.comm_world.Create_graph(index, n_edge, True)
+        self.rank = self.comm.Get_rank()
+        self.size = self.comm.Get_size()
+       #makes large array for sending and reciving
+        self.swarm = nu.zeros([self.size, self._k_max * 3 + 2 + 4]) + nu.nan
+        self.swarmChi = nu.zeros(self.size) + nu.inf
+
+    def Square(self):
+        #Each worker communicates with max of 4 other workers
+        Nrow = 3
+        #make grid cartiesian grid
+        self.comm_world = mpi.COMM_WORLD
+        self.rank_world = self.comm_world.Get_rank()
+        self.size_world = self.comm_world.Get_size()
+        #make grid
+        Ncoulms = self.size_world/Nrow
+        if self.size_world % Nrow != 0:
+            print 'Warrning: Not cylindrical, workers may not work correctly'
+        tot = 0
+        grid = []
+        for i in xrange(Ncoulms):
+            for j in range(Nrow):
+                grid.append(nu.array([j,i]))
+                tot += 1
+        #fill in grid if points left over
+        i = 0
+        while tot < self.size_world:
+            grid.append((j,i))
+            i += 1
+        grid = nu.array(grid)   
+        edges,ind=[],[]
+        #make comunication indicies
+        for i in range(self.size_world):
+            #find 4 closest workers
+            min_dist = nu.zeros((4,2)) +9999999
+            for k in range(min_dist.shape[0]):
+                for j in range(self.size_world):
+                    if (min_dist[k][0] > nu.sqrt((grid[i][0] - grid[j][0])**2 + (grid[i][1] - grid[j][1])**2) 
+                        and i != j):
+                        if not nu.any(min_dist[:,1] == j):
+                            min_dist[k][0] = nu.sqrt((grid[i][0] - grid[j][0])**2 + (grid[i][1] - grid[j][1])**2)
+                            min_dist[k][1] = nu.copy(j)
+            #if on edged of grid, wrap around
+            if nu.any(grid[i] == 0): #top or left side
+                if grid[i][0] == 0: #top
+                    #find one on bottom
+                    index = min_dist[:,0].argmax()
+                    Index = nu.nonzero(nu.logical_and(grid[:,0] == Nrow - 1,grid[:,1] == grid[i,1]))[0]
+                    min_dist[index] = [0,Index[0].copy()]
+                if grid[i][1] == 0: #left
+                    index = min_dist[:,0].argmax()
+                    Index = nu.nonzero(nu.logical_and(grid[:,0] == grid[i,0],grid[:,1] == Ncoulms-1))[0]
+                    min_dist[index]= [0,Index[0].copy()]
+            if nu.any(grid[i]  == Ncoulms - 1): #right side and maybe bottom
+                if grid[i][1] == Ncoulms - 1: #right
+                    index = min_dist[:,0].argmax()
+                    Index = nu.nonzero(nu.logical_and(grid[:,1] == 0,grid[:,0] == grid[i,0]))[0]
+                    min_dist[index] = [0,Index[0].copy()]
+                if grid[i][0] == Nrow - 1: #bottom
+                    index = min_dist[:,0].argmax()
+                    Index = nu.nonzero(nu.logical_and(grid[:,1] == grid[i,1],grid[:,0] == 0))[0]
+                    min_dist[index] = [0,Index[0].copy()]
+            '''if grid[i][0]  == Nrow - 1: #def bottom
+                index = min_dist[:,0].argmax()
+                Index = nu.nonzero(nu.logical_and(grid[:,1] == grid[i,1],grid[:,0] == 0))[0]
+                min_dist[index] = [0,Index[0].copy()]'''
+            if nu.any(grid[i]  == Ncoulms): #extra grid on right side
+                print 'bad'
+            t =[]
+            for k in range(min_dist.shape[0]):
+                t.append(int(min_dist[k,1]))
+            edges.append(t)
+            if len(ind) == 0:
+                ind.append(min_dist.shape[0])
+            else:
+                ind.append(ind[-1] + min_dist.shape[0])
+        n_edge =[] 
+        for i in edges:
+            for j in i:
+                n_edge.append(j)
+        self.comm = self.comm_world.Create_graph(ind, n_edge, True)
+        self.rank = self.comm.Get_rank()
+        self.size = self.comm.Get_size()
+       #makes large array for sending and reciving
+        self.swarm = nu.zeros([self.size, self._k_max * 3 + 2 + 4]) + nu.nan
+        self.swarmChi = nu.zeros(self.size) + nu.inf
+        print self.comm.rank, self.comm.Get_neighbors( self.comm.rank)
+
+    #====Update stuff====
+    def thuso_min(self, x, y):
             if x[0] >y[0]:
                 return y
             else:
                 return x
 
-        def get_best():
+    def get_best(self):
             #updates info
            self.chibest ,self.parambest= self.comm_world.allreduce( 
                (self.chibest,self.parambest), op = self.thuso_min)
@@ -672,7 +784,7 @@ class Topologies(object):
            self.global_iter = self.comm_world.allreduce(self.current,op = mpi.SUM)
            self.iter_stop = self.comm_world.bcast(self.iter_stop,root=0)
 
-        def update(param, chi,bins):
+    def swarm_update(self,param, chi,bins):
             '''Updates positions of swarm using topology'''
             for kk in xrange(len(self.swarm[self.rank])):
                 if kk<bins*3+2+4:
@@ -683,63 +795,6 @@ class Topologies(object):
             #update from other processes
             self.swarm = self.comm.alltoall(self.swarm)
             self.swarmChi = self.comm.alltoall(self.swarmChi)
-        
-        self.swarm_update = update
-        self.get_best = get_best
-        self.thuso_min = thuso_min
-
-    def Cliques(self):
-        self.comm = mpi.COMM_WORLD
-        self._size = self.comm.Get_size()
-        self._rank = self.comm.Get_rank()
-        #setup comunication arrays to other workers + 1 from world
-        self.swarm, self.swarmChi = [],[]
-        for i in xrange(self.cpu_tot+1):
-            self.swarm.append(Array('d',nu.ones(self._k_max * 3 + 2 + 4) + nu.nan))
-            self.swarmChi.append(Value('d',nu.inf))
-        #get best function for cliques
-        def get_best():
-            size = self._size
-            rank = self._rank
-            #self.alltoall
-            #param*bins + dust + losvd + chi
-            global_best = nu.zeros((size, self._k_max * 3 + 2 + 4 + 1))
-            chi = [] 
-            for i in range(self.cpu_tot):
-                chi.append(self.swarmChi[i].value)
-            best_chi_index = nu.argmin(chi)
-            #print chi
-            for i in range(size):
-                global_best[i] = nu.hstack((nu.array(self.swarm[best_chi_index]), chi[best_chi_index]))
-            #send best from clique to all others
-            global_best = nu.array(self.comm.alltoall(global_best))
-            #find best chi value and put into local swarm
-            best_chi_index = global_best[:,-1].argmin()
-            if rank == 0:
-                print 'best chi from clique %d with chi of %2.2f' %(best_chi_index, global_best[best_chi_index,-1])
-            self.swarmChi[-1].value = global_best[best_chi_index,-1]
-            for i in xrange(len(self.swarm[-1])):
-                self.swarm[-1][i] = global_best[best_chi_index, i]
-        
-        def update(param, chi, bins, rank, global_rank):
-            '''Updates positions of swarm using topology'''
-            for kk in xrange(len(self.swarm[rank])):
-                if kk<bins*3+2+4:
-                    self.swarm[rank][kk] = param[kk]
-                else:
-                    self.swarm[rank][kk] = nu.nan
-            self.swarmChi[rank].value = chi
-        
-        self.swarm_update = update
-        self.get_best = get_best
-
-    def Square(self):
-        def get_best():
-            pass
-        def update(param, chi, bins, rank, global_rank):
-            pass
-        self.swarm_update = update
-        self.get_best = get_best
 
     
     def __init__(self, top = 'cliques', k_max=16):
@@ -775,7 +830,7 @@ if __name__ == '__main__':
     rank = comm.Get_rank()
     size = comm.Get_size()
     if rank == 0:
-        data,info,weight,dust = ag.iterp_spec(3,lam_min=4000, lam_max=8000)
+        data,info,weight,dust = ag.iterp_spec(3,'sinc',lam_min=4000, lam_max=8000)
         data_len = nu.array(data.shape)
         comm.bcast(data_len,0)
     else:
@@ -783,12 +838,13 @@ if __name__ == '__main__':
         comm.bcast(data_len,0)
         data = nu.zeros(data_len)
     data = comm.bcast(data, 0)
-    Top = Topologies('ring')
     fun = MC_func(data)
     fun.autosetup()
     if rank == 0:
         print info
-    param,chi,bayes = root_run(fun.send_class, Top, itter=10**4, burnin=500 , k_max=16, func=vanilla)
-    if rank == 0:
-        pik.dump((param,chi,data),open('vanila_'+info[0]+'.pik','w'),2)
+    for i in ['ring','cliques','square']:
+        Top = Topologies(i)
+        param, chi, bayes = root_run(fun.send_class, Top, itter=10**6, burnin=1000 , k_max=16, func=vanilla)
+        if rank == 0:
+            pik.dump((param,chi,data),open(i+info[0]+'.pik','w'),2)
         print info
