@@ -74,6 +74,7 @@ def root_run(fun, topology, func, burnin=5000, itter=10**5, k_max=10):
                                                    topology.global_iter)
                 sys.stdout.flush()
                 time = Time.time()
+                pik.dump((topology.swarm,topology.swarmChi),open('swarm','w'),2)
             i += 1
         #put in convergence diagnosis
         print 'Done sending stop signal'
@@ -135,6 +136,10 @@ def tuning(active_param, active_dust, active_losvd, rank, birth_rate, option,T_c
         birth_rate = .8
     elif birth_rate < .2:
         birth_rate = .2
+    return active_param, active_dust, active_losvd, birth_rate
+
+def none(active_param, active_dust, active_losvd, rank, birth_rate, option,T_cuurent, burnin,fun, accept_rate):
+    'normal RJMCMC'
     return active_param, active_dust, active_losvd, birth_rate
 
 #+===================================
@@ -252,14 +257,10 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3):
             sys.stdout.flush()
 
         #sample from distiburtion
-        #file.writerow(nu.hstack(( active_param[str(bins)], active_dust, active_losvd, chi[str(bins)][-1])))
         t_pro.append(Time.time())
-        try:
-            active_param[str(bins)] = fun.proposal(active_param[str(bins)],
-                                                   sigma[str(bins)])
-        except TypeError:
-            pik.dump((active_param[str(bins)], sigma[str(bins)]),open('rand_error.pik','w'),2)
-            raise
+        
+        active_param[str(bins)] = fun.proposal(active_param[str(bins)],
+                                               sigma[str(bins)])
         if fun._dust:
             active_dust = fun.proposal(active_dust,sigma_dust)
         if fun._losvd:
@@ -268,9 +269,14 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3):
         t_pro[-1] -= Time.time()
         #swarm stuff
         t_swarm.append(Time.time())
+        #if option.rank == 1:
+            #print 'before',active_param[str(bins)] 
         active_param[str(bins)], active_dust, active_losvd, birth_rate = swarm_function(active_param[str(bins)],
                                                                                         active_dust, active_losvd, rank, birth_rate,
                                                                                         option,T_cuurent, burnin, fun, acept_rate[str(bins)][-1] )
+        #if option.rank == 1:
+            #print 'after',active_param[str(bins)] 
+
         t_swarm[-1] -=Time.time()
         #calculate new model and chi
         t_lik.append(Time.time())
@@ -296,9 +302,8 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3):
             param[str(bins)].append(nu.copy(nu.hstack((active_param[str(bins)]
                                                        , active_dust,
                                                        active_losvd))))
+            
             Nacept[str(bins)] += 1
-            if not nu.isinf(min(chi[str(bins)])): #put temperature on order of chi calue
-                T_start = nu.round(min(chi[str(bins)]))+1.
             #see if global best fit
             if option.chibest > chi[str(bins)][-1]:
                 #set global in sharred arrays
@@ -310,6 +315,9 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3):
                                                active_dust, active_losvd))[kk]
                     else:
                         option.parambest[kk] = nu.nan
+                if not nu.isinf(nu.min(chi[str(bins)])): #put temperature on order of chi calue
+                    T_start = nu.round(nu.min(chi[str(bins)]))+1.
+
                 #option.chibest.release();option.parambest.release()
                 print('%i has best fit with chi of %2.2f and %i bins, %i steps left' %(global_rank,option.chibest,bins,j_timeleft-j))
                 sys.stdout.flush()
@@ -460,6 +468,7 @@ def swarm_vect(pam, active_dust, active_losvd, rank, birth_rate, option):
     #random weight for each swarm array
     u = nu.random.rand()
     swarm_param,swarm_dust,swarm_losvd = [],[],[]
+    bins = pam.shape[0]/3
     for i in xrange(len(option.swarmChi)):
         tot_chi += 1/option.swarmChi[i]
         temp_array = nu.array(option.swarm[i])
@@ -468,14 +477,24 @@ def swarm_vect(pam, active_dust, active_losvd, rank, birth_rate, option):
             continue
         temp_pam = temp_array[:-6]
         temp_dust,temp_losvd = temp_array[-6:-4], temp_array[-4:]
+        temp_bins = temp_pam.shape[0]/3
         #get direction to other in swarm
         if temp_pam.shape[0] == pam.shape[0]:
             swarm_param.append(pam - temp_pam)
         elif temp_pam.shape[0] > pam.shape[0]:
             #if not in same number of param take closest one or one with most weight
-            bins = temp_pam.shape[0]/3
-            index = temp_pam[range(2,bins*3,3)].argmax()
-            swarm_param.append(pam[:3] - temp_pam[index*3:index*3+3])
+            index = temp_pam[range(2,temp_bins*3,3)].argsort()[-bins:]
+            t =[]
+            for j in index:
+                t.append(temp_pam[j*3:j*3+3])
+            swarm_param.append(pam - nu.ravel(t))
+        elif temp_pam.shape[0] < pam.shape[0] :
+            #if not in same number of param take closest one or one with most weight
+            index = pam[range(2,bins*3,3)].argsort()[-temp_bins:]
+            t = pam.copy()
+            for j in xrange(len(index)):
+                t[index[j]*3:index[j]*3+3] = t[index[j]*3:index[j]*3+3] - temp_pam[j*3:j*3+3]
+            swarm_param.append(t)
         else:
             swarm_param.append(False)
         if nu.any(swarm_param[-1]):
@@ -498,6 +517,9 @@ def swarm_vect(pam, active_dust, active_losvd, rank, birth_rate, option):
                 out_param = out_param - weight * swarm_param[i] * u
                 out_dust = out_dust - weight * swarm_dust[i] * u
                 out_losvd = out_losvd - weight * swarm_losvd[i] * u
+            if option.swarmChi[rank]/option.swarmChi.min() > 100:
+                #print out_param, rank 
+                pass
         except ValueError:
             pass
     return out_param, out_dust, out_losvd, up_chance
