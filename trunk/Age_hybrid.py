@@ -898,21 +898,18 @@ class Topologies(object):
                 else:
                     i += 1
                 #get best fits
-                self.comm_world.isend((self.chibest,self.parambest,self.current), dest=0 , tag=2)
-                self.current = 0
-                self._update_buffer.append(self.comm_world.irecv(dest=0,tag=3))
-                i = 0
-                while i < len(self._update_buffer):
-                    if self._update_buffer[i].Get_status():
-                        try:
-                            self.chibest,self.parambest,self.global_iter = self._update_buffer[i].wait()
+            self.comm_world.isend((self.chibest,self.parambest,self.current), dest=0 , tag=2)
+            self.current = 0
+            self._update_buffer.append(self.comm_world.irecv(dest=0,tag=3))
+            i = 0
+            while i < len(self._update_buffer):
+                if self._update_buffer[i].Get_status():
+                    try:
+                        self.chibest,self.parambest,self.global_iter = self._update_buffer[i].wait()
                             #print 'reciveing'
-                            del(self._update_buffer[i])
-                        except:
-                            i += 1                    
-
-                
-
+                        del(self._update_buffer[i])
+                    except:
+                        i += 1                    
 
     def swarm_update(self,param, chi,bins):
         '''Updates positions of swarm using topology'''
