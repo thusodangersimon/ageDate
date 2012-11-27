@@ -35,9 +35,10 @@ from scipy.signal import convolve
 import pylab as lab
 from multiprocessing import Pool,pool
 
-def make_chi_grid(data,dust=None,points=500, Metal=None, Age=None):
+def make_chi_grid(data,dust=None,losvd=None,points=500, Metal=None, Age=None):
     'makes a 3d pic of metal,age,chi with input spectra 2-D only'
     fun=ag.MC_func(data)
+    fun.autosetup()
     ag.spect = fun.spect
     #create grid
     if nu.any(Metal) or nu.any(Age):
@@ -50,16 +51,18 @@ def make_chi_grid(data,dust=None,points=500, Metal=None, Age=None):
 
     param = nu.array(zip(metal.ravel(),age.ravel(),nu.ones_like(age.ravel())))
     #probably need to handel dust in a better way
-    dust_param = nu.zeros([len(param),2])
+    dust_param = nu.zeros_like(param[:,:2])
     if nu.any(dust):
         dust_param[:,0] = dust[0]
         dust_param[:,1] = dust[1]
-        
-    
+    losvd_param = nu.zeros((dust_param.shape[0],4))
+    if nu.any(losvd):
+        for i in range(len(losvd)):
+            losvd_param[:,i] = losvd[i]
     #start making calculations for chi squared value
     po,out=Pool(),[]
     for i in xrange(len(param)):
-        out.append(po.apply_async(func,args = (fun.data,param[i],dust_param[i],
+        out.append(po.apply_async(func,args = (fun.data,param[i],dust_param[i],losvd_param[i],
                             fun._lib_vals ,fun._age_unq,fun._metal_unq)))
     b=nu.array(map(get, out))
     po.close()
@@ -72,13 +75,15 @@ def make_chi_grid(data,dust=None,points=500, Metal=None, Age=None):
 def get(f):
     return f.get()
 
-def func(data,param,param_dust,lib_vals,age_unq,metal_unq):
+def func(data,param,param_dust,losvd,lib_vals,age_unq,metal_unq):
 
     bins = param.shape[0] / 3
     model = ag.get_model_fit_opt(param, lib_vals, age_unq,metal_unq, bins)
     model = ag.dust(nu.hstack((param, param_dust)), model)
-    N,chi = ag.N_normalize(data, model, bins)
-    return nu.hstack((param, param_dust,chi))
+    model = ag.LOSVD(model,losvd,[data[:,0].min(), data[:,0].max()])
+    model = ag.data_match(data, model, bins,True)
+    param[slice(2,bins*3,3)],chi = ag.N_normalize(data, model, bins)
+    return nu.hstack((param, param_dust,losvd,chi))
 
 
 def histo_plot(x,y,z=None):
