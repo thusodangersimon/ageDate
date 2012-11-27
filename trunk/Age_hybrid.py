@@ -42,18 +42,26 @@ def root_run(fun, topology, func, burnin=5000, itter=10**5, k_max=10):
     topologies'''
    #start RJMCMC SWARM 
     N = 3 #output number
-    if not rank == 0:
+    if not topology.rank == 0:
         #output is: [param, chi, bayes_fact, acept_rate, out_sigma, rank]
         print 'Starting rank %i on %s.'%(topology.rank_world,mpi.Get_processor_name())
+        #flush old buffers
+        topology.get_best()
+        while not topology.iter_stop:
+            topology.get_best()
         temp = rjmcmc_swarm(fun, topology, func, burnin)
         #temp = [param, chi, bayes_fact]
+        print topology.iter_stop
         print 'rank %i on %s is complete'%(topology.rank_world,mpi.Get_processor_name())
-        comm.barrier()
+        #topology.comm_world.isend(topology.rank_world,dest=0,tag=99)
+        print topology.iter_stop
+        topology.comm_world.barrier()
         for i in range(N):
-            comm.send(temp[i], dest=0)
+            topology.comm_world.send(temp[i], dest=0)
         return None,None,None
     else:
     #while rjmcmc is  root process is running update curent iterations and gather best fit for swarm
+        print 'starting root on %i on %s'%(topology.rank,mpi.Get_processor_name())
         stop_iter = burnin * topology.size_world + itter
         #dummy param for swarm
         time = Time.time()
@@ -61,35 +69,38 @@ def root_run(fun, topology, func, burnin=5000, itter=10**5, k_max=10):
         while (topology.global_iter <= stop_iter and topology.iter_stop):  
             #Time.sleep(5)
             #get swarm values from other workers depending on topology
-            topology.swarm_update(topology.parambest,topology.chibest,1)
+            topology.swarm_update(topology.parambest,topology.chibest, (nu.isfinite(topology.parambest).sum() - 6)/3)
             topology.get_best()
             #get total iterations
-        #global_iter  = comm.reduce(topology.current.value, root=0)
-        #global_iter = comm.bcast(global_iter , root=0)
-        #get find global best fit
-        #topology.chibest.value = comm.allreduce(topology.chibest.value,op=mpi.MIN)
-        #print current iterations
+            Time.sleep(.1)
             if Time.time() - time > 5:
                 print '%2.2f percent done at %i' %((float(topology.global_iter) / stop_iter) * 100., 
                                                    topology.global_iter)
                 sys.stdout.flush()
                 time = Time.time()
-                pik.dump((topology.swarm,topology.swarmChi),open('swarm','w'),2)
+                #print topology.current
+            #pik.dump((topology.swarm,topology.swarmChi),open('swarm','w'),2)
             i += 1
         #put in convergence diagnosis
+        #tell other workers to stop
         print 'Done sending stop signal'
-        for i in range(10):
-            topology.swarm_update(topology.parambest,topology.chibest,1)
         topology.iter_stop = False
-        topology.get_best()
+        t= Time.time()
+        while True:
+            topology.get_best()
+            Time.sleep(1)
+            if Time.time() -t >15: #or len(done) == topology.size_world:
+                break
+        
         #get results from other processes
+        print 'barrier'
         temp =[]
-        comm.barrier()
+        topology.comm_world.barrier()
         for i in xrange(1,topology.size_world):
             print 'getting data from %i and has '%(i)
             t=[]
             for k in xrange(N):
-                t.append( comm.recv(source=i))
+                t.append( topology.comm_world.recv(source=i))
             temp.append(t)
         try:
             param, chi, bayes = dic_data(temp, burnin)
@@ -231,9 +242,9 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3):
                                                active_dust,active_losvd))[kk]
             else:
                     option.parambest[kk] = nu.nan
-        print ('%i has best fit with chi of %2.2f and %i bins' 
-               %(global_rank, option.chibest, bins))
-        sys.stdout.flush()
+        #print ('%i has best fit with chi of %2.2f and %i bins' 
+               #%(global_rank, option.chibest, bins))
+        #sys.stdout.flush()
         #set current swarm value
     for kk in range(len(option.swarm[rank])):
         if kk<bins*3+2+4:
@@ -304,6 +315,10 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3):
                                                        active_losvd))))
             
             Nacept[str(bins)] += 1
+            #put temperature on order of chi calue
+            if abs(nu.log10(T_start /chi[str(bins)][-1])) > 2 and T_cuurent < burnin:
+                #if not nu.isinf(nu.min(chi[str(bins)])): #put temperature on order of chi calue
+                T_start = chi[str(bins)][-1]
             #see if global best fit
             if option.chibest > chi[str(bins)][-1]:
                 #set global in sharred arrays
@@ -315,12 +330,10 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3):
                                                active_dust, active_losvd))[kk]
                     else:
                         option.parambest[kk] = nu.nan
-                if not nu.isinf(nu.min(chi[str(bins)])): #put temperature on order of chi calue
-                    T_start = nu.round(nu.min(chi[str(bins)]))+1.
 
                 #option.chibest.release();option.parambest.release()
-                print('%i has best fit with chi of %2.2f and %i bins, %i steps left' %(global_rank,option.chibest,bins,j_timeleft-j))
-                sys.stdout.flush()
+                #print('%i has best fit with chi of %2.2f and %i bins, %i steps left' %(global_rank,option.chibest,bins,j_timeleft-j))
+                #sys.stdout.flush()
                 #break
         else:
             param[str(bins)].append(nu.copy(param[str(bins)][-1]))
@@ -346,7 +359,8 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3):
         ############################determine if chain stuck and shake it out of it
         t_unsitc.append(Time.time())
         sigma[str(bins)],sigma_dust,sigma_losvd = unstick(acept_rate[str(bins)],param[str(bins)][-2000:],
-                                                          sigma[str(bins)],sigma_dust, sigma_losvd, j, fun._dust, fun._losvd)
+                                                          sigma[str(bins)],sigma_dust, sigma_losvd, j, fun._dust, fun._losvd
+                                                          , option.rank,T_cuurent)
         t_unsitc[-1]-=Time.time()
         #############################decide if birth or death
         t_birth.append(Time.time())
@@ -418,11 +432,12 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3):
         t_comm.append(Time.time())
         option.swarm_update(nu.hstack((active_param[str(bins)],active_dust,active_losvd)),
                             chi[str(bins)][-1],bins)
+        
         #get other wokers param
         #if  option.current % 10 == 0:
         option.get_best()
         t_comm[-1]-=Time.time()
-        pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm),open('time_%i.pik'%option.rank_world,'w'),2)
+        #pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm),open('time_%i.pik'%option.rank_world,'w'),2)
     #####################################return once finished 
     for i in param.keys():
         chi[i]=nu.array(chi[i])
@@ -436,7 +451,7 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3):
         #acept_rate[i]=nu.array(acept_rate[i])
         #out_sigma[i]=nu.array(out_sigma[i])
         bayes_fact[i] = nu.array(bayes_fact[i])
-    pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm),open('time_%i.pik'%option.rank_world,'w'),2)
+    pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm,param,chi),open('time_%i.pik'%option.rank_world,'w'),2)
     return param, chi, bayes_fact,acept_rate, out_sigma,rank
     #q_final.put((param, chi, bayes_fact,acept_rate, out_sigma,rank))
     '''end_rank = 9999999
@@ -466,7 +481,7 @@ def swarm_vect(pam, active_dust, active_losvd, rank, birth_rate, option):
     #prob to birth a new ssp
     up_chance = 0.
     #random weight for each swarm array
-    u = nu.random.rand()
+    u = nu.random.rand() *.1
     swarm_param,swarm_dust,swarm_losvd = [],[],[]
     bins = pam.shape[0]/3
     for i in xrange(len(option.swarmChi)):
@@ -488,13 +503,13 @@ def swarm_vect(pam, active_dust, active_losvd, rank, birth_rate, option):
             for j in index:
                 t.append(temp_pam[j*3:j*3+3])
             swarm_param.append(pam - nu.ravel(t))
-        elif temp_pam.shape[0] < pam.shape[0] :
+            '''elif temp_pam.shape[0] < pam.shape[0] :
             #if not in same number of param take closest one or one with most weight
             index = pam[range(2,bins*3,3)].argsort()[-temp_bins:]
             t = pam.copy()
             for j in xrange(len(index)):
                 t[index[j]*3:index[j]*3+3] = t[index[j]*3:index[j]*3+3] - temp_pam[j*3:j*3+3]
-            swarm_param.append(t)
+            swarm_param.append(t)'''
         else:
             swarm_param.append(False)
         if nu.any(swarm_param[-1]):
@@ -613,7 +628,8 @@ def SA_polymodal(i,length,T_start,T_stop, modes=1):
     else:
         return 1.
 
-def  unstick(acept_rate, param, sigma, sigma_dust, sigma_losvd, iteration, is_dust, is_losvd):
+def  unstick(acept_rate, param, sigma, sigma_dust, sigma_losvd, iteration, is_dust, is_losvd,rank,
+             T_current):
     '''checks to see if worker is stick and injects a temperature into worker to get it out'''
     if not iteration % 50 == 0:
         #only check every once in a while
@@ -621,7 +637,7 @@ def  unstick(acept_rate, param, sigma, sigma_dust, sigma_losvd, iteration, is_du
     rate = nu.array(acept_rate)
     Param = nu.array(param)[:,1]
     if nu.median(rate[-2000:]) < .1 and len(nu.unique(Param)) < 200 and len(Param) > 999:
-        print 'worker is stuck'
+        print 'worker %i is stuck' %rank
         if nu.any(sigma.diagonal() < 10**-10):
             sigma = nu.zeros_like(sigma) + .1
             sigma_dust = nu.ones((2,2))/1.
@@ -631,6 +647,63 @@ def  unstick(acept_rate, param, sigma, sigma_dust, sigma_losvd, iteration, is_du
             return sigma*10 ,sigma_dust*10, sigma_losvd*10
     else:
         return sigma ,sigma_dust, sigma_losvd
+
+def Convergence_tests(param,keys,n=1000):
+    #uses Levene's test to see if var between chains are the same if that is True
+    #uses f_oneway (ANOVA) to see if means are from same distrubution 
+    #if both are true then tells program to exit
+    #uses last n chains only
+    for i in param:
+        for j in keys:
+            i[j]=nu.array(i[j])
+    ad_k
+    D_result={}
+    for i in keys:
+        for k in range(param[0][i].shape[1]):
+            samples='' 
+            for j in range(len(param)):
+                samples+='param['+str(j)+']["'+i+'"][-'+str(int(n))+':,'+str(k)+'],'
+        D_result[i]=eval('ad_k('+samples[:-1]+')')[-1]>.05
+    if any(D_result.values()):
+        print 'A-D test says they are the same'
+        return True
+    #try kustkal test
+    A_result={}
+    out=False
+    for i in keys:
+        A_result[i]=nu.zeros(param[0][i].shape[1])
+        for k in range(param[0][i].shape[1]):
+            samples='' 
+            for j in range(len(param)):
+                samples+='param['+str(j)+']["'+i+'"][-'+str(int(n))+':,'+str(k)+'],'
+            A_result[i][k]=eval('kruskal('+samples[:-1]+')')[1]
+        if nu.all(A_result[i]>.05): #if kruskal test is true
+            out=True
+            print "ANOVA says chains have converged. Ending program"
+            return True            
+        else:
+            print '%i out of %i parameters have same means' %(sum( A_result[i]>.05),
+                                                              param[0][i].shape[1])
+    #do ANOVA to see if means are same
+    if out:
+        L_result={}
+        out=False
+        #turn into an array
+        for i in keys:
+            param[0][i]=nu.array(param[0][i])
+            L_result[i]=nu.zeros(param[0][i].shape[1])
+            for k in range(param[0][i].shape[1]):
+                samples='' 
+                for j in range(len(param)):
+                    samples+='param['+str(j)+']["'+i+'"][-'+str(int(n))+':,'+str(k)+'],'
+                L_result[i][k]=eval('levene('+samples[:-1]+')')[1]
+            if nu.all(L_result[i]>.05): #if leven test is true
+                print "Levene's test is true for %s bins" %i
+                return True
+            else:
+                print '%i out of %i parameters have same varance' %(sum( L_result[i]>.05),
+                                                                param[0][i].shape[1])
+    return False
 
 #====================================================
 class Topologies(object):
@@ -660,7 +733,7 @@ class Topologies(object):
         self.send_to = nu.arange(self.size)
         self.send_to = self.send_to[self.send_to != self.rank]
         self.reciv_from = self.send_to.copy()        
-        print self.rank, self.send_to, self.reciv_from
+        #print self.rank, self.send_to, self.reciv_from
 
 
     def Ring(self):
@@ -694,9 +767,9 @@ class Topologies(object):
             if nu.any(nu.array(self.comm.Get_neighbors(i)) == self.rank) and i != self.rank:
                 self.reciv_from.append(i)
         self.reciv_from = nu.array(self.reciv_from)
-        print self.rank, self.send_to, self.reciv_from
+        #print self.rank, self.send_to, self.reciv_from
 
-    def Cliques(self, N=3):
+    def Cliques(self, N=10):
         #N = 3
         self.comm_world = mpi.COMM_WORLD
         self.rank_world = self.comm_world.Get_rank()
@@ -716,7 +789,7 @@ class Topologies(object):
         index,edges = [],[]
         #workers
         j = 0
-        print 'world',self.size_world 
+        #print 'world',self.size_world 
         for i in range(self.size_world - len(head_nodes)):
             if len(index) == 0:
                 index.append(len(workers[j]))
@@ -725,6 +798,8 @@ class Topologies(object):
             edges.append(workers[j])
             if (i + 1) % (len(workers[j]) - 1) == 0:
                 j += 1
+            if j >= len(workers):
+                break
         #head nodes
         for i in head_nodes:
             temp = nu.unique(nu.hstack((workers[i],head_nodes)))
@@ -748,7 +823,7 @@ class Topologies(object):
             if nu.any(nu.array(self.comm.Get_neighbors(i)) == self.rank) and i != self.rank:
                 self.reciv_from.append(i)
         self.reciv_from = nu.array(self.reciv_from)
-        print self.rank, self.send_to, self.reciv_from
+        #print self.rank, self.send_to, self.reciv_from
 
     def Square(self):
         #Each worker communicates with max of 4 other workers
@@ -837,7 +912,7 @@ class Topologies(object):
             if nu.any(nu.array(self.comm.Get_neighbors(i)) == self.rank) and i != self.rank:
                 self.reciv_from.append(i)
         self.reciv_from = nu.array(self.reciv_from)
-        print self.rank, self.send_to, self.reciv_from
+        #print self.rank, self.send_to, self.reciv_from
 
     #====Update stuff====
     def thuso_min(self, x, y):
@@ -848,68 +923,68 @@ class Topologies(object):
 
     def get_best(self):
         #updates chain info
-        '''#bottleneck
-        self.chibest ,self.parambest= self.comm_world.allreduce( 
-            (self.chibest,self.parambest), op = self.thuso_min)
-           #self.parambest = self.comm_world.bcast( self.parambest,root=
-        self.global_iter = self.comm_world.allreduce(self.current,op = mpi.SUM)
-        self.iter_stop = self.comm_world.bcast(self.iter_stop,root=0)'''
-        #checks to see if should stop
+       #checks to see if should stop
         if self.rank_world == 0:
             for i in range(1,self.size_world):
                 self.comm_world.isend(self.iter_stop, i , tag=1)
                 self._update_buffer.append(self.comm_world.irecv(dest=i,tag=2))
             i = 0
-            while i < len(self._update_buffer):
+            while i < len(self._update_buffer)  :
+                if not self.iter_stop:
+                    break
                 if self._update_buffer[i].Get_status():
                     try:
-                        chibest,parambest,current = self._update_buffer[i].wait()
-                        #print 'reciveing'
+                        chibest,parambest,current,rank = self._update_buffer[i].wait()
                         del(self._update_buffer[i])
                         #find best fit
                         if chibest < self.chibest:
                             self.chibest = chibest + 0
                             self.parambest = parambest.copy()
+                            num = (nu.isfinite(self.parambest).sum() - 6)/3
+                            print '%i has best fit with a chi of %2.2f and %i bins' %(rank,self.chibest,num)
+                            sys.stdout.flush()
                         #update global iter
                         self.global_iter += current
-                
                     except:
-                        i += 1                    
-
+                        i += 1    
+                else:
+                    i += 1 
             #send updated info
+            #print 'sent'
             for i in range(1,self.size_world):
                 self.comm_world.isend((self.chibest,self.parambest,self.global_iter),
                                       dest=i,tag=3)
-
+            self.current += 1
         else:
             #check for old tags
-            self._stop_buffer.append(self.comm_world.irecv(dest=0 , tag=1))
-            i = 0
-            while i < len(self._stop_buffer):
-                if self._stop_buffer[i].Get_status():
-                    #print 'reciveing'
-                    try:
-                        T = self._stop_buffer[i].wait()
-                        if not T == None:
-                            self.iter_stop = T
-                        del(self._stop_buffer[i])
-                    except:
-                        i += 1                    
-                else:
-                    i += 1
+            if len(self._stop_buffer) == 0:
+                self._stop_buffer.append(self.comm_world.irecv(dest=0 , tag=1))
+            if self._stop_buffer[0].Get_status():
+                try:
+                    T = self._stop_buffer[0].wait()
+                    if not T == None:
+                        self.iter_stop = T
+                    del(self._stop_buffer[0])
+                except:
+                    pass
                 #get best fits
-            self.comm_world.isend((self.chibest,self.parambest,self.current), dest=0 , tag=2)
-            self.current = 0
-            self._update_buffer.append(self.comm_world.irecv(dest=0,tag=3))
-            i = 0
-            while i < len(self._update_buffer):
-                if self._update_buffer[i].Get_status():
-                    try:
-                        self.chibest,self.parambest,self.global_iter = self._update_buffer[i].wait()
+            if self.current == 200:
+                self.comm_world.isend((self.chibest,self.parambest,self.current,self.comm_world.rank), dest=0 , tag=2)
+                self.current = 0
+            if len(self._update_buffer) == 0:
+                self._update_buffer.append(self.comm_world.irecv(dest=0,tag=3))
+            #t_2 = Time.time()
+                #print len(self._update_buffer)
+            if self._update_buffer[0].Get_status():
+                try:
+                    self.chibest,self.parambest,self.global_iter = self._update_buffer[i].wait()
                             #print 'reciveing'
-                        del(self._update_buffer[i])
-                    except:
-                        i += 1                    
+                    del(self._update_buffer[i])
+                except:
+                    pass
+            #t_2 -= Time.time()            
+            #return t_1,t_2
+            
 
     def swarm_update(self,param, chi,bins):
         '''Updates positions of swarm using topology'''
@@ -940,15 +1015,10 @@ class Topologies(object):
                 i += 1
     
         for i in self.reciv_from:
-            self.buffer.append([(self.comm.irecv(dest=int(i), tag=int(5)),i),
+            self.buffer.append([(self.comm.irecv(dest=int(i), tag=5),i),
                                 (self.comm.irecv(dest=i, tag=6),i)])
-            
-            '''#slow 
-            self.swarm = self.comm.alltoall(self.swarm)
-            self.swarmChi = self.comm.alltoall(self.swarmChi)'''
-
     
-    def __init__(self, top = 'cliques', k_max=16):
+    def __init__(self, top = 'cliques', k_max=10):
         self._k_max = k_max
         #number of iterations done
         self.current = 0
@@ -999,12 +1069,18 @@ if __name__ == '__main__':
     fun.autosetup()
     if rank == 0:
         print info,size
-    print size,rank
-    for i in ['all','ring','cliques','square']:
+    #print size,rank
+    for i in ['ring','cliques','square','all']:
         Top = Topologies(i)
-        print i
+        #print i, Top.iter_stop
         Top.comm_world.barrier()
-        param, chi, bayes = root_run(fun.send_class, Top, itter=10**6, burnin=1000 , k_max=16, func=vanilla)
+        param, chi, bayes = root_run(fun.send_class, Top, itter=10**6, burnin=5000 , k_max=10, func=vanilla)
         if rank == 0:
             pik.dump((param,chi,data),open(i+info[0]+'.pik','w'),2)
+            #copy times into dir
+            os.popen('mkdir %s' %i)
+            os.popen('mv *.pik %s/' %i)
             print info
+            Top.comm_world.barrier()
+        else:
+            Top.comm_world.barrier()
