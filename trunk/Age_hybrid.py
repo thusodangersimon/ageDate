@@ -33,7 +33,7 @@ from Age_RJMCMC import *
 from mpi4py import MPI as mpi
 import time as Time
 import cPickle as pik
-#import csv
+import csv
 #import pylab as lab
 import os
 
@@ -51,10 +51,8 @@ def root_run(fun, topology, func, burnin=5000, itter=10**5, k_max=10):
             topology.get_best()
         temp = rjmcmc_swarm(fun, topology, func, burnin)
         #temp = [param, chi, bayes_fact]
-        print topology.iter_stop
         print 'rank %i on %s is complete'%(topology.rank_world,mpi.Get_processor_name())
         #topology.comm_world.isend(topology.rank_world,dest=0,tag=99)
-        print topology.iter_stop
         topology.comm_world.barrier()
         for i in range(N):
             topology.comm_world.send(temp[i], dest=0)
@@ -157,7 +155,7 @@ def none(active_param, active_dust, active_losvd, rank, birth_rate, option,T_cuu
 #main function  
 def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3):
     nu.random.seed(random_permute(current_process().pid))
-    #file = csv.writer(open('out'+str(rank)+'txt','w'))
+    #file = csv.writer(open('out'+str(option.comm_world.rank)+'.txt','w'))
     #initalize boundaries
     #option._k_max = k_max
     lib_vals = fun._lib_vals
@@ -257,7 +255,7 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3):
     T_cuurent,Nexchange_ratio = 0.0,1.0
     size = 0
     j,T,j_timeleft = 1,9.,nu.random.exponential(100)
-    T_start,T_stop = 3*10**5., 1.
+    T_start,T_stop = option.chibest, 1.
     birth_rate = 0.5
     out_dust_sig, out_losvd_sig = [sigma_dust], [sigma_losvd]
     #profiling
@@ -266,12 +264,12 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3):
         if T_cuurent% 1000 == 0:
             print "hi, I'm at itter %i, chi %f from %s bins and from %i SA %2.2f" %(len(param[str(bins)]),chi[str(bins)][-1],bins, global_rank,SA_polymodal(T_cuurent,burnin,T_start,T_stop))
             sys.stdout.flush()
-
+        #file.writerow(nu.hstack((active_param[str(bins)],chi[str(bins)][-1])))
         #sample from distiburtion
         t_pro.append(Time.time())
-        
         active_param[str(bins)] = fun.proposal(active_param[str(bins)],
                                                sigma[str(bins)])
+
         if fun._dust:
             active_dust = fun.proposal(active_dust,sigma_dust)
         if fun._losvd:
@@ -280,15 +278,11 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3):
         t_pro[-1] -= Time.time()
         #swarm stuff
         t_swarm.append(Time.time())
-        #if option.rank == 1:
-            #print 'before',active_param[str(bins)] 
         active_param[str(bins)], active_dust, active_losvd, birth_rate = swarm_function(active_param[str(bins)],
                                                                                         active_dust, active_losvd, rank, birth_rate,
                                                                                         option,T_cuurent, burnin, fun, acept_rate[str(bins)][-1] )
-        #if option.rank == 1:
-            #print 'after',active_param[str(bins)] 
-
         t_swarm[-1] -=Time.time()
+        #file.writerow(nu.hstack((active_param[str(bins)],chi[str(bins)][-1])))
         #calculate new model and chi
         t_lik.append(Time.time())
         chi[str(bins)].append(0.)
@@ -316,7 +310,7 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3):
             
             Nacept[str(bins)] += 1
             #put temperature on order of chi calue
-            if abs(nu.log10(T_start /chi[str(bins)][-1])) > 2 and T_cuurent < burnin:
+            if T_start > chi[str(bins)][-1] and T_cuurent < burnin:
                 #if not nu.isinf(nu.min(chi[str(bins)])): #put temperature on order of chi calue
                 T_start = chi[str(bins)][-1]
             #see if global best fit
@@ -478,10 +472,11 @@ def swarm_vect(pam, active_dust, active_losvd, rank, birth_rate, option):
     if not in same bin number, just chnages dust,losvd and birthrate to pull it towards
     other memebers'''
     tot_chi = 0.
+    chi = []
     #prob to birth a new ssp
     up_chance = 0.
     #random weight for each swarm array
-    u = nu.random.rand() *.1
+    u = nu.random.rand() 
     swarm_param,swarm_dust,swarm_losvd = [],[],[]
     bins = pam.shape[0]/3
     for i in xrange(len(option.swarmChi)):
@@ -490,19 +485,20 @@ def swarm_vect(pam, active_dust, active_losvd, rank, birth_rate, option):
         temp_array = temp_array[nu.isfinite(temp_array)]
         if len(temp_array) == 0:
             continue
+        chi.append(1/option.swarmChi[i])
         temp_pam = temp_array[:-6]
         temp_dust,temp_losvd = temp_array[-6:-4], temp_array[-4:]
         temp_bins = temp_pam.shape[0]/3
         #get direction to other in swarm
         if temp_pam.shape[0] == pam.shape[0]:
-            swarm_param.append(pam - temp_pam)
+            swarm_param.append(temp_pam - pam)
         elif temp_pam.shape[0] > pam.shape[0]:
             #if not in same number of param take closest one or one with most weight
             index = temp_pam[range(2,temp_bins*3,3)].argsort()[-bins:]
             t =[]
             for j in index:
                 t.append(temp_pam[j*3:j*3+3])
-            swarm_param.append(pam - nu.ravel(t))
+            swarm_param.append( nu.ravel(t)- pam)
             '''elif temp_pam.shape[0] < pam.shape[0] :
             #if not in same number of param take closest one or one with most weight
             index = pam[range(2,bins*3,3)].argsort()[-temp_bins:]
@@ -513,8 +509,8 @@ def swarm_vect(pam, active_dust, active_losvd, rank, birth_rate, option):
         else:
             swarm_param.append(False)
         if nu.any(swarm_param[-1]):
-            swarm_dust.append(active_dust - temp_dust)
-            swarm_losvd.append(active_losvd - temp_losvd)
+            swarm_dust.append(temp_dust - active_dust)
+            swarm_losvd.append(temp_losvd - active_losvd)
         else:
             swarm_dust.append(False)
             swarm_losvd.append(False)
@@ -524,14 +520,14 @@ def swarm_vect(pam, active_dust, active_losvd, rank, birth_rate, option):
             up_chance += 1/option.swarmChi[i]
     up_chance /= tot_chi
     #make out array
-    out_param, out_dust, out_losvd = pam, active_dust, active_losvd
+    out_param, out_dust, out_losvd = pam.copy(), active_dust.copy(), active_losvd.copy()
     for i in xrange(len(swarm_param)):
         try:
-            weight = 1/option.swarmChi[i]/ tot_chi
+            weight = (chi[i]) / tot_chi
             if nu.any(swarm_param[i]):
-                out_param = out_param - weight * swarm_param[i] * u
-                out_dust = out_dust - weight * swarm_dust[i] * u
-                out_losvd = out_losvd - weight * swarm_losvd[i] * u
+                out_param = out_param + weight * swarm_param[i] * u
+                out_dust = out_dust + weight * swarm_dust[i] * u
+                out_losvd = out_losvd + weight * swarm_losvd[i] * u
             if option.swarmChi[rank]/option.swarmChi.min() > 100:
                 #print out_param, rank 
                 pass
