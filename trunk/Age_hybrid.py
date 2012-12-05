@@ -693,8 +693,7 @@ class Topologies(object):
         self.comm_world = mpi.COMM_WORLD
         self.rank_world = self.comm_world.Get_rank()
         self.size_world = self.comm_world.Get_size()
-       
- 
+
     def Ring(self):
         '''makes ring topology'''
         self.comm_world = mpi.COMM_WORLD
@@ -836,6 +835,10 @@ class Topologies(object):
         self.comm = self.comm_world.Create_graph(ind, n_edge, True)
         self.rank = self.comm.Get_rank()
         self.size = self.comm.Get_size()
+    
+    def get_neighbors(self,rank):
+        '''for All, since doesn't use make cartisian grid'''
+        return range(self.size)
 
     #====Update stuff====
     def thuso_min(self, x, y):
@@ -850,7 +853,6 @@ class Topologies(object):
         if self.rank_world == 0:
             #does stop signal to all
             for i in xrange(1,self.comm_world.size):
-                print self.iter_stop
                 self._stop_buffer.append(self.comm_world.Send_init((
                             self.iter_stop,mpi.INT),dest=i,tag=1))
                 #recive best chi,param and current iteration from others
@@ -882,8 +884,7 @@ class Topologies(object):
             self.buffer.append(self.comm.Send_init((self.swarm[:,0],mpi.DOUBLE),dest=self.send_to[i],tag=5))
             self.buffer.append(self.comm.Send_init((self.swarmChi[:,0],mpi.DOUBLE),dest=self.send_to[i],tag=6))
         for i in xrange(len(self.reciv_from)):
-                #recive other stuff
-            #print self.swarmChi[:,i+1]
+            #recive other stuff
             self.buffer.append(self.comm.Recv_init((self.swarmChi[:,i+1],mpi.DOUBLE),source=self.reciv_from[i],tag=6))
             self.buffer.append(self.comm.Recv_init((self.swarm[:,i+1],mpi.DOUBLE),source=self.reciv_from[i],tag=5))
   
@@ -928,13 +929,20 @@ class Topologies(object):
         
     def make_swarm(self):
         #who to send to and who to recieve from
-        self.send_to = nu.array(self.comm.Get_neighbors(self.rank))
+        try:
+            self.send_to = nu.array(self.comm.Get_neighbors(self.rank))
+        except AttributeError:
+            #if all no get_neighbors will be found
+            self.send_to = nu.array(self.get_neighbors(self.rank))
         self.send_to = nu.unique(self.send_to[self.send_to != self.rank])
         self.reciv_from = []
-        for i in xrange(self.size):
-            if nu.any(nu.array(self.comm.Get_neighbors(i)) == self.rank) and i != self.rank:
-                self.reciv_from.append(i)
-        self.reciv_from = nu.array(self.reciv_from)
+        try:
+            for i in xrange(self.size):
+                if nu.any(nu.array(self.comm.Get_neighbors(i)) == self.rank) and i != self.rank:
+                    self.reciv_from.append(i)
+            self.reciv_from = nu.array(self.reciv_from)
+        except AttributeError:
+            self.reciv_from = self.send_to.copy()
         #makes large array for sending and reciving
         self.swarm = nu.zeros([len(self.reciv_from)+1, self._k_max * 3 + 2 + 4],order='Fortran') + nu.nan
         self.swarmChi = nu.zeros((1,len(self.reciv_from)+1),order='Fortran') + nu.inf
@@ -992,7 +1000,7 @@ if __name__ == '__main__':
     if rank == 0:
         print info,size
     #print size,rank
-    for i in ['cliques','ring','square','all']:
+    for i in ['all','ring','square','cliques']:
         Top = Topologies(i)
         #print i, Top.iter_stop
         Top.comm_world.barrier()
