@@ -44,20 +44,16 @@ def root_run(fun, topology, func, burnin=5000, itter=10**5, k_max=10):
     N = 3 #output number
     if not topology.rank == 0:
         #output is: [param, chi, bayes_fact, acept_rate, out_sigma, rank]
-        print 'Starting rank %i on %s.'%(topology.rank_world,mpi.Get_processor_name())
-        #flush old buffers
-        topology.get_best()
-        while not topology.iter_stop:
-            topology.get_best()
+        print 'Starting rank %i on %s.'%(topology.rank_world,mpi.Get_processor_name())    
         temp = rjmcmc_swarm(fun, topology, func, burnin)
         #temp = [param, chi, bayes_fact]
         #print topology.iter_stop
         print 'rank %i on %s is complete'%(topology.rank_world,mpi.Get_processor_name())
         #topology.comm_world.isend(topology.rank_world,dest=0,tag=99)
         #print topology.iter_stop
-        topology.comm_world.barrier()
+        #topology.comm_world.barrier()
         for i in range(N):
-            topology.comm_world.send(temp[i], dest=0)
+            topology.comm_world.send(temp[i], dest=0,tag=99)
         return None,None,None
     else:
     #while rjmcmc is  root process is running update curent iterations and gather best fit for swarm
@@ -66,7 +62,7 @@ def root_run(fun, topology, func, burnin=5000, itter=10**5, k_max=10):
         #dummy param for swarm
         time = Time.time()
         i = 1
-        while (topology.global_iter <= stop_iter and topology.iter_stop): 
+        while (topology.global_iter <= stop_iter and nu.any(topology.iter_stop)): 
             #get swarm values from other workers depending on topology
             topology.get_best()
             topology.swarm_update(topology.parambest,topology.chibest, (nu.isfinite(topology.parambest).sum() - 6)/3)
@@ -82,25 +78,34 @@ def root_run(fun, topology, func, burnin=5000, itter=10**5, k_max=10):
             i += 1
         #put in convergence diagnosis
         #tell other workers to stop
-        print 'Done sending stop signal'
-        topology.iter_stop[0] = False
+        print 'Sending stop signal.'
+        for i in xrange(1,topology.comm_world.size):
+            topology.iter_stop[:,i] = 0
         t= Time.time()
         while True:
-            topology.get_best()
-            Time.sleep(1)
+            topology.get_best(True)
+            #Time.sleep(1)
             if Time.time() -t >15: #or len(done) == topology.size_world:
                 break
         
         #get results from other processes
-        print 'barrier'
+        print 'Root reciving.'
         temp =[]
-        topology.comm_world.barrier()
-        for i in xrange(1,topology.size_world):
-            print 'getting data from %i and has '%(i)
-            t=[]
-            for k in xrange(N):
-                t.append( topology.comm_world.recv(source=i))
-            temp.append(t)
+        i= 1
+        time = Time.time() 
+        while Time.time() - time < 60:
+        #for i in xrange(1,topology.size_world):
+            if topology.comm_world.Iprobe(source=i,tag=99):
+                print 'getting data from %i '%(i)
+                t=[]
+                for k in xrange(N):
+                    t.append( topology.comm_world.recv(source=i,tag=99))
+                temp.append(t)
+                print 'done from %i '%(i)
+            i+=1
+            if i > topology.comm_world.size -1:
+                i = 1
+        print 'done reciving'
         try:
             param, chi, bayes = dic_data(temp, burnin)
         except IndexError:
@@ -415,8 +420,9 @@ def rjmcmc_swarm(fun, option, swarm_function=vanilla, burnin=5*10**3):
         t_house[-1]-=Time.time()
         #swarm update
         t_comm.append(Time.time())
-        option.swarm_update(nu.hstack((active_param[str(bins)],active_dust,active_losvd)),
-                            chi[str(bins)][-1],bins)
+        if T_cuurent<burnin or T_cuurent % 100 == 0:
+            option.swarm_update(nu.hstack((active_param[str(bins)],active_dust,active_losvd)),
+                                chi[str(bins)][-1],bins)
         
         #get other wokers param
         if  option.current % 200 == 0:
@@ -672,6 +678,10 @@ def Convergence_tests(param,keys,n=1000):
                                                                 param[0][i].shape[1])
     return False
 
+def get_crash(path):
+    '''recovers data from crash run'''
+    pass
+
 #====================================================
 class Topologies(object):
     """Topologies( cpus='max'. top='cliques', k_max=16)
@@ -852,9 +862,10 @@ class Topologies(object):
         #print self.send_to,self.reciv_from,self.swarmChi
         if self.rank_world == 0:
             #does stop signal to all
+            self.iter_stop = nu.ones((1,self.comm_world.size),dtype=int)
             for i in xrange(1,self.comm_world.size):
                 self._stop_buffer.append(self.comm_world.Send_init((
-                            self.iter_stop,mpi.INT),dest=i,tag=1))
+                            self.iter_stop[:,i],mpi.INT),dest=i,tag=1))
                 #recive best chi,param and current iteration from others
             #make chibest,parambest and current temp arrays
             self._chibest = {}
@@ -888,16 +899,16 @@ class Topologies(object):
             self.buffer.append(self.comm.Recv_init((self.swarmChi[:,i+1],mpi.DOUBLE),source=self.reciv_from[i],tag=6))
             self.buffer.append(self.comm.Recv_init((self.swarm[:,i+1],mpi.DOUBLE),source=self.reciv_from[i],tag=5))
   
-    def get_best(self):
+    def get_best(self, op=False):
        #updates chain info
        #checks to see if should stop
-        #if self.rank_world == 0:
-        mpi.Prequest.Startall(self._stop_buffer)
-        mpi.Prequest.Testall(self._stop_buffer)
         mpi.Prequest.Startall(self._update_buffer)
         if self.rank_world == 0:
-            mpi.Prequest.Testall(self._update_buffer)
-            #find best fit
+            mpi.Prequest.Waitany(self._update_buffer)
+            if op:
+                mpi.Prequest.Startall(self._stop_buffer)
+                mpi.Prequest.Waitall(self._stop_buffer)
+              #find best fit
             for i in self._current.keys():
                 #print self._parambest[i],i
                 if self._current[i] > 199:
@@ -911,10 +922,14 @@ class Topologies(object):
                     print '%i has best fit with a chi of %2.2f and %i' %(int(i),self.chibest,num)                    
                     sys.stdout.flush()
         else:
-            mpi.Prequest.Waitall(self._update_buffer)
+            mpi.Prequest.Testall(self._update_buffer)
+            if self.comm_world.Iprobe(source=0, tag=1):
+                Time.sleep(5)
+                mpi.Prequest.Startall(self._stop_buffer)
+                mpi.Prequest.Waitall(self._stop_buffer)
             if self.current > 199:
                 self.current = nu.array([[0]])
-            
+                #print self.iter_stop
 
     def swarm_update(self,param, chi,bins):
         '''Updates positions of swarm using topology'''
@@ -925,7 +940,7 @@ class Topologies(object):
                 self.swarm[:,0][kk] = nu.nan
         self.swarmChi[:,0] = chi
         mpi.Prequest.Startall(self.buffer)
-        mpi.Prequest.Testall(self.buffer)
+        mpi.Prequest.Testany(self.buffer)
         
     def make_swarm(self):
         #who to send to and who to recieve from
@@ -1000,7 +1015,7 @@ if __name__ == '__main__':
     if rank == 0:
         print info,size
     #print size,rank
-    for i in ['all','ring','square','cliques']:
+    for i in ['ring','square','cliques', 'all']:
         Top = Topologies(i)
         #print i, Top.iter_stop
         Top.comm_world.barrier()
