@@ -86,7 +86,8 @@ class memoized(object):
 ###spectral lib stuff####
 global lib_path,spect
 lib_path = '/home/thuso/Phd/Spectra_lib/'
-try:
+spect,info = None,None
+'''try:
     #load in spectral library, if default paths isn't correct ask
     #for correct path to lib
     spect,info = load_spec_lib(lib_path)  
@@ -96,7 +97,7 @@ except OSError :
     if not lib_path[-1] == '/':
         lib_path += '/'
     spect,info = load_spec_lib(lib_path)
-               
+    '''              
 def find_az_box(param, age_unq, metal_unq):
     #find closest metal
     line = None
@@ -581,9 +582,12 @@ def gauss1(diff_wave,  wave_current,  sigma,  h3,  h4):
 class MC_func:
     '''Does everything the is required for and Age_date mcmc sampler'''
     def __init__(self, data,option='rjmc', burnin=10**4, itter=5*10**5,
-                 cpus=cpu_count(), use_dust=True, use_lovsd=True,bins=None):
+                 cpus=cpu_count(), use_dust=True, use_lovsd=True,spec_lib='BC03.splib',bins=None):
         #match spectra for use in class /Turned off due to redshift fitting
-        global spect
+        global spect,info
+       #load spectra or use default
+        if not nu.any(spect): 
+          spect,info = load_spec_lib(lib_path,spec_lib)
         self.spect = nu.copy(spect)
         self.data = nu.copy(data)
         #normalized so area under curve is 1 to keep chi 
