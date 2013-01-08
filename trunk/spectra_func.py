@@ -63,7 +63,7 @@ def get_fitting_info(lib_path='/home/thuso/Phd/Code/Spectra_lib/'):
 
     return out,lib
 
-def load_spec_lib(lib_path='/home/thuso/Phd/Spectra_lib/'):
+def load_spec_lib(lib_path='/home/thuso/Phd/Spectra_lib/', lib='BC03.splib'):
     '''loads all spectra into libary first load of lib may be slow.
     .splib files take precendence over .spec files'''
     #check if exsiting .splib file 
@@ -74,13 +74,10 @@ def load_spec_lib(lib_path='/home/thuso/Phd/Spectra_lib/'):
         for i in files:
              if i.endswith('splib'):
                  splib_files.append(i)
-        if len(splib_files) > 1: #more thank 1 splib file to choose from
-            a = False
-            while not a:
-                a = raw_input('Please select lib to load %s ' %splib_files)
+        if lib in splib_files:
+            return pik.load(open(lib_path + lib))
         else:
-            a = splib_files[0]
-        return pik.load(open(lib_path + a))
+            raise IOError('SSP Libraiy does not exsist.')
     else:
         print 'First Load, May take some time'
         outname = raw_input('Please Give name of input Lib ')
