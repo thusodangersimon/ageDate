@@ -62,7 +62,7 @@ class memoized(object):
 
    def __call__(self, *args):
       #works different for different functions
-      if self.func.__name__ == 'redshift':
+      if self.func.__name__ == 'gauss1':
          arg = str(args[1])
          if arg in self.cache:
             return self.cache[arg]
@@ -189,7 +189,7 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins):
                                             temp_param[0], 
                                             lib_vals[0][:,1] == 
                                             temp_param[1]))[0]
-            if len(index)<1: #if not in lib_vals return dummy array
+            if len(index) < 1: #if not in lib_vals return dummy array
                 out[str(ii)] = spect[:,0] + nu.inf
             else:
                 out[str(ii)] = nu.copy(spect[:,index[0] + 1])
@@ -498,22 +498,23 @@ def LOSVD(model,param,wave_range):
     #resample specturm so resolution is same at all places
     wave_range = nu.array(wave_range)/(1. + tparam[1]) - [100, -100]
     index = nu.searchsorted(model['wave'], [wave_range[0], wave_range[1]])
-    wave_diff = nu.diff(model['wave'][index[0]:index[1]]).min()
+    try:
+       wave_diff = nu.diff(model['wave'][index[0]:index[1]]).min()
+    except ValueError:
+       #model and data range are off
+       return tmodel
     wave = nu.arange(model['wave'][index[0]], model['wave'][index[1]], wave_diff)
     #print wave.min(),wave.max(),redshift(wave[[0,-1]],tparam[1])
     #convolve individual spectra
     for i in model.keys():
         if i == 'wave':
             continue
-        tmodel[i] = spectra_lin_interp(tmodel['wave'], tmodel[i], wave)
-        #model[i] = spectra_lin_interp(model['wave'], model[i], wave)
-        #model[i] = convolve_python(wave, model[i], tparam)
-        #print 'between'
-        #lab.plot(wave,tmodel[i])
-        convolve(wave, tmodel[i], tparam ,tmodel[i])
-        #lab.plot(wave,tmodel[i])
-        #lab.ylim((0,nu.median(tmodel[i])*5))
-        #lab.show()
+        #python convolve (slow)
+        model[i] = spectra_lin_interp(model['wave'], model[i], wave)
+        tmodel[i] = convolve_python_fast(wave, nu.ascontiguousarray(model[i]), tparam)
+        #c++ convolve (faster)
+        #tmodel[i] = spectra_lin_interp(tmodel['wave'], tmodel[i], wave)
+        #convolve(wave, tmodel[i], tparam ,tmodel[i])
     #apply redshift
     tmodel['wave'] = redshift(wave,tparam[1])
     #uncertanty convolve
@@ -521,6 +522,30 @@ def LOSVD(model,param,wave_range):
     #    out[:,2] = nu.sqrt(nu.convolve(kernel**2, data[:,2]**2,'same'))
 
     return tmodel
+
+def convolve_python_fast(x, y, losvd_param, option='rebin'):
+   '''convolve(array, kernel)
+   does convoluton useing input kernel. in a faster way '''
+   diff_wave = nu.mean(nu.diff(x))
+   Len_data = len(x)
+   #ys = nu.repeat(y,Len_data).reshape(Len_data,Len_data).T
+   #make kernels
+   Kernals = map(gauss1,[diff_wave]*Len_data, x,[losvd_param[0]]*Len_data,[losvd_param[2]]*Len_data, [losvd_param[3]]*Len_data)
+   #make an array with same size as y 
+   Kernals = map(make_kernel_array, Kernals,[Len_data]*Len_data,range(Len_data))
+   #convovle
+   ys = nu.array(map(lambda x,y: nu.sum(x*y), Kernals, [y]*Len_data))
+   return ys
+   
+def make_kernel_array(Kernel, Length, i):
+   '''Puts arrays from Kernels into matrix array. If kernel is
+   longer than array with return error'''
+   kern_len = len(Kernel)
+   middle = (kern_len - 1)/2
+   out_array = nu.zeros(Length)
+   index = nu.arange(kern_len) - middle + i
+   nu.put(out_array,index,Kernel,mode='clip')
+   return out_array
 
 def convolve_python(x, y, losvd_param, option='rebin'):
    '''convolve(array, kernel)
@@ -536,6 +561,10 @@ def convolve_python(x, y, losvd_param, option='rebin'):
       kernel = gauss1(diff_wave, x[i], losvd_param[0], losvd_param[2], losvd_param[3])
       kernel[kernel < 0] = 0
       Len = len(kernel)  
+      #check if kernel is longer than input array
+      if Len > Len_data:
+         ys.fill(nu.nan)
+         return ys
       m2 = i + (Len - 1)/2 + 1
       m1 = i - (Len - 1)/2 
       if m1 < 0:
@@ -560,6 +589,7 @@ def convolve_python(x, y, losvd_param, option='rebin'):
       #t.append(len(k))
    return  ys
 
+@memoized
 def gauss1(diff_wave,  wave_current,  sigma,  h3,  h4):
    '''inline gauss(nu.ndarray diff_wave, float wave_current float sigma, float h3, float h4)
 	Returns value of gaussian-hermite function normalized to area = 1'''
@@ -710,6 +740,7 @@ class MC_func:
         self.send_class._dust = self._dust
         self.send_class._losvd = self._losvd
         self.send_class._velocityscale = self._velocityscale
+        self.send_class.norms = self.norms
 
     def sampler(self,option):
         '''puts samplers for use'''
@@ -846,7 +877,7 @@ class MC_func:
            if losvd[0] <= 10**-3 or losvd[0] > 4:
               #sigma can't be negitive or too large
               return 0
-           if nu.any(nu.abs(losvd[1:]) > 10):
+           if nu.any(nu.abs(losvd[1:]) > 2.):
               #redshift can't be too high
               #skewness and kurtosis can't be too high
               return 0
@@ -992,8 +1023,6 @@ class MC_func:
         if not nu.any(nu.isfinite(temp)):
             pik.dump((param,bins),open('error.pik','w'),2)
             return nu.inf, nu.zeros(bins)
-
-        
         #dust
         if nu.any(dust_param):
             model = dust(nu.hstack((param, dust_param)), model)
