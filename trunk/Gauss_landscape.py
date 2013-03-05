@@ -107,13 +107,16 @@ class Mixture_model(object):
         '''Creates data and stores real infomation for model
         (n_points number of points to generate for model 
         y_i = \sum_i theta_j*x_i^(i-1)'''
-        if not real_theta:
+        if not nu.all(real_theta):
             #if no input params make random
             self._order = nu.random.randint(1,10)
             self._real_theta = nu.random.randn(self._order)
         else:    
             self._order = len(real_theta)
             self._real_theta = real_theta
+        #maximum amount of varibles to look at
+        self._min_order = 1
+        self._max_order = self._order + 5
         self.data = nu.zeros((n_points,2))
         self.data[:,0] = nu.random.rand(n_points)*10-5
         self.data[:,0].sort()
@@ -130,7 +133,6 @@ class Mixture_model(object):
         '''log liklyhood calculation'''
         out =  lik_toyIII(self.data[:,0],self.data[:,1],param,
                           self.var,answer=False)
-        
         return nu.sum(out) + self.prior(param)
 
     def prior(self,param):
@@ -145,75 +147,191 @@ class Mixture_model(object):
     
     def step_func(self,accept_rate,param,sigma,order):
         '''changes step size'''
-        if accept_rate > .5 and nu.all(sigma < 10):
+        if accept_rate > .25  and nu.all(sigma < 100):
             sigma *= 1.05
-        elif accept_rate <.23:
+        elif accept_rate <.23  and nu.any(sigma > 10**-5):
             sigma /= 1.05
+        if len(param[-1000:]) % 100:
+            try:
+                sigma = nu.cov(param[-1000:].T)
+            except AttributeError:
+                sigma = nu.var(param[-1000:])
         return sigma
 
     def birth_death(self,birth_rate, bins, j, j_timeleft, active_param):
-        attempt = False
-        if ((birth_rate > nu.random.rand() and bins < len(active_param.keys()) and 
-             j > j_timeleft ) or (j > j_timeleft and bins == 1 and bins < len(active_param.keys()))):
+        if birth_rate > nu.random.rand() and bins+1 != self._max_order :
             #birth
             attempt = True #so program knows to attempt a new model
-            rand_index = nu.random.randint(bins)
-            temp_bins = 1 + bins
+            #create step
+            temp_bins = bins + 1 #nu.random.randint(bins+1,self._max_order)
             #criteria for this step
-            critera = 1/4.**3 * birth_rate #(1/3.)**temp_bins
+            critera = 2**(bins-temp_bins) * birth_rate 
             #new param step
-            for k in range(len(active_param[str(bins)])):
-                active_param[str(temp_bins)][k]=active_param[str(bins)][k]
-            #set last 3 and rand_index 3 to new
-            if .5 > nu.random.rand(): #x'=x+-u
-                active_param[str(temp_bins)][-3:] = (active_param[str(bins)][rand_index*3:rand_index*3+3] + 
-                                                     rand_step)
-                active_param[str(temp_bins)][rand_index*3:rand_index*3+3] = (
-                    active_param[str(bins)][rand_index*3:rand_index*3+3] - rand_step)
-                k = 0
-                #check to see if in bounds
-                while fun.prior(nu.hstack((active_param[str(temp_bins)],
-                                           nu.zeros(2)))): 
-                    k += 1
-                    if k < 100:
-                        rand_step = nu.random.rand(3) * [fun._metal_unq.ptp(), fun._age_unq.ptp(),1.]
-                    else:
-                        rand_step /= 2.
-                    active_param[str(temp_bins)][-3:] = (
-                        active_param[str(bins)][rand_index*3:rand_index*3+3] + rand_step)
-                    active_param[str(temp_bins)][rand_index*3:rand_index*3+3]=(
-                        active_param[str(bins)][rand_index*3:rand_index*3+3]-rand_step)
-            else: #draw new values randomly from param space
-                active_param[str(temp_bins)][-3:] = (nu.random.rand(3) * 
-                                                     nu.array([fun._metal_unq.ptp(), fun._age_unq.ptp(),5.]) + 
-                                                     nu.array([fun._metal_unq.min(), fun._age_unq.min(), 0]))
-        elif j > j_timeleft and bins > 1 and  0.01 < nu.random.rand():
+            #active_param[str(temp_bins)][:bins] = active_param[str(bins)].copy()
+            #draw new points randomly from prior (bad)
+            #active_param[str(temp_bins)][bins:] = self.initalize_param(temp_bins)[0][bins:]
+            #split move params W1 = w *u, W2=w*(1-u) 
+            for j in range(len(active_param[str(bins)])):
+                if j * 2 + 1 >= len(active_param[str(temp_bins)]):
+                    break
+                u = nu.random.rand()
+                active_param[str(temp_bins)][2*j] = active_param[str(bins)][j] *u
+                active_param[str(temp_bins)][2*j+1] = active_param[str(bins)][j] *(1-u)
+                
+            #print active_param[str(temp_bins)],active_param[str(bins)]
+            #check to see if in bounds
+            #other methods of creating params
+        elif bins - 1 > self._min_order:
             #death
             attempt = True #so program knows to attempt a new model
-            Num_zeros = active_param[str(bins)][range(2,bins*3,3)] == 0
-            if Num_zeros.sum() > 1:
-                #remove all parts with zeros
-                temp_bins = bins - Num_zeros.sum()
-                #criteria for this step
-                critera = 4.**(3*temp_bins) * (1 - birth_rate) 
-                k = 0
-                for ii in range(bins):
-                    if not active_param[str(bins)][ii*3+2] == 0:
-                        active_param[str(temp_bins)][k*3:k*3+3] = active_param[str(bins)][ii*3:ii*3+3].copy()
-                        k += 1
-            else:
-                #choose randomly
-                critera = 4.**3 * (1 - birth_rate)
-                temp_bins = bins - 1
-                Ntot = nu.sum(active_param[str(bins)][range(2,bins*3,3)])
-                rand_index = (rand_choice(active_param[str(bins)][range(2,bins*3,3)],
-                                      active_param[str(bins)][range(2,bins*3,3)]/Ntot))
-                k = 0
-                for ii in xrange(bins): #copy to lower dimestion
-                    if not ii == rand_index:
-                        active_param[str(temp_bins)][3*k:3*k+3] = nu.copy(active_param[str(bins)]
-                                                                          [3*ii:3*ii+3])
-                        k += 1
+            #choose param randomly delete
+            temp_bins = bins - 1 #nu.random.randint(self._min_order,bins)
+            critera = 2**(bins - temp_bins) * (1. - birth_rate )
+            #merge 2 params together
+            for i in range(len(active_param[str(temp_bins)])):
+                index = nu.random.randint(len(active_param[str(bins)]),size=2)
+                u = nu.random.rand()
+                active_param[str(temp_bins)][i] = active_param[str(bins)][index[0]] * u +  active_param[str(bins)][index[1]] * (1-u)
+        else:
+            #do nothing
+            attempt = False
+        if not attempt:
+            temp_bins, critera = None,None
+        else:
+            j, j_timeleft = 0, nu.random.exponential(200)
+        return active_param, temp_bins, attempt, critera, j, j_timeleft
+
+
+class Gaussian_Mixture_model(object):
+    '''Uses a mixture model of gausians to test RJMCMC infrenece'''
+    def __init__(self,n_points=100,real_k=None):
+        '''Creates data and stores real infomation for model
+        y = sum_i^k w_i*N(mu_i,sigma_i)
+        where sum_i^k w_i =1'''
+        #initalize how many mixture compents
+        if not real_k:
+            self._k = nu.random.randint(1,10)
+        else:
+            self._k = real_k
+        self._max_order = 10
+        self._min_order = 1
+        #generate real parametes from normal [mu,sigma] sigma>0
+        self._param = nu.random.randn(self._k,2)*9 
+        self._param[:,1] = nu.abs(self._param[:,1])
+        self._param = self._param[self._param[:,0].argsort()]
+        #generate points
+        temp_points = []
+        for i in range(self._k):
+            temp_points.append(nu.random.randn(n_points)*self._param[i,1] +
+                               self._param[i,0])
+        y,x = nu.histogram(nu.ravel(temp_points),bins=n_points,density=True)
+        x = x[1:]
+        self.data = nu.vstack((x,y)).T
+        #set prior values
+        self.mu,self.var = 0.,9.
+
+    def proposal(self,mu,sigma):
+        '''drawing function for RJMC'''
+        param = nu.random.multivariate_normal(mu,sigma)
+        param = param.reshape((param.shape[0]/2,2))
+        param = param[param[:,0].argsort()]
+        param[:,1] = nu.abs(param[:,1])
+        return nu.ravel(param)
+
+    def lik(self,param,**args):
+        '''log liklyhood calculation'''
+        #create random points for histograming
+        k = len(param)
+        n_points = self.data.shape[0]
+        temp_points = []
+        for i in range(0,k,2):
+            temp_points.append(nu.random.randn(n_points)*abs(param[i+1]) +
+                               param[i])
+        y,x = nu.histogram(nu.ravel(temp_points),bins=self.data[:,0],density=True)
+        x = x[1:]
+        out = stat_dist.norm.logpdf(y,self.data[1:,1])
+        #out = -nu.sum((self.data[1:,1] - y)**2)
+        return nu.sum(out) #+ self.prior(param)
+
+    def disp_model(self,param):
+        '''makes x,y axis for plotting of params'''
+        k = len(param)
+        n_points = self.data.shape[0]
+        temp_points = []
+        for i in range(0,k,2):
+            temp_points.append(nu.random.randn(n_points)*abs(param[i+1]) +
+                               param[i])
+        y,x = nu.histogram(nu.ravel(temp_points),bins=self.data[:,0],density=True)
+        x = x[1:]
+        return x,y
+
+    def prior(self,param):
+        '''log prior and boundary calculation'''
+        return stat_dist.norm.logpdf(param,self.mu,self.var).sum()
+    
+    def initalize_param(self,order):
+        '''initalizes parameters for uses in MCMC'''
+        order *= 2
+        params = nu.random.multivariate_normal([0]*order,nu.identity(order)*9)
+        sigma = nu.identity(order)*nu.random.rand()*9
+        return params,sigma
+    
+    def step_func(self,accept_rate,param,sigma,order):
+        '''changes step size'''
+        if accept_rate > .25  and nu.all(sigma < 100):
+            sigma *= 1.05
+        elif accept_rate <.23  and nu.any(sigma > 10**-5):
+            sigma /= 1.05
+        if len(param[-1000:]) % 100 and len(param)>500:
+            try:
+                sigma = nu.cov(param[-1000:].T)
+            except AttributeError:
+                sigma = nu.cov(nu.array(param[-1000:]).T)
+        return sigma
+
+    def birth_death(self,birth_rate, bins, j, j_timeleft, active_param):
+        if birth_rate > nu.random.rand() and bins+1 != self._max_order :
+            #birth
+            attempt = True #so program knows to attempt a new model
+            #create step
+            temp_bins = bins + 1 #nu.random.randint(bins+1,self._max_order)
+            #criteria for this step
+            critera = 2**(bins-temp_bins) * birth_rate 
+            #new param step
+            #active_param[str(temp_bins)][:bins] = active_param[str(bins)].copy()
+            #draw new points randomly from prior (bad)
+            #active_param[str(temp_bins)][bins:] = self.initalize_param(temp_bins)[0][bins:]
+            #split move params W1 = w *u, W2=w*(1-u) 
+            for j in range(len(active_param[str(bins)])):
+                if j * 2 + 1 >= len(active_param[str(temp_bins)]):
+                    break
+                u = nu.random.rand()
+                active_param[str(temp_bins)][2*j] = active_param[str(bins)][j] *u
+                active_param[str(temp_bins)][2*j+1] = active_param[str(bins)][j] *(1-u)
+                
+            #print active_param[str(temp_bins)],active_param[str(bins)]
+            #check to see if in bounds
+            #other methods of creating params
+        elif bins - 1 > self._min_order:
+            #death
+            attempt = True #so program knows to attempt a new model
+            #choose param randomly delete
+            temp_bins = bins - 1 #nu.random.randint(self._min_order,bins)
+            critera = 2**(bins - temp_bins) * (1. - birth_rate )
+            #merge 2 params together
+            for i in range(len(active_param[str(temp_bins)])):
+                index = nu.random.randint(len(active_param[str(bins)]),size=2)
+                u = nu.random.rand()
+                active_param[str(temp_bins)][i] = active_param[str(bins)][index[0]] * u +  active_param[str(bins)][index[1]] * (1-u)
+        else:
+            #do nothing
+            attempt = False
+        if not attempt:
+            temp_bins, critera = None,None
+        else:
+            j, j_timeleft = 0, nu.random.exponential(200)
+        return active_param, temp_bins, attempt, critera, j, j_timeleft
+
 
 def lik_toyI(p=None,x=115,n=200):
     '''likelihood for toy I'''
