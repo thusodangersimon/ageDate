@@ -451,15 +451,16 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
     fun is MCMC class, option is multiprocessing class and 
     tells program when to stop, swarm_function is swarm class
     ,seed is random seed (optional)'''
-    if not seed:
+    '''if not seed:
         nu.random.seed(random_permute(current_process().pid))
     else:
-        nu.random.seed(seed)
+        nu.random.seed(seed)'''
     #initalize parameters from class
     param,active_param,chi,sigma={},{},{},{}
     Nacept,Nreject,acept_rate,out_sigma={},{},{},{}
     bayes_fact={} #to calculate bayes factor
-    for i in range(1,option._k_max+1):
+    T_cuurent = {}
+    for i in range(1,fun._max_order):
         #save chains
         param[str(i)] = []
         #current and i-1 chain and step size
@@ -471,9 +472,9 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
         acept_rate[str(i)],out_sigma[str(i)]=[.35],[]
         #RJMC bayes estimation (citiation) (doesn't work)
         bayes_fact[str(i)]=[]       
-    
+        T_cuurent[str(i)] = 0
     #choose order
-    bins = fun._real_theta.shape[0] #nu.random.randint(1,option._k_max+1)
+    bins = nu.random.randint(1,fun._max_order)
     #first lik calc
     chi[str(bins)][-1] = fun.lik(active_param[str(bins)])
     #check if starting off in bad place ie chi=inf or nan
@@ -484,14 +485,13 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
     #store inital values
     param[str(bins)].append(active_param[str(bins)].copy())
     #set best chi and param
-    '''if option.chibest > chi[str(bins)][-1]:
+    if nu.isfinite(chi[str(bins)][-1]):
         option.chibest[0] = chi[str(bins)][-1]+.0
         for kk in range(len(option.parambest)):
-            if kk<bins*3+2+4:
-                option.parambest[kk] = nu.hstack((active_param[str(bins)],
-                                               active_dust,active_losvd))[kk]
+            if len(active_param[str(bins)]) > kk:
+                option.parambest[kk] = active_param[str(bins)][kk]
             else:
-                    option.parambest[kk] = nu.nan'''
+                    option.parambest[kk] = nu.nan
     #set current swarm value
     '''for kk in range(len(option.swarm[0])):
         if kk<bins*3+2+4:
@@ -501,16 +501,16 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
             option.swarm[0][kk] = nu.nan
     option.swarmChi[0]= chi[str(bins)][-1]'''
     #start rjMCMC
-    T_cuurent,Nexchange_ratio = 0.0,1.0
+    Nexchange_ratio = 1.0
     size,a = 0,0
     j,T,j_timeleft = 1,9.,nu.random.exponential(100)
-    T_start,T_stop = abs(chi[str(bins)][-1].copy()), 1.
+    T_start,T_stop = abs(chi[str(bins)][-1].copy())/10., 1.
     birth_rate = 0.5
     #profiling
     t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm = [],[],[],[],[],[],[],[],[] 
-    while True :#option.iter_stop:
-        if T_cuurent% 1000 == 0:
-            print chi[str(bins)][-1], sigma[str(bins)]
+    while option.current < 10**6 :#option.iter_stop:
+        if T_cuurent[str(bins)] % 1001 == 0:
+            print acept_rate[str(bins)][-1],bins,sigma[str(bins)].diagonal()
             sys.stdout.flush()
 
         #sample from distiburtion
@@ -521,9 +521,7 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
         t_pro[-1] -= Time.time()
         #swarm stuff
         t_swarm.append(Time.time())
-        '''active_param[str(bins)], active_dust, active_losvd, birth_rate = swarm_function(active_param[str(bins)],
-                                                                                        active_dust, active_losvd, rank, birth_rate,
-                                                                                        option,T_cuurent, burnin, fun, acept_rate[str(bins)][-1] )'''
+        '''active_param[str(bins)], active_dust, active_losvd, birth_rate = swarm_function(active_param[str(bins)]'''
         #if option.rank == 1:
             #print 'after',active_param[str(bins)] 
 
@@ -533,37 +531,41 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
         chi[str(bins)].append(0.)
         chi[str(bins)][-1] = fun.lik(active_param[str(bins)])
         #decide to accept or not change from log lik to like
-        a = nu.exp((chi[str(bins)][-2] - chi[str(bins)][-1])
-                 /SA_polymodal(T_cuurent,burnin,T_start,T_stop))
+        a = nu.exp(-(chi[str(bins)][-2] - chi[str(bins)][-1])
+                 /SA_polymodal(T_cuurent[str(bins)],burnin,T_start,T_stop))
         t_lik[-1]-=Time.time()
         t_accept.append(Time.time())
         #put temperature on order of chi calue
-        if nu.abs(nu.log10(T_start /chi[str(bins)][-1])) > 2 and T_cuurent < burnin:
+        if nu.abs(nu.log10(T_start /chi[str(bins)][-1])) > 2 and T_cuurent[str(bins)] < burnin:
             T_start = chi[str(bins)][-1]
  
         #metropolis hastings
         if a > nu.random.rand(): #acepted
             param[str(bins)].append(active_param[str(bins)])            
             Nacept[str(bins)] += 1
-            print 'here'
            #see if global best fit
-            '''if option.chibest > chi[str(bins)][-1]:
+            if option.chibest < chi[str(bins)][-1] and nu.isfinite(chi[str(bins)][-1]):
                 option.chibest[0] = chi[str(bins)][-1]+.0
-                for kk in xrange(option._k_max*3):
-                    if kk<bins*3+2+4:
-                        option.parambest[kk]=nu.hstack((active_param[str(bins)],
-                                               active_dust, active_losvd))[kk]
+                for kk in range(len(option.parambest)):
+                    if len(active_param[str(bins)]) > kk:
+                        option.parambest[kk] = active_param[str(bins)][kk]
                     else:
-                        option.parambest[kk] = nu.nan'''
+                        option.parambest[kk] = nu.nan
         else:
-            param[str(bins)].append(nu.copy(param[str(bins)][-1]))
+            try:
+                param[str(bins)].append(nu.copy(param[str(bins)][-1]))
+            except IndexError:
+                #if first time in new place
+                param[str(bins)].append(nu.copy(active_param[str(bins)]))
             active_param[str(bins)] = nu.copy(param[str(bins)][-1]) 
             chi[str(bins)][-1] = nu.copy(chi[str(bins)][-2])
             Nreject[str(bins)]+=1
         t_accept[-1]-=Time.time()
         ###########################step stuff
         t_step.append(Time.time())
-        sigma[str(bins)] =  fun.step_func(acept_rate[str(bins)][-1] ,param[str(bins)][-2000:],sigma[str(bins)],bins)
+        if T_cuurent > burnin:
+            #only tune step if in burn-in
+            sigma[str(bins)] =  fun.step_func(acept_rate[str(bins)][-1] ,param[str(bins)][-2000:],sigma[str(bins)],bins)
         t_step[-1]-=Time.time()
         ############################determine if chain stuck and shake it out of it
         t_unsitc.append(Time.time())
@@ -573,55 +575,21 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
         t_unsitc[-1]-=Time.time()
         #############################decide if birth or death
         t_birth.append(Time.time())
-        '''active_param, temp_bins, attempt, critera = swarm_death_birth(fun, birth_rate, bins, j, j_timeleft, active_param)
-        #calc chi of new model
-        if attempt:
-            attempt = False
-            tchi, active_param[str(temp_bins)][range(2,temp_bins*3,3)] = fun.lik(
-                active_param[str(temp_bins)], active_dust, active_losvd)
-            bayes_fact[str(bins)].append(nu.exp((chi[str(bins)][-1]-tchi)/2.)*critera) #save acceptance critera for later
-            #rjmcmc acceptance critera ##############
-            if bayes_fact[str(bins)][-1]  > nu.random.rand():
-                #print '%i has changed from %i to %i' %(rank,bins,temp_bins)
-                #accept model change
-                bins = temp_bins + 0
-                chi[str(bins)].append(nu.copy(tchi))
-                #sort by age so active_param[bins*i+1]<active_param[bins*(i+1)+1]
-                if not nu.all(active_param[str(bins)][range(1,bins*3,3)] ==
-                          nu.sort(active_param[str(bins)][range(1,bins*3,3)])):
-                    index = nu.argsort(active_param[str(bins)][range(1,bins*3,3)])
-                    temp_index = [] #create sorting indcci
-                    for k in index:
-                        for kk in range(3):
-                            temp_index.append(3*k+kk)
-                    active_param[str(bins)] = active_param[str(bins)][temp_index]
-                param[str(bins)].append(nu.copy((nu.hstack((active_param[str(bins)],active_dust,active_losvd)))))
-                j, j_timeleft = 0, nu.random.exponential(200)
-                #continue
-            if T_cuurent >= burnin:
-                j, j_timeleft = 0, nu.random.exponential(200)
-        else: #reset j and time till check for attempt jump
-            j, j_timeleft = 0, nu.random.exponential(200)'''
+        if j >= j_timeleft:
+            active_param, temp_bins, attempt, critera, j, j_timeleft = fun.birth_death(birth_rate, bins, j, j_timeleft, active_param)
+            if attempt:
+                #check if accept move
+                tchi = fun.lik(active_param[str(temp_bins)])
+                rj_a = nu.exp(-(chi[str(bins)][-1]-tchi)/2.) * critera
+                if rj_a > nu.random.rand():
+                    #accept move
+                    bins = temp_bins +0
+                    chi[str(bins)].append(tchi + 0)
+                attempt = False
         t_birth[-1]-=Time.time()
         #########################################change temperature
-        '''if nu.min([1,nu.exp((chi[str(bins)][-2]-chi[str(bins)][-1])/(2.*SA(T_cuurent+1,burnin,T_start,T_stop))-(chi[str(bins)][-2]+chi[str(bins)][-1])/(2.*SA(T_cuurent,burnin,T_start,T_stop)))/T])>nu.random.rand():
-            if T_cuurent<burnin:
-                T_cuurent += 1
-                #print T_cuurent,burnin,rank
-            if T_cuurent==round(burnin):
-                print 'done with cooling'
-                T_cuurent += 1
-            Nexchange_ratio+=1   
-        #make sure the change temp rate is aroudn 20%
-        if Nexchange_ratio/(nu.sum(Nacept.values())+nu.sum(Nreject.values()))>.25:
-            T=T*1.05
-        elif Nexchange_ratio/(nu.sum(Nacept.values())+nu.sum(Nreject.values()))<.20:
-            T=T/1.05
-        #change current temperature with size of param[bin]
-        if len(param[str(bins)])<burnin:
-            T_cuurent=len(param[str(bins)])'''
-        T_cuurent += 1
-        if T_cuurent==round(burnin):
+        T_cuurent[str(bins)] += 1
+        if T_cuurent[str(bins)]==round(burnin):
             pass#print 'done with cooling from %i' %global_rank 
 
     ##############################convergece assment
@@ -650,8 +618,8 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
         param[i]=nu.array(param[i])
         ###correct metalicity and norm 
         bayes_fact[i] = nu.array(bayes_fact[i])
-    pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm,param,chi),open('time_%i.pik'%option.rank_world,'w'),2)
-    return param, chi, bayes_fact,acept_rate, out_sigma,rank
+    #pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm,param,chi),open('time_%i.pik'%option.rank_world,'w'),2)
+    return param, chi, bayes_fact,acept_rate, out_sigma, acept_rate
 
 #########swarm functions only in this program######
 def swarm_vect(pam, active_dust, active_losvd, rank, birth_rate, option):
