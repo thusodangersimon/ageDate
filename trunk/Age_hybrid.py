@@ -8,7 +8,7 @@
 # TODO: 
 #
 #    vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
-#    Copyright (C) 2011  Thuso S Simon
+#    Copyright (C) 2012  Thuso S Simon
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -504,13 +504,13 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
     Nexchange_ratio = 1.0
     size,a = 0,0
     j,T,j_timeleft = 1,9.,nu.random.exponential(100)
-    T_start,T_stop = abs(chi[str(bins)][-1].copy())/10., 1.
+    T_start,T_stop = 300, 1.
     birth_rate = 0.5
     #profiling
     t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm = [],[],[],[],[],[],[],[],[] 
-    while option.current < 10**6 :#option.iter_stop:
+    while option.current < 10**5 :#option.iter_stop:
         if T_cuurent[str(bins)] % 1001 == 0:
-            print acept_rate[str(bins)][-1],bins,sigma[str(bins)].diagonal()
+            print acept_rate[str(bins)][-1],chi[str(bins)][-1],bins
             sys.stdout.flush()
 
         #sample from distiburtion
@@ -537,7 +537,7 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
         t_accept.append(Time.time())
         #put temperature on order of chi calue
         if nu.abs(nu.log10(T_start /chi[str(bins)][-1])) > 2 and T_cuurent[str(bins)] < burnin:
-            T_start = chi[str(bins)][-1]
+            T_start = option.chibest[0]
  
         #metropolis hastings
         if a > nu.random.rand(): #acepted
