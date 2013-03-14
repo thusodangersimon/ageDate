@@ -8,7 +8,7 @@
 #TODO: 
 #
 #    vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
-#    Copyright (C) 2011  Thuso S Simon
+#    Copyright (C) 2012  Thuso S Simon
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -38,7 +38,7 @@ import pylab as lab
 import scipy.stats as stat_dist
 from scipy.special import expn
 import rpy2.robjects as ro
-import Age_hybrid as hy
+#import Age_hybrid as hy
 
 #template class things needed for programs to run
 class template_class(object):
@@ -215,20 +215,28 @@ class Gaussian_Mixture_model(object):
             self._k = real_k
         self._max_order = 10
         self._min_order = 1
+        self._order = self._k
         #generate real parametes from normal [mu,sigma] sigma>0
         self._param = nu.random.randn(self._k,2)*9 
         self._param[:,1] = nu.abs(self._param[:,1])
         self._param = self._param[self._param[:,0].argsort()]
         #generate points
-        temp_points = []
+        '''temp_points = []
         for i in range(self._k):
             temp_points.append(nu.random.randn(n_points)*self._param[i,1] +
                                self._param[i,0])
-        y,x = nu.histogram(nu.ravel(temp_points),bins=n_points,density=True)
-        x = x[1:]
+        y,x = nu.histogram(nu.ravel(temp_points),bins=n_points)#,density=True)
+        x = x[1:]'''
+        x,y = nu.random.randn(n_points)*10, nu.zeros(n_points)
+        x.sort()
+        for i in range(0,self._k,2):
+            y += stat_dist.norm.pdf(x,self._param[i,0],self._param[i,1])
+        y *= 1000
         self.data = nu.vstack((x,y)).T
         #set prior values
         self.mu,self.var = 0.,9.
+        
+    
 
     def proposal(self,mu,sigma):
         '''drawing function for RJMC'''
@@ -242,27 +250,27 @@ class Gaussian_Mixture_model(object):
         '''log liklyhood calculation'''
         #create random points for histograming
         k = len(param)
-        n_points = self.data.shape[0]
-        temp_points = []
+        #n_points = self.data.shape[0]
+        #temp_points = []
+        y = nu.zeros_like(self.data[:,1])
+        x = self.data[:,0]
         for i in range(0,k,2):
-            temp_points.append(nu.random.randn(n_points)*abs(param[i+1]) +
-                               param[i])
-        y,x = nu.histogram(nu.ravel(temp_points),bins=self.data[:,0],density=True)
-        x = x[1:]
-        out = stat_dist.norm.logpdf(y,self.data[1:,1])
-        #out = -nu.sum((self.data[1:,1] - y)**2)
-        return nu.sum(out) #+ self.prior(param)
+            y += stat_dist.norm.pdf(x,param[i],nu.abs(param[i+1]))
+        y *= 1000
+        out = stat_dist.norm.logpdf(self.data[:,1],y)
+        #out = -nu.sum((self.data[:,1] - y)**2)
+        return nu.sum(out) + self.prior(param)
 
     def disp_model(self,param):
         '''makes x,y axis for plotting of params'''
         k = len(param)
-        n_points = self.data.shape[0]
-        temp_points = []
+        #n_points = self.data.shape[0]
+        #temp_points = []
+        y = nu.zeros_like(self.data[:,1])
+        x = self.data[:,0]
         for i in range(0,k,2):
-            temp_points.append(nu.random.randn(n_points)*abs(param[i+1]) +
-                               param[i])
-        y,x = nu.histogram(nu.ravel(temp_points),bins=self.data[:,0],density=True)
-        x = x[1:]
+            y += stat_dist.norm.pdf(x,param[i],nu.abs(param[i+1]))
+        y *= 1000
         return x,y
 
     def prior(self,param):
@@ -278,7 +286,7 @@ class Gaussian_Mixture_model(object):
     
     def step_func(self,accept_rate,param,sigma,order):
         '''changes step size'''
-        if accept_rate > .25  and nu.all(sigma < 100):
+        if accept_rate > .25  and nu.all(sigma < 10):
             sigma *= 1.05
         elif accept_rate <.23  and nu.any(sigma > 10**-5):
             sigma /= 1.05
@@ -296,33 +304,69 @@ class Gaussian_Mixture_model(object):
             #create step
             temp_bins = bins + 1 #nu.random.randint(bins+1,self._max_order)
             #criteria for this step
-            critera = 2**(bins-temp_bins) * birth_rate 
+            critera = 10**(-temp_bins) * birth_rate
+            print temp_bins
             #new param step
             #active_param[str(temp_bins)][:bins] = active_param[str(bins)].copy()
             #draw new points randomly from prior (bad)
             #active_param[str(temp_bins)][bins:] = self.initalize_param(temp_bins)[0][bins:]
             #split move params W1 = w *u, W2=w*(1-u) 
-            for j in range(len(active_param[str(bins)])):
-                if j * 2 + 1 >= len(active_param[str(temp_bins)]):
-                    break
-                u = nu.random.rand()
-                active_param[str(temp_bins)][2*j] = active_param[str(bins)][j] *u
-                active_param[str(temp_bins)][2*j+1] = active_param[str(bins)][j] *(1-u)
-                
-            #print active_param[str(temp_bins)],active_param[str(bins)]
+            u,index = nu.random.rand(),[nu.random.randint(0,bins)]
+            #add split to last 2 indicic's
+            for j in range(2):
+                active_param[str(temp_bins)][j*2] = (
+                    active_param[str(bins)][index[0]*2] * abs(j-u))
+                active_param[str(temp_bins)][j*2+1] = abs(
+                    active_param[str(bins)][index[0]*2+1] *abs(j-u))
+            #copy other vars
+            j = 2
+            while j< temp_bins:
+                i = nu.random.randint(0,bins)
+                while i  in index:
+                    i = nu.random.randint(0,bins)
+                index.append(i)
+                active_param[str(temp_bins)][j*2] = active_param[str(bins)][i*2] 
+                active_param[str(temp_bins)][j*2+1] = abs(active_param[str(bins)][i*2+1] )
+                j+=1
+            
             #check to see if in bounds
             #other methods of creating params
-        elif bins - 1 > self._min_order:
+        elif bins - 1 >= self._min_order:
             #death
             attempt = True #so program knows to attempt a new model
             #choose param randomly delete
             temp_bins = bins - 1 #nu.random.randint(self._min_order,bins)
-            critera = 2**(bins - temp_bins) * (1. - birth_rate )
-            #merge 2 params together
-            for i in range(len(active_param[str(temp_bins)])):
-                index = nu.random.randint(len(active_param[str(bins)]),size=2)
-                u = nu.random.rand()
-                active_param[str(temp_bins)][i] = active_param[str(bins)][index[0]] * u +  active_param[str(bins)][index[1]] * (1-u)
+            critera = 10**(temp_bins) * (1. - birth_rate )
+            if .5>nu.random.rand():
+                #merge 2 params together
+                #W1*u+W2*(1-u) = w 
+                u,index = nu.random.rand(),nu.random.randint(0,bins,2)
+                active_param[str(temp_bins)][0] = (
+                    active_param[str(bins)][index[0]*2] *(1-u) +
+                    active_param[str(bins)][index[1]*2]*u)
+                active_param[str(temp_bins)][1] = (
+                    active_param[str(bins)][index[0]*2+1] *(1-u) +
+                    active_param[str(bins)][index[1]*2+1]*u)
+                j = 1
+                while j< temp_bins:
+                    i = nu.random.randint(0,bins)
+                    while i  in index:
+                        i = nu.random.randint(0,bins)
+                    index = nu.append(index,i)
+                    active_param[str(temp_bins)][j*2] = active_param[str(bins)][i*2] 
+                    active_param[str(temp_bins)][j*2+1] = abs(active_param[str(bins)][i*2+1] )
+                    j+=1
+            else:
+                #drop param with smallest prior
+                prob =[]
+                for i in range(bins):
+                    prob.append(self.prior(active_param[str(bins)][2*i:2*i+2]))
+                index = nu.where(min(prob) != prob)[0]
+                j = 0
+                for i in index:
+                    active_param[str(temp_bins)][j:j+2] = (
+                        active_param[str(bins)][i:i+2].copy())
+                    j += 1
         else:
             #do nothing
             attempt = False
