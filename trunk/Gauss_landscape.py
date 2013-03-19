@@ -305,7 +305,7 @@ class Gaussian_Mixture_model(object):
             temp_bins = bins + 1 #nu.random.randint(bins+1,self._max_order)
             #criteria for this step
             critera = 10**(-temp_bins) * birth_rate
-            print temp_bins
+            #print temp_bins
             #new param step
             #active_param[str(temp_bins)][:bins] = active_param[str(bins)].copy()
             #draw new points randomly from prior (bad)
@@ -518,6 +518,17 @@ def sample(x, size, replace=False, prob=None):
     return nu.array(out)
 
 if __name__ == '__main__':
-   #pmc test of calc evidence
-    #linear regssion model
-    pass
+    #mpi version of Gaussian_model
+    import Age_hybrid as hy
+    import Gauss_landscape as G
+    
+    #initalize lik funcions and communication topologies
+    fun = G.Gaussian_Mixture_model(1000,5)
+    top = hy.Topologies('ring')
+    #send root data
+    if top.comm_world.rank == 0:
+        top.comm_world.bcast(fun.data,root=0)
+    else:
+       fun.data =  top.comm_world.bcast(fun.data,root=0)
+    
+    param,chi,t = hy.mpi_general(fun, top, swarm_func=hy.vanilla, burnin=5000, itter=10**5)
