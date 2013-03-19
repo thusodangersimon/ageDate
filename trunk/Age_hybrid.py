@@ -508,9 +508,9 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
     birth_rate = 0.5
     #profiling
     t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm = [],[],[],[],[],[],[],[],[] 
-    while option.current < 10**5 :#option.iter_stop:
+    while option.iter_stop:
         if T_cuurent[str(bins)] % 1001 == 0:
-            print acept_rate[str(bins)][-1],chi[str(bins)][-1],bins
+            print acept_rate[str(bins)][-1],chi[str(bins)][-1],bins,option.comm_world.rank
             sys.stdout.flush()
 
         #sample from distiburtion
@@ -620,6 +620,85 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
         bayes_fact[i] = nu.array(bayes_fact[i])
     #pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm,param,chi),open('time_%i.pik'%option.rank_world,'w'),2)
     return param, chi, bayes_fact,acept_rate, out_sigma, acept_rate
+
+#mpi run
+def mpi_general(fun, topology, swarm_func=vanilla, burnin=5000, itter=10**5):
+    '''From MPI start, starts workers doing RJMCMC and coordinates comunication 
+    topologies'''
+   #start RJMCMC SWARM 
+    N = 3 #output number
+    if not topology.rank == 0:
+        #output is: [param, chi, bayes_fact, acept_rate, out_sigma, rank]
+        print 'Starting rank %i on %s.'%(topology.rank_world,mpi.Get_processor_name())    
+        temp = RJMC_general(fun, topology, swarm_func, burnin=burnin)
+        #temp = [param, chi, bayes_fact]
+        #print topology.iter_stop
+        print 'rank %i on %s is complete'%(topology.rank_world,mpi.Get_processor_name())
+        #topology.comm_world.isend(topology.rank_world,dest=0,tag=99)
+        #print topology.iter_stop
+        #topology.comm_world.barrier()
+        for i in range(N):
+            topology.comm_world.send(temp[i], dest=0,tag=99)
+        return None,None,None
+    else:
+    #while rjmcmc is  root process is running update curent iterations and gather best fit for swarm
+        print 'starting root on %i on %s'%(topology.rank,mpi.Get_processor_name())
+        stop_iter = burnin * topology.size_world + itter
+        #dummy param for swarm
+        time = Time.time()
+        i = 1
+        while (topology.global_iter <= stop_iter and nu.any(topology.iter_stop)): 
+            #get swarm values from other workers depending on topology
+            topology.get_best()
+            topology.swarm_update(topology.parambest,topology.chibest, (nu.isfinite(topology.parambest).sum() - 6)/3)
+            #get total iterations
+            Time.sleep(.1)
+            if Time.time() - time > 5:
+                print '%2.2f percent done at %i' %((float(topology.global_iter) / stop_iter) * 100., 
+                                                   topology.global_iter)
+                sys.stdout.flush()
+                time = Time.time()
+                #print topology.current
+            #pik.dump((topology.swarm,topology.swarmChi),open('swarm','w'),2)
+            i += 1
+        #put in convergence diagnosis
+        #tell other workers to stop
+        print 'Sending stop signal.'
+        for i in xrange(1,topology.comm_world.size):
+            topology.iter_stop[:,i] = 0
+        t= Time.time()
+        while True:
+            topology.get_best(True)
+            #Time.sleep(1)
+            if Time.time() -t >15: #or len(done) == topology.size_world:
+                break
+        
+        #get results from other processes
+        print 'Root reciving.'
+        temp =[]
+        i= 1
+        time = Time.time() 
+        while Time.time() - time < 60:
+        #for i in xrange(1,topology.size_world):
+            if topology.comm_world.Iprobe(source=i,tag=99):
+                print 'getting data from %i '%(i)
+                t=[]
+                for k in xrange(N):
+                    t.append( topology.comm_world.recv(source=i,tag=99))
+                temp.append(t)
+                print 'done from %i '%(i)
+            i+=1
+            if i > topology.comm_world.size -1:
+                i = 1
+        print 'done reciving'
+        try:
+            param, chi, bayes = dic_data(temp, burnin)
+        except IndexError:
+            pass
+        #save accept rate and sigma for output
+        return param, chi, t
+
+
 
 #########swarm functions only in this program######
 def swarm_vect(pam, active_dust, active_losvd, rank, birth_rate, option):
