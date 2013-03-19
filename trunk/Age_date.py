@@ -491,7 +491,7 @@ def LOSVD(model,param,wave_range):
     '''convolves data with a gausian with dispersion of sigma, and hermite poly
     of h3 and h4'''
     #unlog sigma
-    import pylab as lab
+    #import pylab as lab
     tparam = param.copy()
     tparam[0] = 10**tparam[0]
     tmodel = model.copy()
@@ -509,10 +509,10 @@ def LOSVD(model,param,wave_range):
     for i in model.keys():
         if i == 'wave':
             continue
-        #python convolve (slow)
+        #python convlve
         model[i] = spectra_lin_interp(model['wave'], model[i], wave)
         tmodel[i] = convolve_python_fast(wave, nu.ascontiguousarray(model[i]), tparam)
-        #c++ convolve (faster)
+        #c++ convolve
         #tmodel[i] = spectra_lin_interp(tmodel['wave'], tmodel[i], wave)
         #convolve(wave, tmodel[i], tparam ,tmodel[i])
     #apply redshift
@@ -603,9 +603,7 @@ def gauss1(diff_wave,  wave_current,  sigma,  h3,  h4):
    slitout *= ( 1.+ h3 * 2**.5 / (6.**.5) * (2 * y**3 - 3 * y) + 
                 h4 / (24**.5) * (4 * y**4 - 12 * y**2 + 3))
    if not slitout.sum() == 0:
-      #print nu.sum(slitout)
       slitout /= nu.sum(slitout)
-
    return slitout      
 
 #####classes############# 
@@ -1020,9 +1018,10 @@ class MC_func:
                                   self._metal_unq, bins)
         #don't bother with analysis if model isn't finite
         temp = nu.copy(model.values())
-        if not nu.any(nu.isfinite(temp)):
-            pik.dump((param,bins),open('error.pik','w'),2)
-            return nu.inf, nu.zeros(bins)
+        if not nu.all(nu.isfinite(temp)):
+           import cPickle as pik
+           pik.dump((param,bins),open('error.pik','w'),2)
+           return nu.inf, nu.zeros(bins)
         #dust
         if nu.any(dust_param):
             model = dust(nu.hstack((param, dust_param)), model)
