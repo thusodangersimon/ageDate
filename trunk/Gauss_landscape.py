@@ -182,7 +182,7 @@ class Gaussian_Mixture_model(object):
         '''changes step size'''
         if accept_rate > .55  and nu.all(sigma < 10):
             sigma *= 1.05
-        elif accept_rate <.50 and nu.all(sigma.diagonal() > 10**-32):
+        elif accept_rate <.50 and nu.any(sigma.diagonal() > 10**-32):
             sigma /= 1.05
         if len(param[-1000:]) % 100 and len(param)>500:
             try:
@@ -200,18 +200,22 @@ class Gaussian_Mixture_model(object):
             attempt = True #so program knows to attempt a new model
             #create step
             temp_bins = bins + 1 #nu.random.randint(bins+1,self._max_order)
-            #split move params W1 = w *u, W2=w*(1-u) 
-            u,index = nu.random.rand(),[nu.random.randint(0,bins)]
+            #split move params 
+            index = [nu.random.randint(0,bins)]
+            mu,sigma = active_param[str(bins)][index[0]*2:index[0]*2+2]
+            w = nu.random.rand()*100
+            u3 =  nu.random.beta(1,1)      
+            u1,u2 = nu.random.beta(2,2,2)
+            w1 = w*u1; w2 = w*(1-u1)
+            mu1 = mu - u2*sigma*nu.sqrt(w2/w1)
+            mu2  = mu + u2*sigma*nu.sqrt(w1/w2)
+            sigma1 = (u3*(1-u3**2)*sigma**2*w/w1)**(1/2.)
+            sigma2 = ((1 - u3)*(1-u2**2)*sigma**2*w/w2)**(1/2.)
             #add split to last 2 indicic's
             for j in range(2):
-                active_param[str(temp_bins)][j*2] = (
-                    active_param[str(bins)][index[0]*2] * abs(j-u))
-                active_param[str(temp_bins)][j*2+1] = abs(
-                    active_param[str(bins)][index[0]*2+1] *abs(j-u))
+                active_param[str(temp_bins)][j*2:j*2+2] = eval('mu%i,sigma%i'%(j+1,j+1))
             #det(jocobian)=w_mu*w_sigma and birth percentage)
-            critera = (active_param[str(bins)][index[0]*2]
-                       * active_param[str(bins)][index[0]*2+1] 
-                       * (birth_rate))
+            critera = abs(mu * sigma * birth_rate)
 
             #copy other vars
             j = 2
