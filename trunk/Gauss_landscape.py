@@ -39,7 +39,10 @@ import scipy.stats as stat_dist
 from scipy.special import expn
 import rpy2.robjects as ro
 #import Age_hybrid as hy
+from scipy.optimize import fmin_powell
+from scipy import seterr
 
+a = seterr('ignore')
 #template class things needed for programs to run
 class template_class(object):
     #things needed for mcmc or rjmcmc to run
@@ -129,9 +132,7 @@ class Gaussian_Mixture_model(object):
 
         self.data = nu.vstack((x,y)).T
         #set prior values
-        self.mu,self.var = 0.,9.
-        
-    
+        self.mu,self.var = 10.,1.
 
     def proposal(self,mu,sigma):
         '''drawing function for RJMC'''
@@ -152,7 +153,9 @@ class Gaussian_Mixture_model(object):
         N = nu.sum(y * self.data[:,1])/nu.sum(y**2)
         out = stat_dist.norm.logpdf(self.data[:,1],N * y)
         #out = -nu.sum((self.data[:,1] - y)**2)
-        return nu.sum(out) + self.prior(param)
+        #return nu.sum(out) + self.prior(param)
+        #test
+        return 1.
 
     def disp_model(self,param):
         '''makes x,y axis for plotting of params'''
@@ -169,7 +172,10 @@ class Gaussian_Mixture_model(object):
 
     def prior(self,param):
         '''log prior and boundary calculation'''
-        return stat_dist.norm.logpdf(param,self.mu,self.var).sum()
+        out = stat_dist.norm.logpdf(param[slice(0,-1,2)],
+            loc=self.mu,scale=self.var)
+        out += stat_dist.norm.logpdf(param[slice(1,param.size,2)],50,1)
+        return out.sum()
     
     def initalize_param(self,order):
         '''initalizes parameters for uses in MCMC'''
@@ -288,6 +294,11 @@ class Gaussian_Mixture_model(object):
         if not attempt:
             temp_bins, critera = None,None
         else:
+            #do quick llsq to help get to better place
+            seterr('ignore')
+            f_temp = lambda x :-self.lik(x)
+            active_param[str(bins)] = fmin_powell(f_temp, 
+                                                  active_param[str(bins)],maxfun=10,disp=False)
             j, j_timeleft = 0, nu.random.exponential(200)
         return active_param, temp_bins, attempt, critera, j, j_timeleft
 
