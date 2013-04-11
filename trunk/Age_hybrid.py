@@ -532,8 +532,12 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
         chi[str(bins)][-1] = fun.lik(active_param[str(bins)])
         #print chi[str(bins)][-2], chi[str(bins)][-1] ,sigma[str(bins)].diagonal()
         #decide to accept or not change from log lik to like
+        #just lik part
         a = nu.exp(-(chi[str(bins)][-2] - chi[str(bins)][-1])
                  /SA_polymodal(T_cuurent[str(bins)],burnin,T_start,T_stop))
+        #priors
+        a *= nu.exp(fun.prior(active_param[str(bins)]) - 
+                    fun.prior(param[str(bins)][-1]))
         #print bins ,chi[str(bins)][-2], chi[str(bins)][-1], active_param[str(bins)]
         
         t_lik[-1]-=Time.time()
