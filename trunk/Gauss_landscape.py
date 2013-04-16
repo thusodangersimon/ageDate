@@ -132,13 +132,12 @@ class Gaussian_Mixture_model(object):
 
         self.data = nu.vstack((x,y)).T
         #set prior values
-        self.mu,self.var = 10.,1.
+        self.mu,self.var = 0.,9.
 
     def proposal(self,mu,sigma):
         '''drawing function for RJMC'''
         param = nu.random.multivariate_normal(mu,sigma)
         param = param.reshape((param.shape[0]/2,2))
-        param = param[param[:,0].argsort()]
         param[:,1] = nu.abs(param[:,1])
         return nu.ravel(param)
 
@@ -146,16 +145,12 @@ class Gaussian_Mixture_model(object):
         '''log liklyhood calculation'''
         #create random points for histograming
         k = len(param)
-        #n_points = self.data.shape[0]
-        #temp_points = []
         x,y = self.disp_model(param)
         #normalize
         N = nu.sum(y * self.data[:,1])/nu.sum(y**2)
         out = stat_dist.norm.logpdf(self.data[:,1],N * y)
         #out = -nu.sum((self.data[:,1] - y)**2)
-        #return nu.sum(out) + self.prior(param)
-        #test
-        return 1.
+        return out.sum()
 
     def disp_model(self,param):
         '''makes x,y axis for plotting of params'''
@@ -172,9 +167,16 @@ class Gaussian_Mixture_model(object):
 
     def prior(self,param):
         '''log prior and boundary calculation'''
-        out = stat_dist.norm.logpdf(param[slice(0,-1,2)],
-            loc=self.mu,scale=self.var)
-        out += stat_dist.norm.logpdf(param[slice(1,param.size,2)],50,1)
+        out = 0.
+        #mean prior
+        for i in param[slice(0,-1,2)]:
+            out += stat_dist.norm.logpdf(i,loc=self.mu,scale=self.var)
+        #var prior
+        for i in param[slice(1,param.size,2)]: 
+            if i < 0:
+                out += -nu.inf
+            else:
+                out += stat_dist.norm.logpdf(i,loc=self.mu,scale=self.var)
         return out.sum()
     
     def initalize_param(self,order):
