@@ -40,7 +40,8 @@ def read_spec(name, lib_path='/home/thuso/Phd/Code/Spectra_lib/'):
     #reads in spec and turns into numpy array [lambda,flux]
     return nu.loadtxt(lib_path+name)
 
-def get_fitting_info(lib_path='/home/thuso/Phd/Code/Spectra_lib/'):
+def get_fitting_info(lib_path='/home/thuso/Phd/Code/Spectra_lib/',
+                     spec_lib='BC03.splib'):
     #gets list of ages,metalicity and asocated file names
     lib = os.listdir(lib_path)
     find_fun = lambda i: i if i.endswith('spec') else None
@@ -51,8 +52,9 @@ def get_fitting_info(lib_path='/home/thuso/Phd/Code/Spectra_lib/'):
     except ValueError:
         pass
     if len(standard_file) == 0:
-        import Age_date as ag
-        lib = ag.info
+        #import Age_date as ag
+        #lib = ag.info
+        spect,lib = load_spec_lib(lib_path,spec_lib)
         out = nu.zeros([len(lib), 2])
     else:
         out = nu.zeros([len(lib), 2])

@@ -29,13 +29,10 @@
 """ uses PMC to find prosterior of stellar spectra age, metalicity and SFR"""
 
 from Age_date import *
-import pypar as par
 from x_means import xmean
 from scipy.special import gamma
 from scipy.optimize import fmin_l_bfgs_b
-#import time as Time
-
-#a=nu.seterr(all='ignore')
+import scipy.stats as stat_dist
 
 def test():
     myID = par.rank()
@@ -87,99 +84,55 @@ def test():
 
     par.finalize()
 
-def PMC_mixture_old(data,bins,n_dist=1,pop_num=10**4):
+def PMC_mixture(fun, bins, n_dist=1, pop_num=10**4):
     #uses population monte carlo to find best fits and prosteror
     #data[:,1]=data[:,1]*1000.      
-   #initalize parmeters and chi squared
-    data_match_all(data)
-    lib_vals=get_fitting_info(lib_path)
-    lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
-    metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
-    age_unq=nu.unique(lib_vals[0][:,1])
     #initalize importance functions
     alpha=nu.array([n_dist**-1.]*n_dist) #[U,N]
     out={}
-    
-    points=nu.zeros([pop_num,bins*3])
-    bin_index=0
-    age_bins=nu.linspace(age_unq.min(),age_unq.max(),bins+1)
-    for k in xrange(bins*3):
-        if any(nu.array(range(0,bins*3,3))==k):#metalicity
-            points[:,k]=(nu.random.random(pop_num)*metal_unq.ptp()+metal_unq[0])
-        else:#age and normilization
-            if any(nu.array(range(1,bins*3,3))==k): #age
-                #mu[k]=nu.random.random()
-                points[:,k]=nu.random.rand(pop_num)*age_unq.ptp()/float(bins)+age_bins[bin_index]
-               # mu[k]=nu.mean([bin[bin_index],bin[1+bin_index]])
-                bin_index+=1
-            else: #norm
-                points[:,k]=nu.random.random(pop_num)*10**3
- 
+    #make inital points from grid of all values
+    m,a = nu.meshgrid(fun._metal_unq,fun._age_unq)
+    points = nu.vstack((m.ravel(),a.ravel(),nu.ones_like(a.ravel()))).T
     #build population parameters
     print 'initalizing mixture'
-    i=0
+    lik = map(fun.lik,points)
+    points[:,range(2,bins*3,3)] = nu.array(zip(*lik)[1])
+    lik = nu.array(zip(*lik)[0])
+    #do weight average
+    lik = nu.exp(-lik,dtype=nu.float128)
+    lik[lik == 0] = nu.finfo(nu.float128).tiny
+    mu = nu.average(points,0,lik/lik.sum())
+    sigma = nu.cov(points.T * nu.vstack([lik/lik.sum()]*bins * 3))
     while True:
-    #get likelihoods
-        if not i==0:
-            points=pop_builder(pop_num,alpha,mu,sigma,age_unq,metal_unq,bins)
-        lik=[]
-        pool=Pool()
-        for ii in points:
-            pool.apply_async(like_gen,(data,ii,lib_vals,age_unq,metal_unq,bins,),callback=lik.append)
-        pool.close()
-        pool.join()
-        lik=nu.array(lik,dtype=nu.float128)
-        lik=lik[lik[:,-1].argsort(),:]
-        #find min and bootstrap (sort of)
-        mu=nu.array([lik[:100,:-1].mean(0)])
-        sigma=nu.array([nu.cov(lik[:100,:-1].T)])*2.
-        i+=1
         print "number of trys is %i" %i
-        if sum(lik[:,-1]<=11399)>3000:
-            break
-        #initalize mcmc lik params
-    chibest=nu.ones(2)+nu.inf
-    for i in range(50): #start refinement loop
-        if i==0:
-            if sum(lik[:,-1]<=11399)<30:
-                lik[:,-1] =(1/lik[:,-1])
-            else:
-                lik[:,-1] =nu.exp(-lik[:,-1]/2.)
-        else:
-            if sum(lik[:,-1]<=11399)<30:
-                 lik[:,-1] =(1/lik[:,-1])                  
-            else:
-                lik[:,-1] =nu.exp(-lik[:,-1]/2.)
-            #q_sum=nu.sum(map(norm_func,lik[:,:-1],[[mu]]*len(lik),[[sigma]]*len(lik)),1)
-            q_sum=nu.sum(map(student_t,lik[:,:-1],[[mu]]*len(lik),[[sigma]]*len(lik)),1)
-            lik[:,-1]=lik[:,-1]/q_sum
         out[str(i)]=nu.copy(lik)
         #create best chi sample
-        parambest=nu.zeros(bins*3)
-        for j in range(bins*3):
+        #parambest=nu.zeros(bins*3)
+        '''for j in range(bins*3):
             parambest[j]=nu.sum(lik[:,j]*lik[:,-1]/nu.sum(lik[:,-1]))
-        chibest[1]=like_gen(data,parambest,lib_vals,age_unq,metal_unq,bins)[-1]
-        weight_norm=lik[:,-1]/nu.sum(lik[:,-1])
+            chibest[1]=like_gen(data,parambest,lib_vals,age_unq,metal_unq,bins)[-1]'''
+    weight_norm=lik[:,-1]/nu.sum(lik[:,-1])
         #print 'best estimate chi squared values is %f, num of dist %i' %(chibest[0],len(alpha))
-        print 'Entropy is %f, and ESS is %f' %(nu.exp(-nu.nansum(weight_norm*nu.log10(weight_norm)))/pop_num,
+    print 'Entropy is %f, and ESS is %f' %(nu.exp(-nu.nansum(weight_norm*nu.log10(weight_norm)))/pop_num,
                                                (nu.sum(weight_norm**2))**-1/pop_num)
         #resample and get new alpha
-        if chibest[0]<chibest[1]: #if old was better fit than new look for clustering
-            alpha,mu,sigma=resample_first(lik)
+    if chibest[0]<chibest[1]: #if old was better fit than new look for clustering
+        alpha,mu,sigma = resample_first(nu.hstack((points,
+                                                   lik.reshape(lik.shape[0],1))))
             #expand sigma so may find better fits
-        else: #else keep iterating
-            chibest[0]=nu.copy(chibest[1])
-            alpha,mu,sigma=resample(lik,nu.copy(alpha),nu.copy(mu),nu.copy(sigma))
+    else: #else keep iterating
+        chibest[0]=nu.copy(chibest[1])
+        alpha,mu,sigma=resample(lik,nu.copy(alpha),nu.copy(mu),nu.copy(sigma))
         #gen new points
         points=pop_builder(pop_num,alpha,mu,sigma,age_unq,metal_unq,bins)
     #get likelihoods
-        lik=[]
-        pool=Pool()
-        for ii in points:
-            pool.apply_async(like_gen,(data,ii,lib_vals,age_unq,metal_unq,bins,),callback=lik.append)
-        pool.close()
-        pool.join()
-        lik=nu.array(lik,dtype=nu.float128)
+    points = fun.proposal(mu,sigma,pop_num)
+    lik = map(fun.lik,points)
+    points[:,range(2,bins*3,3)] = nu.array(zip(*lik)[1])
+    lik = nu.array(zip(*lik)[0])
+    #do weight average
+    lik = nu.exp(-lik,dtype=nu.float128)
+    lik[lik == 0] = nu.finfo(nu.float128).tiny
 
     return nu.vstack(out.values())
 
@@ -544,6 +497,22 @@ class PMC_func:
 def toy():
 
     pass
+
+def logadd(x):
+    '''Does log(A + B) if only log(A) and log(B) are known. Uses formula
+    A + B = A + ln(1+ B/A)
+    '''
+    x = nu.asarray(x)
+    x = nu.sort(x[nu.isfinite(x)])
+    x = nu.append(x[0],x[x != x[0]])
+    if x.shape[0] == 1:
+        return(x)
+    z = 0
+    for i in range(0,len(x)):
+        z += x[i] + nu.log(1 + nu.sum(nu.exp(z - x[i])))
+        
+    return z
+     
 
 if __name__=='__main__':
     test()

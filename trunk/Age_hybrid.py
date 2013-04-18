@@ -474,7 +474,7 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
         bayes_fact[str(i)]=[]       
         T_cuurent[str(i)] = 0
     #choose order
-    bins = nu.random.randint(1,fun._max_order)
+    bins = nu.random.randint(fun._min_order,fun._max_order)
     #first lik calc
     chi[str(bins)][-1] = fun.lik(active_param[str(bins)])
     #check if starting off in bad place ie chi=inf or nan
@@ -506,11 +506,12 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
     j,T,j_timeleft = 1,9.,nu.random.exponential(100)
     T_start,T_stop = 300, 1.
     birth_rate = 0.5
+    trans_moves = 0
     #profiling
     t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm = [],[],[],[],[],[],[],[],[] 
     while option.iter_stop:
         if T_cuurent[str(bins)] % 1001 == 0:
-            print acept_rate[str(bins)][-1],chi[str(bins)][-1],bins,sigma[str(bins)].diagonal()
+            print acept_rate[str(bins)][-1],chi[str(bins)][-1],bins,sigma[str(bins)].diagonal(), option.current
             sys.stdout.flush()
 
         #sample from distiburtion
@@ -533,20 +534,20 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
         #print chi[str(bins)][-2], chi[str(bins)][-1] ,sigma[str(bins)].diagonal()
         #decide to accept or not change from log lik to like
         #just lik part
-        a = nu.exp(-(chi[str(bins)][-2] - chi[str(bins)][-1])
-                 /SA_polymodal(T_cuurent[str(bins)],burnin,T_start,T_stop))
+        a = (-(chi[str(bins)][-2] - chi[str(bins)][-1])
+                 /SA_polymodal(T_cuurent[str(bins)],burnin,abs(T_start),T_stop))
         #priors
-        a *= nu.exp(fun.prior(active_param[str(bins)]) - 
+        a += (fun.prior(active_param[str(bins)]) - 
                     fun.prior(param[str(bins)][-1]))
         #print bins ,chi[str(bins)][-2], chi[str(bins)][-1], active_param[str(bins)]
         
         t_lik[-1]-=Time.time()
         t_accept.append(Time.time())
         #put temperature on order of chi calue
-        if nu.abs(nu.log10(T_start /chi[str(bins)][-1])) > 2 and T_cuurent[str(bins)] < burnin:
-            T_start = option.chibest[0]
+        '''if nu.abs(nu.log10(T_start /chi[str(bins)][-1])) > 2 and T_cuurent[str(bins)] < burnin:
+            T_start = option.chibest[0]'''
         #metropolis hastings
-        if a > nu.random.rand(): #acepted
+        if nu.exp(a) > nu.random.rand(): #acepted
             param[str(bins)].append(nu.copy(active_param[str(bins)]))
             Nacept[str(bins)] += 1
            #see if global best fit
@@ -569,7 +570,7 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
         t_accept[-1]-=Time.time()
         ###########################step stuff
         t_step.append(Time.time())
-        if T_cuurent[str(bins)] > burnin:
+        if T_cuurent[str(bins)] < burnin + 5000:
             #only tune step if in burn-in
             sigma[str(bins)] =  fun.step_func(acept_rate[str(bins)][-1] ,param[str(bins)][-2000:],sigma[str(bins)],bins)
         t_step[-1]-=Time.time()
@@ -586,7 +587,10 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
             if attempt:
                 #check if accept move
                 tchi = fun.lik(active_param[str(temp_bins)])
-                rj_a = nu.exp(-(chi[str(bins)][-1]-tchi)/2.) * critera
+                rj_a = (nu.exp(-(chi[str(bins)][-1]-tchi)/
+                              SA(trans_moves,100,1200.,T_stop)) * critera)
+                trans_moves += 1
+                print chi[str(bins)][-1],tchi
                 if rj_a > nu.random.rand():
                     #accept move
                     bins = temp_bins +0
@@ -601,7 +605,7 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
             pass#print 'done with cooling from %i' %global_rank 
 
     ##############################convergece assment
-        
+       
         ##############################house keeping
         t_house.append(Time.time())
         j+=1
@@ -613,15 +617,15 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
         t_comm.append(Time.time())
         '''if T_cuurent<burnin or T_cuurent % 100 == 0:
             option.swarm_update(nu.hstack((active_param[str(bins)],active_dust,active_losvd)),
-                                chi[str(bins)][-1],bins)'''
-        
+                                chi[str(bins)][-1],bins)
+        '''
         #get other wokers param
         '''if  option.current % 200 == 0:
             option.get_best()'''
         t_comm[-1]-=Time.time()
         #if mpi isn't on allow exit
         if option.comm_world.size == 1:
-            if nu.sum(T_cuurent.values()) > 10**5:
+            if option.current > 2*10**5:
                 option.iter_stop = False
         #pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm),open('time_%i.pik'%option.rank_world,'w'),2)
     #####################################return once finished 

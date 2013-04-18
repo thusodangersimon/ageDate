@@ -881,7 +881,7 @@ class MC_func:
               return 0
         #check to see if no bins or some type of binning
         temp = self.age_bound(self._age_unq, self.bins)
-        out = 1.
+        out = 1./(self._age_unq.ptp()*self._metal_unq.ptp())**self.bins
         if len(temp) <= 2:
             #all types of binning should look same
             for i in xrange(1, 3 * self.bins, 3):
@@ -922,8 +922,10 @@ class MC_func:
         if nu.any(losvd):
            if nu.any(losvd < 0) or nu.any(losvd > 10**4) or losvd[1] > 13:
               return 0
-
-        return out
+	if bol:
+	    return 1
+	else:
+            return out
         
     def area_under_curve(self, data):
         #gives area under curve of the data spectra

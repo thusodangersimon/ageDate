@@ -232,10 +232,10 @@ if __name__=='__main__':
    
    #use quick fits for fit of simple function
    fun = G.Gaussian_Mixture_model(1000,1)
-   x,y =fun.data[:,0], fun.data[:,1]
+   x,y =fun.data[:,0], fun.data[:,1]*1000
    params = nu.random.randn(2)*9
    params[1] = nu.abs(params[1])
-   func = lambda x,p: fun.disp_model(p)[1]
+   func = lambda x,p: fun.disp_model(p)[1]*1000
    const = [[-nu.inf,nu.inf],[0,nu.inf]]
    #start program
    chi,param,parambest,chibest = quick_cov_MCMC(x,y,params,func,const)

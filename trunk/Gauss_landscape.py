@@ -244,42 +244,36 @@ class Gaussian_Mixture_model(object):
             #choose param randomly delete
             temp_bins = bins - 1 #nu.random.randint(self._min_order,bins)
             critera = 2**(temp_bins) * (1 - birth_rate )
-            #if .5>nu.random.rand():
+            if .5>nu.random.rand():
                 #merge 2 params together
                 #W1*u+W2*(1-u) = w 
-            '''u,index = nu.random.rand(),nu.random.randint(0,bins,2)
-            active_param[str(temp_bins)][0] = (
+                u,index = nu.random.rand(),nu.random.randint(0,bins,2)
+                #combine the param
+                active_param[str(temp_bins)][0] = (
                     active_param[str(bins)][index[0]*2] *(1-u) +
                     active_param[str(bins)][index[1]*2]*u)
-            active_param[str(temp_bins)][1] = (
+                active_param[str(temp_bins)][1] = (
                     active_param[str(bins)][index[0]*2+1] *(1-u) +
                     active_param[str(bins)][index[1]*2+1]*u)
-            j = 1
-            while j< temp_bins:
-                i = nu.random.randint(0,bins)
-                while i  in index:
-                    i = nu.random.randint(0,bins)
-                index = nu.append(index,i)
-                active_param[str(temp_bins)][j*2] = active_param[str(bins)][i*2] 
-                active_param[str(temp_bins)][j*2+1] = abs(active_param[str(bins)][i*2+1] )
-                j+=1
-                else:'''
-            '''#drop param with largest std
-            index = active_param[str(bins)][range(1,bins*2,2)].argmax()
-            j = 0
-            for i in range(bins):
-                if i == index:
-                    continue
-                active_param[str(temp_bins)][2*j:2*j+2] = nu.copy(active_param[str(bins)][2*i:2*i+2])
-                j += 1'''
-            #drop random param
-            index = nu.random.randint(bins)
-            j = 0
-            for i in range(bins):
-                if i == index:
-                    continue
-                active_param[str(temp_bins)][2*j:2*j+2] = nu.copy(active_param[str(bins)][2*i:2*i+2])
-                j += 1
+                j = 1
+                #copy the rest
+                for i in range(bins):
+                    if i in index:
+                        continue
+                    elif j >= temp_bins:
+                        break
+                    active_param[str(temp_bins)][j*2] = active_param[str(bins)][i*2] 
+                    active_param[str(temp_bins)][j*2+1] = abs(active_param[str(bins)][i*2+1] )
+                    j+=1
+            else:
+                #drop random param
+                index = nu.random.randint(bins)
+                j = 0
+                for i in range(bins):
+                    if i == index:
+                        continue
+                    active_param[str(temp_bins)][2*j:2*j+2] = nu.copy(active_param[str(bins)][2*i:2*i+2])
+                    j += 1
             '''#drop param with smallest prior
             prob =[]
             for i in range(bins):
@@ -298,12 +292,38 @@ class Gaussian_Mixture_model(object):
         else:
             #do quick llsq to help get to better place
             seterr('ignore')
-            f_temp = lambda x :-self.lik(x)
+            #print 'here'
+            f_temp = lambda x :(-self.lik(x) - self.prior(x))
             active_param[str(bins)] = fmin_powell(f_temp, 
-                                                  active_param[str(bins)],maxfun=10,disp=False)
+                                                  active_param[str(bins)],disp=False)
             j, j_timeleft = 0, nu.random.exponential(200)
         return active_param, temp_bins, attempt, critera, j, j_timeleft
 
+    def bic(self):
+        '''() -> ndarray
+        Calculates the Bayesian Information Criteria for all models in 
+        range.
+        '''
+        seterr('ignore')
+        temp = []
+        #set minimization funtion to work with powell method
+        f_temp = lambda x :-self.lik(x)
+        #find maximum likelihood for all models
+        for i in range(self._min_order,self._max_order):
+            #gen params
+            param = self.initalize_param(i)[0]
+            param = fmin_powell(f_temp, param ,disp=False)
+            temp.append([i,nu.copy(param),self.lik(param)])
+
+        #calculate bic
+        #BIC, number of gausians
+        out = nu.zeros((len(temp),2))
+        for i,j in enumerate(temp):
+            out[i,1] = j[2] + j[0]**2*nu.log(self.data.shape[0])
+            out[i,0] = j[0]
+
+        return out
+                
 
 def lik_toyI(p=None,x=115,n=200):
     '''likelihood for toy I'''
