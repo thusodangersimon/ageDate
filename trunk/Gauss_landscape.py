@@ -223,7 +223,7 @@ class Gaussian_Mixture_model(object):
             for j in range(2):
                 active_param[str(temp_bins)][j*2:j*2+2] = eval('mu%i,sigma%i'%(j+1,j+1))
             #det(jocobian)=w_mu*w_sigma and birth percentage)
-            critera = abs(mu * sigma * birth_rate)
+            critera = abs(1/(mu * sigma) * birth_rate)
 
             #copy other vars
             j = 2
@@ -291,11 +291,9 @@ class Gaussian_Mixture_model(object):
             temp_bins, critera = None,None
         else:
             #do quick llsq to help get to better place
-            seterr('ignore')
-            #print 'here'
             f_temp = lambda x :(-self.lik(x) - self.prior(x))
-            active_param[str(bins)] = fmin_powell(f_temp, 
-                                                  active_param[str(bins)],disp=False)
+            active_param[str(temp_bins)] = fmin_powell(f_temp, 
+                                                  active_param[str(temp_bins)],maxfun=10,disp=False)
             j, j_timeleft = 0, nu.random.exponential(200)
         return active_param, temp_bins, attempt, critera, j, j_timeleft
 
