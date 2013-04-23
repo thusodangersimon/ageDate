@@ -510,8 +510,8 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
     #profiling
     t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm = [],[],[],[],[],[],[],[],[] 
     while option.iter_stop:
-        if T_cuurent[str(bins)] % 1001 == 0:
-            print acept_rate[str(bins)][-1],chi[str(bins)][-1],bins,sigma[str(bins)].diagonal(), option.current
+        if T_cuurent[str(bins)] % 20001 == 0:
+            print acept_rate[str(bins)][-1],chi[str(bins)][-1],bins,option.current
             sys.stdout.flush()
 
         #sample from distiburtion
@@ -587,11 +587,17 @@ def RJMC_general(fun, option, swarm_function=vanilla, burnin=5*10**3,seed=None):
             if attempt:
                 #check if accept move
                 tchi = fun.lik(active_param[str(temp_bins)])
-                rj_a = (nu.exp(-(chi[str(bins)][-1]-tchi)/
-                              SA(trans_moves,100,1200.,T_stop)) * critera)
+                #likelihoods
+                rj_a = (-(chi[str(bins)][-1]-tchi)/
+                              SA(trans_moves,100,5000.,T_stop))
+                #parameter priors
+                rj_a += (fun.prior(active_param[str(temp_bins)]) - 
+                         fun.prior(active_param[str(bins)]))
+                #model priors
+                rj_a += 0 #uniform
                 trans_moves += 1
-                print chi[str(bins)][-1],tchi
-                if rj_a > nu.random.rand():
+                #print rj_a , critera, temp_bins>bins
+                if nu.exp(rj_a) * critera > nu.random.rand():
                     #accept move
                     bins = temp_bins +0
                     chi[str(bins)].append(tchi + 0)
@@ -968,6 +974,16 @@ class Topologies(object):
     square - every worker is connect to 4 other workers
     cpus is number of cpus (max or number) to run chains on, k_max is max number of ssps to combine"""
 
+    def Single(self):
+        #Using mpi but want to run chains independantly
+        self.comm = mpi.COMM_SELF
+        self.size = self.comm.Get_size()
+        self.rank = self.comm.Get_rank()
+        self.comm_world = mpi.COMM_SELF
+        self.rank_world = self.comm_world.Get_rank()
+        self.size_world = self.comm_world.Get_size()
+
+
     def All(self):
         #all workers talk to eachother
         self.comm = mpi.COMM_WORLD
@@ -1255,7 +1271,7 @@ class Topologies(object):
         self.chibest = nu.array([[nu.inf]],dtype=float)
         self.parambest = nu.ones(k_max * 3 + 2 + 4) + nu.nan
         #check if topology is in list
-        if not top in ['all', 'ring', 'cliques', 'square']:
+        if not top in ['all', 'ring', 'cliques', 'square','single']:
             raise ValueError('Topology is not in list.')
         if top.lower() == 'all':
             self.All()
@@ -1265,6 +1281,8 @@ class Topologies(object):
             self.Cliques()
         elif top.lower() == 'square':
             self.Square()
+        elif top.lower() == 'single':
+            self.Single()
         #print self.iter_stop
         self.make_swarm()
         self.init_sync_var()
