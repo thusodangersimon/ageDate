@@ -214,7 +214,8 @@ class ezgal(object):
 		files = [ file ]
 
 		# then model_dir if set in environment
-		if self.model_dir: files.append( '%s%s' % (self.model_dir,os.path.basename(file)) )
+		if self.model_dir: 
+                        files.append( '%s%s' % (self.model_dir,os.path.basename(file)) )
 
 		# finally model directory in data directory
 		files.append( '%smodels/%s' % (self.data_dir,os.path.basename(file)) )

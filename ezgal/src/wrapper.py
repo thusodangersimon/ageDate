@@ -28,7 +28,7 @@ class wrapper(object):
 		See wrapper.add_model() for meaning of extra_data and extra_name parameters """
 
 		# models should be a list
-		if type( models ) != type( [] ): models = [models]
+		if type( models ) is not list: models = [models]
 
 		self.models = []
 		self.nmodels = 0
