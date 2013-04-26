@@ -43,8 +43,8 @@ from scipy.special import exp1
 #from scipy.signal import fftconvolve
 import time as Time
 import boundary as bound
-import Age_MCMC as mc
-import Age_RJMCMC as rjmc
+#import Age_MCMC as mc
+#import Age_RJMCMC as rjmc
 from losvd_convolve import convolve
 #import Age_hybrid as hy
 

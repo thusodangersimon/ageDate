@@ -1,16 +1,29 @@
-import ezgal,utils,astro_filter,ezgal_light,wrapper,sfhs,weight,dusts
+'''EzGal 
+==========
+A python module for calculating observables (magnitudes, masses, mass-to-light ratios, etc...) from standard SPS models as a function of filter, formation redshift, and redshift. A web interface to EzGal is available for calculating models and getting results immediately.
 
-__all__ = ["model", "utils", "wrapper", "sfhs", "weight"]
+This is a fork of the EZGAL for running with Age_Date. See http://www.baryons.org/ for more info about EZGAL.
+
+'''
+
+
+
+import src
+import convert #todo
 __author__ = 'Conor Mancone, Anthony Gonzalez'
 __email__ = 'cmancone@gmail.com'
 __ver__ = '2.0'
 
-ezgal = ezgal.ezgal
+ezgal = src.ezgal.ezgal
 model = ezgal
-astro_filter = astro_filter.astro_filter
-ezgal_light = ezgal_light.ezgal_light
-wrapper = wrapper.wrapper
-weight = weight.weight
+astro_filter = src.astro_filter.astro_filter
+ezgal_light = src.ezgal_light.ezgal_light
+wrapper = src.wrapper.wrapper
+weight = src.weight.weight
+
+__all__ = ["model", "utils", "wrapper", "sfhs", "weight"]
+del src
+
 
 def interpolate( values, xs, models=None, key=None, return_wrapper=False ):
 	""" models = ezgal.interpolate( values, xs, models, return_wrapper=False )
