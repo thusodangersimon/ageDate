@@ -34,6 +34,7 @@ import numpy as nu
 from glob import glob
 import Age_date as ag
 import ezgal as gal
+import scipy.stats as stats_dist
 
 class Example_lik_class(object):
 
@@ -121,7 +122,7 @@ class Spectral_fit(object):
     to fit a Spectrum. 
     '''
 
-    def __init__(self,data, use_dust=True, use_losvd=True, spec_lib='Bc03',imf='chab',spec_lib_path='/home/thuso/Phd/stellar_models/ezgal/'):
+    def __init__(self,data, use_dust=True, use_losvd=True, spec_lib='p2',imf='salp',spec_lib_path='/home/thuso/Phd/stellar_models/ezgal/'):
         '''(Example_lik_class,#user defined) -> NoneType or userdefined
 
         initalize class, initalize spectal func, put nx2 or nx3 specta
@@ -136,14 +137,15 @@ class Spectral_fit(object):
         CB07 - Currently unpublished. Please reference as an updated BC03 model.
         M05 - Maraston et al. 2005 (MNRAS, 362, 799)
         C09 - Conroy, Gunn, and White 2009 (ApJ, 699, 486C) and Conroy and Gunn 2010 (ApJ, 712, 833C (Please cite both)
-        PEGASE2 - Fioc and Rocca-Volmerange 1997 (A&A, 326, 950)
+        PEGASE2 (p2) - Fioc and Rocca-Volmerange 1997 (A&A, 326, 950)
         More to come!'''
         
         #initalize data and make ezgal class for uses
         self.data = nu.copy(data)
+        #check data, reduice wavelenght range, match wavelengths to lib
         #get all ssp libs with spec_lib name
-        cur_lib = ['basti', 'bc03', 'cb07','m05','c09','pegase2']
-        assert spec_lib.lower() in cur_lib, ('%s is not in ' %spec_lib.lower() + cur_lib)
+        cur_lib = ['basti', 'bc03', 'cb07','m05','c09','p2']
+        assert spec_lib.lower() in cur_lib, ('%s is not in ' %spec_lib.lower() + str(cur_lib))
         if not spec_lib_path.endswith('/') :
             spec_lib_path += '/'
         models = glob(spec_lib_path+spec_lib+'*'+imf+'*')
@@ -153,7 +155,8 @@ class Spectral_fit(object):
         #crate ezgal class of models
         self.SSP = gal.wrapper(models)
         #check to see if properties are the same
-        
+        self._metal_unq = nu.float64(self.SSP['met'])
+        self._age_unq = nu.copy(self.SSP.sed_ages)
 
     def proposal(self,mu,sigma):
         '''(Example_lik_class, ndarray,ndarray) -> ndarray
@@ -166,15 +169,35 @@ class Spectral_fit(object):
     def lik(self,param):
         '''(Example_lik_class, ndarray) -> float
         Calculates likelihood for input parameters. Outuputs log-likelyhood'''
-        
+        #get model
+        self.SSP.get_sed
+        #apply sfh and dust
+        self.SSP.make_sfh1
+        #apply losvd
+        ag.LOSVD
+        #calc log-lik
+        stats_dist.norm.logpdf
         #return loglik
-        pass
+        
 
     def prior(self,param):
         '''(Example_lik_class, ndarray) -> float
         Calculates log-probablity for prior'''
         #return logprior
-        pass
+        #uniform
+        stats_dist.uniform.logpdf
+        #conj of uniform
+        stats_dist.pareto.logpdf
+        #normal
+        stats_dist.norm.logpdf
+        #multinormal conjuigates
+        stats_dist.gamma.logpdf
+        stats_dist.invgamma.logpdf
+        #exponetal
+        stats_dist.expon
+        #half normal (never negitive)
+        stats_dist.halfnorm
+        
 
 
     def model_prior(self,model):

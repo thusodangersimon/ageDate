@@ -179,11 +179,13 @@ class Gaussian_Mixture_model(object):
                 out += stat_dist.norm.logpdf(i,loc=self.mu,scale=self.var)
         return out.sum()
     
-    def initalize_param(self,order):
+    def initalize_param(self,order,size=1):
         '''initalizes parameters for uses in MCMC'''
         order *= 2
-        params = nu.random.multivariate_normal([0]*order,nu.identity(order)*9)
+        params = nu.random.multivariate_normal([0]*order,nu.identity(order)*9,size)
         sigma = nu.identity(order)*nu.random.rand()*9
+        if size > 1:
+            sigma = [sigma]*size
         return params,sigma
     
     def step_func(self,accept_rate,param,sigma,order):

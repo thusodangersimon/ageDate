@@ -26,13 +26,16 @@
 #
 #
 #
-""" uses PMC to find prosterior of stellar spectra age, metalicity and SFR"""
+""" Uses PMC to find prosterior of stellar spectra age, metalicity and SFR. Uses
+Likelihood_class.py for likelihood class."""
 
 from Age_date import *
 from x_means import xmean
 from scipy.special import gamma
 from scipy.optimize import fmin_l_bfgs_b
 import scipy.stats as stat_dist
+from scipy.misc import logsumexp
+
 
 def test():
     myID = par.rank()
@@ -91,16 +94,15 @@ def PMC_mixture(fun, bins, n_dist=1, pop_num=10**4):
     alpha=nu.array([n_dist**-1.]*n_dist) #[U,N]
     out={}
     #make inital points from grid of all values
-    m,a = nu.meshgrid(fun._metal_unq,fun._age_unq)
-    points = nu.vstack((m.ravel(),a.ravel(),nu.ones_like(a.ravel()))).T
+    #m,a = nu.meshgrid(fun._metal_unq,fun._age_unq)
+    points = fun.initalize_param(bins, pop_num)[0]
     #build population parameters
     print 'initalizing mixture'
-    lik = map(fun.lik,points)
-    points[:,range(2,bins*3,3)] = nu.array(zip(*lik)[1])
-    lik = nu.array(zip(*lik)[0])
-    #do weight average
-    lik = nu.exp(-lik,dtype=nu.float128)
-    lik[lik == 0] = nu.finfo(nu.float128).tiny
+    lik = nu.asarray(map(fun.lik, points))
+    prior = nu.asarray(map(fun.prior, points))
+    poster = lik + prior
+    #devide by miture class to get weights
+
     mu = nu.average(points,0,lik/lik.sum())
     sigma = nu.cov(points.T * nu.vstack([lik/lik.sum()]*bins * 3))
     while True:
@@ -391,128 +393,7 @@ def pop_builder(pop_num,alpha,mu,sig,age_unq,metal_unq,bins):
             index=nu.nonzero(points[:,i]>age_unq[-1])[0] #upper range
             points[index,i]=nu.copy(age_unq[-1])
 
-    return points
-
-class PMC_func:
-    #makes more like function, so input params and the chi is outputted
-    def __init__(self,data,bins,spect=spect):
-        data_match_all(data)
-        self.data=data
-        lib_vals=get_fitting_info(lib_path)
-        lib_vals[0][:,0]=10**nu.log10(lib_vals[0][:,0]) #to keep roundoff error constistant
-        metal_unq=nu.log10(nu.unique(lib_vals[0][:,0]))
-        age_unq=nu.unique(lib_vals[0][:,1])
-        self.lib_vals=lib_vals
-        self.age_unq= age_unq
-        self.metal_unq,self.bins,self.spect=metal_unq,bins,spect
-        self.bounds()
-
-    def func(self,param):
-        #so can evalulate like normal function
-        if len(param)!=self.bins*3:
-            return nu.nan
-        print param
-        return like_gen(self.data,param,self.lib_vals,self.age_unq,self.metal_unq,self.bins)[-1]
-    
-    def func_all(self,param):
-        if len(param)!=self.bins*3:
-            return nu.nan
-        return like_gen(self.data,param,self.lib_vals,self.age_unq,self.metal_unq,self.bins)
- 
-    def min_bound(self):
-        #outputs an array of minimum values for parameters
-        out=nu.zeros(self.bins*3)
-        for k in range(self.bins*3):
-            if any(nu.array(range(0,self.bins*3,3))==k): #metal
-                out[k]=self.metal_unq[0]
-            elif any(nu.array(range(1,self.bins*3,3))==k): #age
-                out[k]=self.age_unq[0]
-            elif any(nu.array(range(2,self.bins*3,3))==k): #norm
-                out[k]=0.0
-        return out
-
-    def max_bound(self):
-        #outputs an array of maximum values for parameters
-        out=nu.zeros(self.bins*3)
-        for k in range(self.bins*3):
-            if any(nu.array(range(0,self.bins*3,3))==k): #metal
-                out[k]=self.metal_unq[-1]
-            elif any(nu.array(range(1,self.bins*3,3))==k): #age
-                out[k]=self.age_unq[-1]
-            elif any(nu.array(range(2,self.bins*3,3))==k): #norm
-                out[k]=nu.inf
-        return out
-
-    def bounds(self):
-        Min=self.min_bound()
-        Max=self.max_bound()
-        out=[]
-        for i in range(len(Min)):
-            out.append((Min[i],Max[i]))
-        self.bounds=nu.copy(out)
-        return out
-
-    def func_prime(self,param,index,h=10**-6):
-    #takes 1st deriv of func
-    #use [f(x+h,params)-f(x-h,params)]/2h
-        temp=nu.copy(param)
-        temp[index]+=h
-        fplus=self.func(temp)
-        temp[index]-=2*h
-        fminus=self.func(temp)
-        return (fplus-fminus)/(2*h)
-
-    def func_2prime(self,param,index,h=10**-6):
-    #takes 2nd deriv of func
-        #does (f(x+h)+f(x-h)-2F(x))/h**2
-        temp=nu.copy(param)
-        temp[index]+=h
-        fplus=self.func(temp)
-        temp[index]-=2*h
-        fminus=self.func(temp)
-        return (fplus+fminus-2*self.func(param))/h**2.
-
-    def step_newton(self,param):
-        #calculates the step used for newton rapshon method
-        #handels boundaries and nan's
-        temp_param=nu.copy(param)
-        for itter in range(10**3):
-            print temp_param
-            for i in range(self.bins*3):
-                #temp_param[i]-=self.func_prime(temp_param,i)/self.func_2prime(temp_param,i)
-                temp_param[i]-=self.func(temp_param)/self.func_prime(temp_param,i)
-                if nu.isnan(temp_param[i]) or nu.isinf(temp_param[i]):
-                    print 'warrning: function not continuous'
-                    raise ValueError
-                if temp_param[i]<self.bounds[i][0]:
-                    if nu.any(i==nu.arange(2,6,3)):
-                        temp_param[i]=1.
-                    else:
-                        temp_param[i]=nu.copy(self.bounds[i][0])
-                elif temp_param[i]>self.bounds[i][1]:
-                    temp_param[i]=nu.copy(self.bounds[i][1])
-
-#sci.fmin_l_bfgs_b(f.func,[-2.,5.7.,10], bounds = f.bounds,approx_grad=True)
-
-def toy():
-
-    pass
-
-def logadd(x):
-    '''Does log(A + B) if only log(A) and log(B) are known. Uses formula
-    A + B = A + ln(1+ B/A)
-    '''
-    x = nu.asarray(x)
-    x = nu.sort(x[nu.isfinite(x)])
-    x = nu.append(x[0],x[x != x[0]])
-    if x.shape[0] == 1:
-        return(x)
-    z = 0
-    for i in range(0,len(x)):
-        z += x[i] + nu.log(1 + nu.sum(nu.exp(z - x[i])))
-        
-    return z
-     
+    return points   
 
 if __name__=='__main__':
     test()

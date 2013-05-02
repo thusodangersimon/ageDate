@@ -372,8 +372,63 @@ class wrapper(object):
 		return self[self.argsort( key )]
 
 	#################
+	## get_sed     ##
+	#################
+        def get_sed(self, age, metal, units='gyrs', met_key = 'met'):
+                ''' wrapper_obj.get_sed(age, metal, units='gyrs')
+
+                Interpolate among stored models and returns sed for specifyed age and metalicity.
+
+                returns ndarray of fluxs
+                '''
+                # make sure we can interpolate
+		if not self.is_matched: 
+                        raise ValueError( "Can't interpolate among the models because the models have different age/wavelength points in their SEDs!" )
+
+		# make sure wrapper object has "met" key
+                key = met_key
+		if not self.meta_data.has_key( key ): 
+                        raise ValueError( "Can't interpolate by %s because that key wasn't found in the wrapper object's meta data!" % key )
+
+		# get meta data for the given key and convert to float
+		meta_values = np.sort(np.float64(self.meta_data[key]))
+
+		# make sure the chosen metalicity is bounded by the meta data values
+                #######put in covex hull method
+		if metal < meta_values.min() or metal > meta_values.max():
+			raise ValueError( 'Metalicity is not in range' )
+                #check if age is bounded
+                ######need to check units
+                if age < self.sed_ages.min() or age > self.sed_ages.max():
+			raise ValueError( 'Age is not in range' )
+                #get seds for interp
+                #check if interp needed for metals
+                if np.any(metal == meta_values):
+                        for i in self.models:
+                                if float(i.meta_data[key]) == metal:
+                                        return i.get_sed(age,age_units=units)
+                #not, get 2 metalicites and interp
+                mod_index = np.searchsorted(meta_values,metal,side='right')
+                if mod_index == 0 or mod_index == len(meta_values):
+                        #didn't find metal
+                        raise ValueError('Metalicity not in range')
+                temp_sed = []
+                for i in self.models:
+                        if float(i.meta_data[key]) == meta_values[mod_index - 1]:
+                                temp_sed.append([meta_values[mod_index - 1], i.get_sed(age,age_units=units)])
+                        if float(i.meta_data[key]) == meta_values[mod_index]:
+                                temp_sed.append([meta_values[mod_index], i.get_sed(age,age_units=units)])
+                #interp!
+                out_sed = self._linear_interpolation([temp_sed[0][0],temp_sed[1][0]],[temp_sed[0][1],temp_sed[1][1]],metal)
+
+                return out_sed
+                
+	#################
 	## interpolate ##
 	#################
+        def _linear_interpolation(self,x,y_temp,x_eval):
+                return y_temp[0]+(x_eval-x[0])*(y_temp[1]-y_temp[0])/(x[1]-x[0])
+
 	def interpolate( self, key, values, return_wrapper=True ):
 		""" wrapper_obj.interpolate( key, values, return_wrapper=True ):
 		
@@ -814,3 +869,6 @@ class wrapper(object):
 		
 		for model in self:
 			model.set_normalization( filter, z, mag, vega=vega, apparent=apparent )
+
+
+                
