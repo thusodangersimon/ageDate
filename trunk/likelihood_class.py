@@ -35,6 +35,8 @@ from glob import glob
 import Age_date as ag
 import ezgal as gal
 import scipy.stats as stats_dist
+import multiprocessing as multi
+from itertools import izip
 
 class Example_lik_class(object):
 
@@ -48,6 +50,7 @@ class Example_lik_class(object):
         initalize class, can do whatever you want. User to define functions'''
         #return #whatever you want or optional
         pass
+
 
     def proposal(self,mu,sigma):
         '''(Example_lik_class, ndarray,ndarray) -> ndarray
@@ -116,6 +119,122 @@ class Example_lik_class(object):
 
 #=============================================
 #spectral fitting with RJCMC Class
+class VESPA_fit(object):
+    '''Finds the age, metalicity, star formation history, 
+    dust obsorption and line of sight velocity distribution
+    to fit a Spectrum.
+
+    Uses vespa methodology splitting const sfh into multiple componets
+    '''
+    def __init__(self,data, min_sfh=1,max_sfh=16,lin_space=False,use_dust=True, use_losvd=True, spec_lib='p2',imf='salp',spec_lib_path='/home/thuso/Phd/stellar_models/ezgal/'):
+        '''(VESPA_fitclass, ndarray,int,int) -> NoneType
+        data - spectrum to fit
+        *_sfh - range number of burst to allow
+        lin_space - make age bins linearly space or log spaced
+        use_* allow useage of dust and line of sigt velocity dispersion
+        spec_lib - spectral lib to use
+        imf - inital mass function to use
+        spec_lib_path - path to ssps
+        sets up vespa like fits
+        '''
+        self.data = data
+        #load models
+        cur_lib = ['basti', 'bc03', 'cb07','m05','c09','p2']
+        assert spec_lib.lower() in cur_lib, ('%s is not in ' %spec_lib.lower() + str(cur_lib))
+        if not spec_lib_path.endswith('/') :
+            spec_lib_path += '/'
+        models = glob(spec_lib_path+spec_lib+'*'+imf+'*')
+        if len(models) == 0:
+            models = glob(spec_lib_path+spec_lib.lower()+'*'+imf+'*')
+        assert len(models) > 0, "Did not find any models"
+        #crate ezgal class of models
+        SSP = gal.wrapper(models)
+        #make all burst modes that can be used
+        age = SSP.sed_ages
+        self.models = {}
+        print 'Initalizing models. Please wait'
+        for i in range(min_sfh, max_sfh+1):
+            models = []
+            if lin_space:
+                #lin space
+                lenght = age.ptp()/float(i)/10**9
+            else:
+                lenght = nu.exp(nu.log(age).ptp()/float(i))
+            for j in SSP:
+                models.append(j.make_burst(lenght))
+            models = class_map(
+            self.models['burst'+str(i)] = [['metal', 'sfr']*i,gal.wrapper(models)]
+            print 'Finished %i out of %i models' %(i,max_sfh)
+        #check to see if properties are the same
+        self._metal_unq = nu.float64(SSP['met'])
+        self._age_unq = nu.copy(SSP.sed_ages)/10.**9
+ 
+
+    def proposal(self,mu,sigma):
+        '''(Example_lik_class, ndarray,ndarray) -> ndarray
+        Proposal distribution, draws steps for chain. Should use a symetric
+        distribution'''
+        
+        #return up_dated_param 
+        pass
+
+    def lik(self,param):
+        '''(Example_lik_class, ndarray) -> float
+        Calculates likelihood for input parameters. Outuputs log-likelyhood'''
+        
+        #return loglik
+        pass
+
+    def prior(self,param):
+        '''(Example_lik_class, ndarray) -> float
+        Calculates log-probablity for prior'''
+        #return logprior
+        pass
+
+
+    def model_prior(self,model):
+        '''(Example_lik_class, any type) -> float
+        Calculates log-probablity prior for models. Not used in MCMC and
+        is optional in RJMCMC.'''
+        #return log_model
+        pass
+
+    def initalize_param(self,model):
+        '''(Example_lik_class, any type) -> ndarray, ndarray
+
+        Used to initalize all starting points for run of RJMCMC and MCMC.
+        outputs starting point and starting step size'''
+        #return init_param, init_step
+        pass
+
+        
+    def step_func(self,step_crit,param,step_size,model):
+        '''(Example_lik_class, float, ndarray or list, ndarray, any type) ->
+        ndarray
+
+        Evaluates step_criteria, with help of param and model and 
+        changes step size during burn-in perior. Outputs new step size
+        '''
+        #return new_step
+        pass
+
+    def birth_death(self,birth_rate, model, param):
+        '''(Example_lik_class, float, any type, dict(ndarray)) -> 
+           dict(ndarray), any type, bool, float
+
+        For RJMCMC only. Does between model move. Birth rate is probablity to
+        move from one model to another, models is current model and param is 
+        dict of all localtions in param space. 
+        Returns new param array with move updated, key for new model moving to,
+        whether of not to attempt model jump (False to make run as MCMC) and the
+        Jocobian for move.
+        '''
+        #for RJCMC
+        #return new_param, try_model, attemp_jump, Jocobian
+        #for MCMC
+        #return None, None, False, None
+        pass
+
 class Spectral_fit(object):
     '''Finds the age, metalicity, star formation history, 
     dust obsorption and line of sight velocity distribution
@@ -158,10 +277,19 @@ class Spectral_fit(object):
         self._metal_unq = nu.float64(self.SSP['met'])
         self._age_unq = nu.copy(self.SSP.sed_ages)/10.**9
         #make keys for models (all caps=required, lower not required
-        self.models = {'SSP':['age','metal','norm'],'dust':['tbc','t']}
+        #+ means additive modesl, * is multiplicative or convolution
+        self.get_sed = lambda x: x[2] * self.SSP.get_sed(x[0],x[1])
+        self.models = {'SSP+':[['age','metal','norm'],self.get_sed],
+			'dust*':[['tbc','tsm'],ag.dust]}
         #set values for priors
         
-
+    def _model_handeler(self,models):
+        '''(Example_lik_class, str) -> str
+        
+        Not called by RJMMCMC or MCMC, but handels how models interact
+        '''
+        pass
+		
     def proposal(self,mu,sigma):
         '''(Example_lik_class, ndarray,ndarray) -> ndarray
         Proposal distribution, draws steps for chain. Should use a symetric
@@ -176,27 +304,21 @@ class Spectral_fit(object):
         '''(Example_lik_class, ndarray, str) -> float
         Calculates likelihood for input parameters. Outuputs log-likelyhood'''
         #get model
-        return 0.
         imodel = []
-        has_dust = False
-        has_losvd = False
+		#get additive models
         for i,j in enumerate(model.split(',')):
-            if j == 'SSP':
+            if j.endswith('+'):
                 try:
-                    imodel.append(param[model][i][2] * self.SSP.get_sed(param[model][i][0],
-                                                param[model][i][1]))
+                    imodel.append(self.models[j][1](param[model][i]))
                 except ValueError:
                     return -nu.inf
-            elif j == 'dust':
-                has_dust = True
-            elif j == 'losvd':
-                has_losvd = True
-                
-        #apply losvd and dust
-        if has_dust:
-            self.SSP.dust
-        if has_losvd:
-            ag.LOSVD
+
+		#combine data with
+		imodel = nu.sum(imodel,0)
+        #apply multipliticave or convolution models
+        for i,j in enumerate(model.split(',')):
+            if j.endswith('*'):
+				imodel = self.models[j][1](imodel,param[model][i])
 
         #make model and data have same wavelength
         
@@ -320,3 +442,36 @@ class Spectral_fit(object):
         #for MCMC
         #return None, None, False, None
         
+#######other functions
+
+#used for class_map
+def spawn(f):
+    def fun(q_in,q_out):
+        while True:
+            i,x = q_in.get()
+            if i == None:
+                break
+            q_out.put((i,f(x)))
+    return fun
+
+def parmap(f, X, nprocs = multi.cpu_count()):
+    q_in   = multi.Queue(1)
+    q_out  = multi.Queue()
+
+    proc = [multi.Process(target=spawn(f),args=(q_in,q_out)) for _ in range(nprocs)]
+    for p in proc:
+        p.daemon = True
+        p.start()
+
+    sent = [q_in.put((i,x)) for i,x in enumerate(X)]
+    [q_in.put((None,None)) for _ in range(nprocs)]
+    res = [q_out.get() for _ in range(len(sent))]
+
+    [p.join() for p in proc]
+
+    return [x for i,x in sorted(res)]
+
+def test(fun,*iters):
+
+    for i in iters:
+        print fun, i

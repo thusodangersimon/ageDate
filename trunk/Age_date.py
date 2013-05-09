@@ -27,12 +27,12 @@
 #
 #
 #
-""" A python version of the age dating spectral fitting code done by Mongwane 2010"""
+""" Utilites used for spectral fitting"""
 
 import numpy as nu
 import os
 import sys
-from multiprocessing import *
+#from multiprocessing import *
 from interp_func import *
 from spectra_func import *
 from scipy.optimize import nnls
@@ -422,7 +422,11 @@ def dict_size(dic):
     return size
 
 def dust(param, model):
-    #does 2 componet dust calibration model following charlot and fall 2000
+   '''(ndarray or list, dict(ndarray)) -> ndarray
+
+    Applies 2 componet dust model following charlot and fall 2000 on model
+   returns same shape as model
+   '''
     t_bc = 7.4771212547196626 #log10(.03*10**9)
     if nu.any(param[-2:] <= 0):
         return model
@@ -442,7 +446,8 @@ def dust(param, model):
     return model
 
 def f_dust(tau): 
-    #dust extinction functin
+    '''(ndarray) -> ndarray
+    Dust extinction functin'''
     out = nu.zeros_like(tau)
     if nu.all(out == tau): #if all zeros
         return nu.ones_like(tau)
