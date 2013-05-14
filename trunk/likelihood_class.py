@@ -151,10 +151,46 @@ class VESPA_fit(object):
         SSP = gal.wrapper(models)
         #make all burst modes that can be used
         age = SSP.sed_ages
+        #remove zeros
+        age = age[age != 0]
+        print age
+        '''
+        ####get all Spectra needed for mcmc run
+        #create lenght and age needed from each model
+        needed = []
+        for i in range(min_sfh, max_sfh+1):
+            if not lin_space:
+                #log space
+                space_age = nu.logspace(nu.log10(age).min(),nu.log10(age).max()
+                                        ,i+1)
+            else:
+                #linear spacing
+                space_age = nu.linspace(age.min(), age.max(), i+1)
+            for j in range(i):
+                #[mean_age_log, length (gyrs)]
+                needed.append([space_age[j:j+2].mean(),space_age[j:j+2].ptp()/10**9])
+        needed = nu.asarray(needed)
+        #sort and combine lengths 
+        lengths = nu.unique(needed[:,1])
+        self.SSP = None
+        get_burst = lambda fun,x: fun.make_burst(x)
+        j = 1
+        for i in lengths:
+            print j
+            #ages = needed[needed[:,1] == i,0]
+            temp_models = map(get_burst,SSP.models,[i]*len(SSP.models))
+            if self.SSP is None:
+                self.SSP = gal.wrapper(temp_models)
+            else:
+                self.SSP += gal.wrapper(temp_models)
+            j+=1
+        #save models for later
+        #create model usage for RJMCMC
         self.models = {}
         print 'Initalizing models. Please wait'
         for i in range(min_sfh, max_sfh+1):
             models = []
+            #calculate total splits
             if lin_space:
                 #lin space
                 lenght = age.ptp()/float(i)/10**9
@@ -162,9 +198,9 @@ class VESPA_fit(object):
                 lenght = nu.exp(nu.log(age).ptp()/float(i))
             for j in SSP:
                 models.append(j.make_burst(lenght))
-            models = class_map(
-            self.models['burst'+str(i)] = [['metal', 'sfr']*i,gal.wrapper(models)]
-            print 'Finished %i out of %i models' %(i,max_sfh)
+            #models = class_map(
+            #self.models['burst'+str(i)] = [['metal', 'sfr']*i,gal.wrapper(models)]
+            #print 'Finished %i out of %i models' %(i,max_sfh)'''
         #check to see if properties are the same
         self._metal_unq = nu.float64(SSP['met'])
         self._age_unq = nu.copy(SSP.sed_ages)/10.**9
@@ -454,7 +490,8 @@ def spawn(f):
             q_out.put((i,f(x)))
     return fun
 
-def parmap(f, X, nprocs = multi.cpu_count()):
+def parmap(f, *X):
+    nprocs = multi.cpu_count()
     q_in   = multi.Queue(1)
     q_out  = multi.Queue()
 
@@ -463,15 +500,10 @@ def parmap(f, X, nprocs = multi.cpu_count()):
         p.daemon = True
         p.start()
 
-    sent = [q_in.put((i,x)) for i,x in enumerate(X)]
+    sent = [q_in.put((i,x)) for i,x in enumerate(zip(*X))]
     [q_in.put((None,None)) for _ in range(nprocs)]
     res = [q_out.get() for _ in range(len(sent))]
 
     [p.join() for p in proc]
 
     return [x for i,x in sorted(res)]
-
-def test(fun,*iters):
-
-    for i in iters:
-        print fun, i

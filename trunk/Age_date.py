@@ -32,7 +32,7 @@
 import numpy as nu
 import os
 import sys
-#from multiprocessing import *
+from multiprocessing import *
 from interp_func import *
 from spectra_func import *
 from scipy.optimize import nnls
@@ -424,26 +424,26 @@ def dict_size(dic):
 def dust(param, model):
    '''(ndarray or list, dict(ndarray)) -> ndarray
 
-    Applies 2 componet dust model following charlot and fall 2000 on model
+   Applies 2 componet dust model following charlot and fall 2000 on model
    returns same shape as model
    '''
-    t_bc = 7.4771212547196626 #log10(.03*10**9)
-    if nu.any(param[-2:] <= 0):
-        return model
+   t_bc = 7.4771212547196626 #log10(.03*10**9)
+   if nu.any(param[-2:] <= 0):
+      return model
     #set all itterated varibles for speed
-    bins = (param.shape[0] - 2) / 3
-    tau_lam = (model['wave'] / 5500.) ** (-.7)
-    T_ism = f_dust(param[-2] * tau_lam)
-    T_bc = f_dust(param[-1] * tau_lam)
-    for i in xrange(bins): 
-        #choose which combo of dust models to use
-        if param[3 * i + 1] <= t_bc: 
-            #fdust*fbc
-            model[str(i)] *= T_ism * T_bc
-        else:
-            #fdust
-            model[str(i)] *= T_ism
-    return model
+   bins = (param.shape[0] - 2) / 3
+   tau_lam = (model['wave'] / 5500.) ** (-.7)
+   T_ism = f_dust(param[-2] * tau_lam)
+   T_bc = f_dust(param[-1] * tau_lam)
+   for i in xrange(bins): 
+      #choose which combo of dust models to use
+      if param[3 * i + 1] <= t_bc: 
+         #fdust*fbc
+         model[str(i)] *= T_ism * T_bc
+      else:
+         #fdust
+         model[str(i)] *= T_ism
+   return model
 
 def f_dust(tau): 
     '''(ndarray) -> ndarray

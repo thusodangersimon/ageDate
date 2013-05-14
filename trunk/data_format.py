@@ -27,556 +27,104 @@
 #
 #
 '''
-does all fits file stuff to format correctly for AGE_date moduals
-most code is taken from ULYSS will site later
+Creates models that will work with EZGAL. Makes CSP (composite spectra
+) using multiproccessing or MPI. Adds meta data for models that don't have it
 '''
 
 import numpy as nu
 import pyfits as fits
 import os
+import ezgal as gal
 from scipy.stats import signaltonoise as stn
+from glob import glob
 
-def Salt_fits(name,redshift=None):
-    #takes 1-d spectra and returns [wavelenght,flux,uncertanty]
-    #uncertanty is calculated fron scipy.stats.signaltonoise program
-    #signal to noise is calculated by numpy.mean(data)/numpy.std(data)
-    spectra=fits.open(name)
-    #wavelength create
-    start,step=spectra[0].header['CRVAL1'],spectra[0].header['CDELT1']
-    length=len(spectra[0].data)
-    out=nu.zeros([length,3])
-    out[:,0]=start+nu.arange(length)*step
-    out[:,1]=spectra[0].data
-    out[:,2]+=nu.std(out[:,1])
-    #redshift calibration
-    if not spectra[0].header.has_key('Z') and redshift:
-        raise KeyError('Does not have redshift keyword. Run get_2slaq_redshift'+
-                       ' to coorect')
-    else:
-        try:
-            redshift=spectra[0].header['Z']
-        except KeyError:
-            print name
-            raise
-    out[:,0] = z_cal(out[:,0],redshift)
+def add_meta():
+    '''adds meta data to exsisting ezgal libraires'''
+    pass
+
+def make_mpi_burst(lengths, spec_lib='p2',imf='salp',spec_lib_path='/home/thuso/Phd/stellar_models/ezgal/'):
+    '''(list, int, str,str,str) -> EZGAL.wrapper
+    makes burst using mpi
+    '''
+    #load models and make wrapper
+    cur_lib = ['basti', 'bc03', 'cb07','m05','c09','p2']
+    assert spec_lib.lower() in cur_lib, ('%s is not in ' %spec_lib.lower() + str(cur_lib))
+    if not spec_lib_path.endswith('/') :
+        spec_lib_path += '/'
+    models = glob(spec_lib_path+spec_lib+'*'+imf+'*')
+    if len(models) == 0:
+        models = glob(spec_lib_path+spec_lib.lower()+'*'+imf+'*')
+    assert len(models) > 0, "Did not find any models"
+        #crate ezgal class of models
+    SSP = gal.wrapper(models)
+   
+    #genrate models from list
+    out = []
+    for i in lengths:
+        for j in SSP.models:
+            out.append(j.make_burst(round(i,19)))
+    #return models
     return out
 
-def get_2slaq_redshift(fits_files,cat_file,object_name):
-    #reads in 2slaq.cat file and adds "Z" key_word to fits file
-    #will skip over '#' charaters and match object_name to cat and add redshift
-    #to input fits files
-    slaq_cat=open(cat_file)
-    fits_hdu=fits.open(fits_files,'update')
-    line=slaq_cat.readline()
-    #check format of cat file
-    #if first line is not start of catalog
-    if not (len(line.split()[0])==19 and line.split()[0][0]=='J'): 
-        #check for #'s
-        if line.split()[0][0]=='#':
-            #skip to first non hash
-            while line.split()[0][0]=='#':
-                line=slaq_cat.readline()
-        else: #try skiping to first contition
-            while (len(line.split()[0])==19 and line.split()[0][0]=='J'):
-                line=slaq_cat.readline()
-    #start of loading catalog
-    cat={}
-    cat[line.split()[0]]=float(line.split()[12])
-    for i in slaq_cat:
-        temp=i.split()
-        cat[temp[0]]=float(temp[12])
-    if cat.has_key(object_name):
-        fits_hdu[0].header.update('Z',cat[object_name], 'Redshift')
-    else:
-        #try first 7 chars and search
-        temp=nu.array(cat.keys())
-        index=[]
-        for i in range(len(temp)):
-            if temp[i][:7]==object_name[:7]:
-                index.append(i+0)
-        if len(index)>1 or len(index)==0:
-            #print '%s is not found in catolog' %object_name
-            raise ValueError('%s is not found in catolog' %object_name)
-        else:
-            fits_hdu[0].header.update('Z',cat[temp[index[0]]], 'Redshift')
-    #write out
-    fits_hdu.update_extend()
-    fits_hdu.close()
+if __name__ == '__main__':
 
-
-#==============================================================================
-# reading routine for SDSS-style format (format=1)
-def spect_read_sdss(sdss_name,option='flux'):
-    #reads from HDR1 and does redshift calibration to Z=0
-    #outputs data in coulum format [wave,flux,uncert (sigma)]
-    #option can be "best_fit" or "flux"
-    sdss=fits.open(sdss_name)[1]
-    out=nu.zeros([sdss.header['NAXIS2'],3])
-    out[:,0]=sdss.data.field('wavelength')/(1+float(sdss.header['Z'])) #redshift correction
-    option=option.lower()
-    if option=='best_fit' or option=='flux':
-        out[:,1]=sdss.data.field(option)
-    else:
-        print 'option must be "best_fit" or "flux"'
-        raise(KeyError)
-    out[:,2]=nu.sqrt(1/sdss.data.field('inverse_variance'))
-    #use and mask and keep only mask==0 and remove any of out[:,2]!=inf
-    out=out[sdss.data.field('and_mask')==0,:]
-    out=out[~nu.isinf(out[:,2]),:]
-    return out
-
-
-def stack(indir,sp='1d'):
-    #does stacking of spectra,
-    #sp is type of spectra are being used '1d' and 'ssds'
-    if indir[-1]!='/':
-        indir+='/'
-    if sp=='1d':
-        fun=Salt_fits
-    elif sp=='ssds':
-        fun=spect_read_sdss
-    else:
-        print 'That option does not exsist, try "1d" or "ssds"'
-        raise
-    files=os.listdir(indir)
-    temp_data={}
-    length=[]
-    wave=nu.array([])
-    for i in files:
-        temp_data[i]=fun(indir+i)
-        length.append(len(temp_data[i][:,0]))
-        wave=nu.append(wave,temp_data[i][:,0])
-    #bin wavelengths
-    out=nu.zeros([max(length),3])
-    out[:,0]=nu.histogram(wave,bins=max(length))[1][:-1]
-    for i in temp_data.keys(): #slopy
-        out[:,1]+=nu.interp(out[:,0],temp_data[i][:,0],temp_data[i][:,1])
-        out[:,2]+=nu.interp(out[:,0],temp_data[i][:,0],temp_data[i][:,2])**2
-
-    out[:,1]/=len(temp_data.keys())
-    out[:,2]=nu.sqrt(out[:,2]/len(temp_data.keys())**2)
-    return out
-
-def z_cal(wave,redshift):
-    #does redshift calibration to put at z=0
-    return wave/(1+float(redshift)) 
+    '''do MPI stuff here'''
+    import mpi4py.MPI as mpi
+    comm = mpi.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
     
-"""
-
-
-#==============================================================================
-# reading routine for BINTABLE format (format=2)
-function uly_spect_read_tbl, data, h, ERR_SP=err_sp, SNR_SP=snr_sp, QUIET=quiet
-  
-# we should there find what collumns to read (for data, error and mask)
-  
-# for the moment it is only suited to the spectra produced by spec2d,
-# the pipeline of DEIMOS: 
-# http://astro.berkeley.edu/~cooper/deep/spec2d/primer.html
-  
-# IVAR is the inverse of the variance of each px
-if tag_exist(data, 'IVAR') then begin
-   zeros = where(data.ivar eq 0, cnt, compl=goodpix)
-   if cnt gt 0 then data.ivar[zeros] = 1 #we put arbitary value for the masked pxs
-   err = 1d/sqrt(data.ivar)
-endif
-
-return, uly_spect_alloc(DATA=data.spec, WAVELEN=data.lambda, ERR=err, GOODPIX=goodpix, SAMP=2)
-
-end
-
-#==============================================================================
-# reading routine of 1D and LSS spectra (format=3)
-function uly_spect_read_lss, data, h, DISP_AXIS=disp_axis, QUIET=quiet
-
-SignalLin = uly_spect_alloc(DATA=data, HEAD=h)
-naxis = sxpar(h, 'NAXIS')
-
-
-# ----------------------------------------------------------------------------
-# search the dispersion axis, and the dispersion type (lin or log)
-disp_type = -1
-if n_elements(disp_axis) le 0 then disp_axis = 0
-vacuum = 0  # Set to 1 if the wavelengths are in vacuum
-
-if disp_axis le 0 then begin #  is there a standard WCS? (Vacuum wavelength)
-    ctype = sxpar(h,'CTYPE*',COUNT=cnt)
-    if cnt gt 0 then begin
-        if ctype[0] eq 'WAVE-WAV' then begin #if it is 2d we need the first CTYPE
-            creator = sxpar(h,'CREATOR', COUNT=count) # try to patch a Pleinpot bug
-            if count gt 0 and creator eq 'Pleinpot     1' then ctype = 'AWAV'
-#  in Elodie lib. 'WAVE' means air (in fits standarts 'AWAV' is air wavelength)
-        endif
-        disp_axis = 1 + where(strtrim(ctype,2) eq 'WAVE' or strmid(ctype,0,5) eq 'WAVE-') 
-        if disp_axis gt 0 then begin
-            if not keyword_set(quiet) then $
-              print, 'Dispersion axis is ', strtrim(disp_axis[0],2), ' (Vacuum wavelength)'
-            vacuum = 1
-        endif
-    endif
-endif
-
-if disp_axis le 0 then begin #  is there a standard WCS? (Air wavelength)
-    disp_axis = 1 + where((strmid(ctype,0,4) eq 'AWAV') eq 1) 
-    if disp_axis gt 0 then begin
-        if not keyword_set(quiet) then $
-          print, 'Dispersion axis is ', strtrim(disp_axis[0],2), ' (Air wavelength)'
-        if max(strmid(ctype[disp_axis-1],5,3) eq ['   ', 'WAV']) then begin
-            disp_type = 0
-            if not keyword_set(quiet) then print, 'Dispersion axis is linear'
-        endif else if strmid(ctype[disp_axis-1],5,3) eq 'LOG' then begin
-            disp_type = 1
-            if not keyword_set(quiet) then $
-              print, 'Dispersion axis is logarithmic'
-        endif
-    endif
-endif
-
-if disp_axis eq 0 then begin
-    disp_axis = 1
-    if naxis gt 1 and not keyword_set(quiet) then $
-      message, 'We assume that the dispersion axis is 1 (X)', /INFO
-endif else $
-  if disp_axis eq 2 then *SignalLin.data = transpose(*SignalLin.data)
-
-ax = strtrim(disp_axis[0],2)
-crval = double(string(sxpar(h,'CRVAL'+ax)))
-
-if disp_type lt 0 then begin    # search the dispersion mode
-    disp_type = 0
-    if crval lt 10 then begin
-        disp_type = 1
-        if crval lt 5 then begin
-            if not keyword_set(quiet) then $
-              print, 'Assume that the dispersion is in log10',crval,'CRVAL'+ax
-        endif else if not keyword_set(quiet) then $
-          print, 'Assume that the dispersion is in log (air wavelength)'
-    endif else if not keyword_set(quiet) then $
-      print, 'Assume that the dispersion is linear (air wavelength)'
-endif 
-
-if disp_type ne 0 and disp_type ne 1 then $
-  message, 'Do not handle this sampling (yet)'
-
-# ----------------------------------------------------------------------------
-# decode the spectral WCS
-cdelt = double(string(sxpar(h,'CD'+ax+'_'+ax, COUNT=count)))
-if count eq 0 then cdelt = double(string(sxpar(h,'CDELT'+ax)))
-
-crpix = double(sxpar(h, 'CRPIX'+ax, COUNT=count))
-if count eq 0 then crpix = 1d
-crval = crval - (crpix - 1d) * cdelt # wavelength of the 1st pixel
-
-if (cdelt le 0.) or (crval le 0.) then $
-  message,'WCS of the observations not set correctly'
-
-if disp_type eq 1 and crval lt 5 then begin  
-#   normally axis should be logn, but sometime it is log 10 ...
-    if not keyword_set(quiet) then $
-      print, 'Convert axis scale from log10 to log'
-    crval *= alog(10d)
-    cdelt *= alog(10d)
-endif
-
-if vacuum eq 1 then begin
-    if not keyword_set(quiet) then $
-      print, 'Wavelength in VACUUM ... approximately converted'
-    if disp_type eq 0 then begin 
-        crval /= 1.00028d 
-        cdelt /= 1.00028d 
-    endif else if disp_type eq 1 then crval -= 0.00028D
-endif
-
-# ----------------------------------------------------------------------------
-# load the output structure
-
-SignalLin.sampling = disp_type # sampling in wavelength: lin/log
-SignalLin.start = crval
-SignalLin.step = cdelt
-
-dof_factor = double(string(sxpar(h, 'DOF_FACT', COUNT=count)))
-if count eq 1 then SignalLin.dof_factor = dof_factor
-
-*SignalLin.hdr = h[3:*]      # initialize the header
-sxdelpar, *SignalLin.hdr, $     # remove wcs and array specific keywords
-  ['NAXIS1', 'CRVAL1', 'CRPIX1', 'CD1_1', 'CDELT1', 'CTYPE1', 'CROTA1', $
-   'CD2_1', 'CD1_2', 'DATAMIN', 'DATAMAX', 'CHECKSUM' $
-  ]
-
-return, SignalLin
-
-end
-
-#==============================================================================
-function uly_spect_read, file_in, lmin, lmax,                         $
-                         VELSCALE=velscale, SG=sg,                    $
-                         ERR_SP=err_sp, SNR_SP=snr_sp, MSK_SP=msk_sp, $
-                         DISP_AXIS=disp_axis, QUIET=quiet
-
-## read the first extension that we hope contains a spectrum
-#fits_read, file_in, data, h
-
-# test if the file or unit argument is valid
-if size(file_in, /TYPE) ne 3 and size(file_in, /TYPE) ne 7 then begin
-    print, 'usage: ULY_SPECT_READ <filename>, ...'
-    print, 'first argument must be a file name or unit number'
-    return, 0
-endif
-file_inl = file_in  # local copy of the argument
-if size(file_in, /TYPE) eq 7 then begin
-    if file_test(file_in) ne 1 then begin
-        file_inl += '.fits'
-        if file_test(file_inl) ne 1 then begin
-            print, 'usage: ULY_SPECT_READ <filename>, ...'
-            print, 'Error, file does not exist (' + file_in + ')'
-            return, 0
-        endif
-    endif
-endif
-
-if n_elements(sg) eq 1 then begin
-    if abs(sg) gt 10 then message, /INFO, $
-      'Notice that the SG (redshift) has an odd value: '+strtrim(sg,2)+$
-      ' is it correct? (it should be a "z", not a "cz")'
-endif
-
-# read the first non-empty extension that we hope contains a spectrum
-naxis = 0
-nhdu = 0
-status = 0
-while naxis eq 0 and status eq 0 do begin       # skip leading empty HDUs
-    data = mrdfits(file_inl, nhdu, h, /SILENT, STATUS=status)
-    if n_elements(h) eq 0 then begin
-        print, 'Cannot access to the data in the file (invalid format?)'
-        return, 0
-    endif
-    naxis = sxpar(h,'NAXIS')
-    nhdu++
-endwhile
-if status ne 0 then begin
-    print, 'Could not find a valid HDU in ', file_inl
-    return, 0
-endif
-
-# switch to the appropriate reading routine
-case uly_spect_filefmt(h) of
-    1 : spect = uly_spect_read_sdss(data, h, ERR_SP=err_sp, SNR_SP=snr_sp, QUIET=quiet)
-    2 : spect = uly_spect_read_tbl(data, h, ERR_SP=err_sp, SNR_SP=snr_sp, QUIET=quiet)
-    3 : spect = uly_spect_read_lss(data, h, DISP_AXIS=disp_axis, QUIET=quiet)
-    else : begin
-        return, uly_spect_alloc(TITLE=file_in)
-    end
-endcase
-
-ntot = n_elements(*spect.data)
-
-if ntot eq 0 then begin
-    print, 'No data read from FITS file'
-    return, spect
-endif
-
-spect.title = file_in
-
-# Handle the case when error  (or signal to noise) is read from another file
-#    assume WCS are the same for error & data spectra
-if n_elements(err_sp) gt 0 then begin
-    testfile = FILE_INFO(err_sp)    
-    if testfile.exists eq 1 then begin
-        fits_read, err_sp, *spect.err, h_err 
-        if disp_axis eq 2 then err = transpose(err)
-    endif else $
-       message, 'File:' + err_sp + ' does not exsists...'
-    for i=0,n_elements((*spect.err)[0,*])-1 do begin #for 2D case
-       nans = where(finite((*spect.err)[*,i]) eq 0, cnt, COMP=fin)
-       if cnt ne 0 then (*spect.err)[nans,i] = max((*spect.err)[fin,i])
-    endfor
-endif else if keyword_set(snr_sp) then begin
-    testfile = FILE_INFO(snr_sp)
-    if testfile.exists eq 1 then begin
-        fits_read, snr_sp, err
-        if disp_axis eq 2 then err = transpose(err)
-        *spect.err = *spect.data / err
-    endif else $
-      message, 'SNR spectrum file not valid'
-    for i=0,n_elements((err)[0,*])-1 do begin #for 2D case
-       neg = where(err[*,i] le 0, c, COMPLEM=pos)
-       if c gt 0 then begin
-          err[neg] = 1
-          em = 10 * max((*spect.err)[pos,i])
-          (*spect.err)[neg,i] = em
-          message, 'The SNR spectrum '+strtrim(string(i),2)+ ' has '+strtrim(string(c),2)+$
-                   ' negative or null values. Their error is set to '+$
-                   strtrim(string(em),2), /INFO
-       endif 
-       nans = where(finite((*spect.err)[*,i]) eq 0, cnt, COMP=fin)
-       if cnt ne 0 then (*spect.err)[nans,i] = max((*spect.err)[fin,i])
-    endfor    
- endif
-
-if n_elements(msk_sp) gt 0 then begin
-    message, 'Read MASK spectrum ... NOT YET IMPLEMENTED'
-endif
-
-# Apply the shift to restframe if required
-if n_elements(sg) gt 0 then begin  # shift to rest-frame
-    z1 = 1d + sg
-    case spect.sampling of
-        0 : begin
-            spect.start /= z1
-            spect.step /= z1
-        end
-        1 : spect.start -= alog(z1)
-        2 : *spect.wavelen /= z1
-    endcase
-endif 
-
-# Determine wavelength range in signal spectrum and extract the required region
-if n_elements(lmin) gt 0 or n_elements(lmax) gt 0 then begin
-    wr = uly_spect_get(spect, /WAVERANGE)
-    if n_elements(lmin) gt 0 then wr[0] = min(lmin)
-    if n_elements(lmax) gt 0 then wr[1] = max(lmax)
-    if n_elements(velscale) eq 1 then begin
-        wr[0] *= 1D - velscale/299792.458D/2D
-        wr[1] *= 1D + velscale/299792.458D/2D
-    endif
-    spect = uly_spect_extract(spect, WAVERANGE=wr, /OVERWRITE)
-endif
-
-ntot = n_elements(*spect.data)  
-
-# Check and eventually replace (with 0) the NaNs, and put in goodpixels
-#   (we must be sure there is no NaNs before rebinning)
-good = where(finite(*spect.data), cnt, COMPLEM=nans, NCOMPLEM=nnans)
-if nnans gt 0 then begin
-    if not keyword_set(quiet) then $
-      print, 'The input spectrum contains'+string(n_elements(nans))+' NaNs ...'
-    if n_elements(*spect.goodpix) eq 0 then *spect.goodpix = good $
-    else begin
-       maskI = bytarr(ntot)
-       maskI[*spect.goodpix] = 1
-       maskI[nans] = 0
-       *spect.goodpix = where(maskI eq 1)
-    endelse
-
-#   patch 1 pix of the nan regions by replicating the edge value
-#   in order to reduce the oscillations of the spline interpolation
-    next = nans+1
-    if next[n_elements(next)-1] eq n_elements(*spect.data) then $
-      next[n_elements(next)-1] = nans[n_elements(next)-1]
- #we connect here the last and the firs pixels in 2D data (not good)
-    (*spect.data)[nans] = (*spect.data)[next]
-    nans = where(finite(*spect.data) eq 0, cnt)
-    if cnt gt 0 then begin
-        prev = nans - 1
-        if prev[0] lt 0 then prev[0] = nans[1]
-        (*spect.data)[nans] = (*spect.data)[prev]
-    endif
-    nans = where(finite(*spect.data) eq 0, cnt)
-
-    if cnt gt 0 then (*spect.data)[nans] = 0
-endif
-
-# do the same with the error, if exists
-if n_elements(*spect.err) gt 0 then begin
-    good = where(finite(*spect.err), cnt, COMPLEM=nans)
-    if cnt eq 0 then begin
-        if not keyword_set(quiet) then begin
-            print, 'The error spectrum does not contain finite values'
-            print, '... ignore it (ie. do as if no errors were given)'
-        endif
-        undefine, *spect.err
-    endif else if cnt lt n_elements(*spect.err) then begin
-        if not keyword_set(quiet) then $
-          print, 'The input spectrum contains'+string(n_elements(nans))+' NaNs ...'
-        if n_elements(*spect.goodpix) eq 0 then *spect.goodpix = good $
-        else begin
-           maskI = bytarr(ntot)
-           maskI[*spect.goodpix] = 1
-           maskI[nans] = 0
-           *spect.goodpix = where(maskI eq 1, cnt)
-           if cnt eq 0 then begin
-               if not keyword_set(quiet) then $
-                 print, 'No good pixels were left ... mask is unset'
-               undefine, *spect.goodpix
-           endif
-        endelse
-        
-#   patch 1 pix of the nan regions by replicating the edge value
-#   in order to reduce the oscillations of the spline interpolation
-        next = nans + 1
-        if next[n_elements(next)-1] eq n_elements(*spect.err) then begin
-            if n_elements(nans) gt 1 then begin
-                nans = nans[0:n_elements(nans)-2]
-                next = next[0:n_elements(nans)-1]
-            endif else next = nans
-        endif 
-        (*spect.err)[nans] = (*spect.err)[next]
-
-        nans = where(finite(*spect.err) eq 0, cnt)
-        if cnt gt 0 then begin
-            prev = nans - 1
-            if prev[0] lt 0 then begin
-               nans = nans[1:*]
-               prev = prev[1:*]
-            endif
-            (*spect.err)[nans] = (*spect.err)[prev]
-        endif
-        nans = where(finite(*spect.err) eq 0, cnt)
-        
-        if cnt gt 0 then (*spect.err)[nans] = 0
-    endif
-endif
-
-# rebin in log of wavelength
-if n_elements(velscale) ne 0 then begin
-    if n_elements(lmin) eq 0 then $
-      spect = uly_spect_logrebin(spect, velscale, /OVER) $
-    else $
-      spect = uly_spect_logrebin(spect, velscale, WAVERANGE=lmin[0], /OVER)
-endif
-
-#after rebining different number of pxs
-ntot = n_elements(*spect.data)
-dim = size(*spect.data, /DIM)
-
-# select goodpixels the good pixels are between lmin[i] and lmax[i] 
-npix = (size(*spect.data))[1]
-Pix_gal = spect.start + lindgen(npix) * spect.step
-#Pix_gal = range(spect.start, spect.start+(npix-1d)*spect.step,npix)
-
-if n_elements(lmin) eq 0 then lmn = [spect.start] else begin
-    lmn = lmin
-    if spect.sampling eq 1 then lmn = alog(lmn) 
-endelse
-if n_elements(lmax) eq 0 then lmx = [spect.start+spect.step*(npix-1)] else begin
-    lmx = lmax
-    if spect.sampling eq 1 then lmx = alog(lmx) 
-endelse
-
-good = 0L
-for i = 0, n_elements(lmn) - 1 do begin
-    good = [good, $
-            where((Pix_gal gt lmn[i]) and (Pix_gal lt lmx[i]))]
-endfor 
-
-if (n_elements(*spect.goodpix) eq 0) and (n_elements(good) gt 1) then begin
-   maskI = bytarr(ntot)
-   maskI = reform(maskI, dim)
-   maskI[good[1:*], *] = 1   
-   *spect.goodpix = where(maskI eq 1)
-endif else begin                # have to combine with the previous mask
-   maskI = bytarr(ntot)
-   maskI[*spect.goodpix] = 1
-   maskI = reform(maskI, dim)
-   maskI[good[1:*],*] += 1
-   *spect.goodpix = where(maskI eq 2)
-endelse
-
-sxaddpar, *spect.hdr, 'HISTORY', 'uly_spect_read, '''+strtrim(file_in,2)+'''
-
-return, spect
-
-end
-
-#== end =======================================================================
-"""
+    min_sfh, max_sfh = 1, 16
+    lin_space = True
+    outdir = '/home/thuso/Phd/stellar_models/ezgal/lin_burst/'
+    age = nu.array([  1.00000000e+06,   2.00000000e+06,   3.00000000e+06,   4.00000000e+06,
+   5.00000000e+06,   6.00000000e+06,   7.00000000e+06,   8.00000000e+06,
+   9.00000000e+06,   1.00000000e+07,   1.20000000e+07 ,  1.40000000e+07,
+   1.60000000e+07,   1.80000000e+07,   2.00000000e+07 ,  2.50000000e+07,
+   3.00000000e+07,   3.50000000e+07,   4.00000000e+07   ,4.50000000e+07,
+   5.00000000e+07 ,  6.00000000e+07   ,7.00000000e+07 ,  8.00000000e+07,
+   9.00000000e+07  , 1.00000000e+08,   1.20000000e+08 ,  1.40000000e+08,           1.60000000e+08 ,  1.80000000e+08 ,  2.00000000e+08 ,  2.50000000e+08,
+   3.00000000e+08,   3.50000000e+08,   4.00000000e+08,   4.50000000e+08,
+   5.00000000e+08,   6.00000000e+08,   7.00000000e+08,   8.00000000e+08,
+   9.00000000e+08  , 1.00000000e+09 ,  1.20000000e+09 ,  1.40000000e+09,
+   1.60000000e+09 ,  1.80000000e+09  , 2.00000000e+09  , 2.50000000e+09,
+   3.00000000e+09 ,  3.50000000e+09   ,4.00000000e+09,   4.49999974e+09,
+   5.00000000e+09,   6.00000000e+09,   7.00000000e+09 ,  8.00000000e+09,
+   8.99999949e+09 ,  1.00000000e+10  , 1.10000005e+10 ,  1.20000000e+10,
+   1.29999995e+10 ,  1.40000000e+10   ,1.50000005e+10 ,  1.60000000e+10,
+    1.69999995e+10 ,  1.79999990e+10  , 1.90000005e+10,   2.00000000e+10])
+    ####stuff for make_burst
+    if rank == 0:
+        needed = []
+        for i in range(min_sfh, max_sfh+1):
+            if not lin_space:
+                #log spacelengths = nu.unique(needed[:,1])
+                space_age = nu.logspace(nu.log10(age).min(),nu.log10(age).max()
+                                        ,i+1)
+            else:
+                #linear spacing
+                space_age = nu.linspace(age.min(), age.max(), i+1)
+            for j in range(i):
+                #[mean_age_log, length (gyrs)]
+                needed.append([space_age[j:j+2].mean(),space_age[j:j+2].ptp()/10**9])
+        needed = nu.asarray(needed)
+        #sort and combine lengths lelengths = nu.unique(needed[:,1])ngths = nu.unique(needed[:,1])
+        lengths = nu.unique(needed[:,1])
+        #split up for scatter
+        chunks = [[] for _ in range(size)]
+        for i, chunk in enumerate(lengths):
+            chunks[i % size].append(chunk)
+    else:
+        lengths = None
+        chunks = None
+    lengths = comm.scatter(chunks, root=0)
+    
+    #start progam up
+    to_save = make_mpi_burst(lengths)
+    #save
+    for i in to_save:
+        if i.meta_data['imf'] == 'Salpeter':
+            imf = 'salp'
+        name = '{0}_{1}_z_{2}_{3}_{4}.fits'.format(i.meta_data['model'],i.meta_data['sfh'],i.meta_data['met'],imf,i.meta_data['length'])
+    
+        i.save_model(outdir+name)
