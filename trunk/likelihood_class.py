@@ -126,8 +126,10 @@ class VESPA_fit(object):
 
     Uses vespa methodology splitting const sfh into multiple componets
     '''
-    def __init__(self,data, min_sfh=1,max_sfh=16,lin_space=False,use_dust=True, use_losvd=True, spec_lib='p2',imf='salp',spec_lib_path='/home/thuso/Phd/stellar_models/ezgal/'):
-        '''(VESPA_fitclass, ndarray,int,int) -> NoneType
+    def __init__(self,data, min_sfh=1,max_sfh=16,lin_space=False,use_dust=True, 
+		use_losvd=True, spec_lib='p2',imf='salp',
+			spec_lib_path='/home/thuso/Phd/stellar_models/ezgal/'):
+		'''(VESPA_fitclass, ndarray,int,int) -> NoneType
         data - spectrum to fit
         *_sfh - range number of burst to allow
         lin_space - make age bins linearly space or log spaced
@@ -136,76 +138,71 @@ class VESPA_fit(object):
         imf - inital mass function to use
         spec_lib_path - path to ssps
         sets up vespa like fits
-        '''
-        self.data = data
+		'''
+		self.data = data
         #load models
-        cur_lib = ['basti', 'bc03', 'cb07','m05','c09','p2']
-        assert spec_lib.lower() in cur_lib, ('%s is not in ' %spec_lib.lower() + str(cur_lib))
-        if not spec_lib_path.endswith('/') :
-            spec_lib_path += '/'
-        models = glob(spec_lib_path+spec_lib+'*'+imf+'*')
-        if len(models) == 0:
-            models = glob(spec_lib_path+spec_lib.lower()+'*'+imf+'*')
-        assert len(models) > 0, "Did not find any models"
+		cur_lib = ['basti', 'bc03', 'cb07','m05','c09','p2']
+		assert spec_lib.lower() in cur_lib, ('%s is not in ' %spec_lib.lower() + str(cur_lib))
+		if not spec_lib_path.endswith('/') :
+			spec_lib_path += '/'
+		models = glob(spec_lib_path+spec_lib+'*'+imf+'*')
+		if len(models) == 0:
+			models = glob(spec_lib_path+spec_lib.lower()+'*'+imf+'*')
+		assert len(models) > 0, "Did not find any models"
         #crate ezgal class of models
-        SSP = gal.wrapper(models)
-        #make all burst modes that can be used
-        age = SSP.sed_ages
-        #remove zeros
-        age = age[age != 0]
-        print age
-        '''
-        ####get all Spectra needed for mcmc run
-        #create lenght and age needed from each model
-        needed = []
-        for i in range(min_sfh, max_sfh+1):
-            if not lin_space:
-                #log space
-                space_age = nu.logspace(nu.log10(age).min(),nu.log10(age).max()
-                                        ,i+1)
-            else:
-                #linear spacing
-                space_age = nu.linspace(age.min(), age.max(), i+1)
-            for j in range(i):
-                #[mean_age_log, length (gyrs)]
-                needed.append([space_age[j:j+2].mean(),space_age[j:j+2].ptp()/10**9])
-        needed = nu.asarray(needed)
-        #sort and combine lengths 
-        lengths = nu.unique(needed[:,1])
-        self.SSP = None
-        get_burst = lambda fun,x: fun.make_burst(x)
-        j = 1
-        for i in lengths:
-            print j
-            #ages = needed[needed[:,1] == i,0]
-            temp_models = map(get_burst,SSP.models,[i]*len(SSP.models))
-            if self.SSP is None:
-                self.SSP = gal.wrapper(temp_models)
-            else:
-                self.SSP += gal.wrapper(temp_models)
-            j+=1
-        #save models for later
-        #create model usage for RJMCMC
-        self.models = {}
-        print 'Initalizing models. Please wait'
-        for i in range(min_sfh, max_sfh+1):
-            models = []
-            #calculate total splits
-            if lin_space:
-                #lin space
-                lenght = age.ptp()/float(i)/10**9
-            else:
-                lenght = nu.exp(nu.log(age).ptp()/float(i))
-            for j in SSP:
-                models.append(j.make_burst(lenght))
-            #models = class_map(
-            #self.models['burst'+str(i)] = [['metal', 'sfr']*i,gal.wrapper(models)]
-            #print 'Finished %i out of %i models' %(i,max_sfh)'''
-        #check to see if properties are the same
-        self._metal_unq = nu.float64(SSP['met'])
-        self._age_unq = nu.copy(SSP.sed_ages)/10.**9
- 
+		self.SSP = gal.wrapper(models)
+        #extract seds from ezgal wrapper
+		spect, info = [], []
+		for i in self.SSP:
+			metal = float(i.meta_data['met'])
+			ages = nu.float64(i.ages)
+			for j in ages:
+				spect.append(i.get_sed(j,age_units='yrs'))
+				info.append([metal+0,j])
+		info,spect = nu.asarray(info),nu.asarray(spect)
+		'''
+        if not nu.any(spect): 
+          spect,info = load_spec_lib(lib_path,spec_lib)
+        self.spect = nu.copy(spect)
+        self.data = nu.copy(data)
+        #normalized so area under curve is 1 to keep chi 
+        #values resonalble
+        #need to properly handel uncertanty
+        self.norms = self.area_under_curve(data) * 10 ** -5 #need to turn off
+        self.data[:,1] = self.data[:, 1] / self.norms
 
+        #initalize bound varables
+        lib_vals = get_fitting_info(lib_path)
+        #to keep roundoff error constistant
+        lib_vals[0][:,0] = nu.log10(lib_vals[0][:, 0]) 
+        metal_unq = nu.unique(lib_vals[0][:, 0])
+        #get boundary of parameters
+        self.hull = bound.find_boundary(lib_vals[0])
+        lib_vals[0][:,0] = 10**lib_vals[0][:,0]
+        age_unq = nu.unique(lib_vals[0][:, 1])
+        self._lib_vals = lib_vals
+        self._age_unq = age_unq
+        self._metal_unq = metal_unq
+        self._option = option
+        self._cpus = cpus
+        self.bins = bins
+        self._burnin = burnin
+        self._iter = itter
+        #set prior info for age, and metalicity
+        self.metal_bound = nu.array([metal_unq.min(),metal_unq.max()])
+        #dust options
+        self._dust = use_dust
+        self.dust_bound = nu.array([0., 4.])
+        #line of sight velocity despersion stuff
+        self._losvd = use_lovsd
+        self._velocityscale = (nu.diff(self.data[:,0]).mean()
+                               / self.data[:,0].mean() * 299792.458)
+        #check to see if properties are the same
+        self._metal_unq = nu.log10(nu.unique(nu.float64(self.SSP['met'])))
+        #self._len_unq = nu.unique(nu.asarray(self.SSP.meta_data['length'],
+		#				dtype=float))
+			'''	
+		
     def proposal(self,mu,sigma):
         '''(Example_lik_class, ndarray,ndarray) -> ndarray
         Proposal distribution, draws steps for chain. Should use a symetric

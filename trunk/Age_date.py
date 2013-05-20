@@ -39,6 +39,7 @@ from scipy.optimize import nnls
 from scipy.optimize.minpack import leastsq
 from scipy.optimize import fmin_l_bfgs_b as fmin_bound
 from scipy.special import exp1 
+from scipy.integrate import simps
 #from scipy import weave
 #from scipy.signal import fftconvolve
 import time as Time
@@ -132,7 +133,8 @@ def find_az_box(param, age_unq, metal_unq):
     age *= 2
     return metal, age,line
 
-def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins):
+def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins, 
+						spect):
     #does dirty work to make spectra models
     #search age_unq and metal_unq to find closet box spectra and interps
     #does multi componets spectra and fits optimal normalization
@@ -224,6 +226,49 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins):
    #exit program
     return out
 
+def make_burst(length, t, metal, metal_unq, age_unq, spect, lib_vals):
+	'''(float, float,float, ndarray(float),ndarray(float)
+		ndarray(float) tuple(ndarray(floats),ndarray(str))) -> ndarray(float)
+		Turns SSP into busrt of constant stellar formation and of length dt at
+		age t for a const metalicity 10**(t-9) - length/2 to 10**(t-9) + length/2.
+		All terms are logrythmic.
+	'''
+	#lib_vals[0][:,0] = 10**nu.log10(lib_vals[0][:,0])
+	assert t > age_unq.min() and t < age_unq.max(), 'Age not in range'
+	assert metal > metal_unq.min() and metal < metal_unq.max(), 'Metalicity not in range'
+	#get all ssp's with correct age range and metalicity
+	#min age range
+	if t - length/2. < age_unq.min():
+		t_min = age_unq.min() + 0.
+	else:
+		t_min = t- length/2.
+	#max age range
+	if 	t + length/2. > age_unq.max():
+		t_max = age_unq.max() + 0.
+	else:
+		t_max = t + length/2.
+	index = nu.searchsorted(age_unq, [t_min,t_max])
+	ages = age_unq[index[0]:index[1]]
+	#get SSP's
+	
+	#handel situation where stepsize is small
+	if len(ages) < 2:
+		pass
+	temp_param = []
+	for i in ages:
+		temp_param.append([metal, i ,1.])
+	ssp = get_model_fit_opt(nu.ravel(temp_param), lib_vals, age_unq, metal_unq, 
+							len(ages), spect, lib_vals)
+	#sort for intergration
+	inters = []
+	#integrate ssp's
+	for i in nu.sort(nu.int64(ssp.keys())):
+		inters.append(ssp[str(i)])
+	
+	return simps(inters, ages, axis=0)/float(len(ages))
+	#return new ssp
+	
+		
 def random_permute(seed):
     #does random sequences to produice a random seed for parallel programs
     ##middle squared method
