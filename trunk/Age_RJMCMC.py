@@ -113,23 +113,21 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
     #see if to use specific seed
     if seed is not None:
         nu.random.seed(seed)
-    #initalize parameters from class
-    active_param, sigma = rj_dict(), rj_dict()
-    param,chi = rj_dict(), rj_dict()
-    Nacept, Nreject = rj_dict(), rj_dict()
-    acept_rate, out_sigma = rj_dict(), rj_dict()
-    bayes_fact = rj_dict() #to calculate bayes factor
-    #simulated anneling param
-    T_cuurent = rj_dict()
-    for i in fun.models.keys(): ####todo add random combination of models
-        #current chain and step size
-        if is_required(i):
-            active_param[i], sigma[i] = [], []
-            temp = fun.initalize_param(i)
-            active_param[i].append(temp[0].copy())
-            sigma[i].append(temp[1].copy())
-            bins = i +''
-            break
+	#initalize parameters from class
+	active_param, sigma = rj_dict(), rj_dict()
+	param,chi = rj_dict(), rj_dict()
+	Nacept, Nreject = rj_dict(), rj_dict()
+	acept_rate, out_sigma = rj_dict(), rj_dict()
+	bayes_fact = rj_dict() #to calculate bayes factor
+	#simulated anneling param
+	T_cuurent = rj_dict()
+	for i in fun.models.keys(): ####todo add random combination of models
+		active_param[i], sigma[i] = [], []
+		temp = fun.initalize_param(i)
+		active_param[i].append(temp[0].copy())
+		sigma[i].append(temp[1].copy())
+	bins = '1' +''
+
     #set other RJ params
     Nacept[bins] , Nreject[bins] = 1.,1.
     acept_rate[bins], out_sigma[bins] = [1.], [sigma[bins][0][:]]
@@ -176,8 +174,7 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
 
         #sample from distiburtion
         t_pro.append(Time.time())
-        active_param[bins] = fun.proposal(active_param[bins],
-                                               sigma[bins])
+        active_param[bins] = fun.proposal(active_param[bins], sigma[bins])
             
         t_pro[-1] -= Time.time()
         #swarm stuff

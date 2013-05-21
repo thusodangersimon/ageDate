@@ -234,8 +234,8 @@ def make_burst(length, t, metal, metal_unq, age_unq, spect, lib_vals):
 		All terms are logrythmic.
 	'''
 	#lib_vals[0][:,0] = 10**nu.log10(lib_vals[0][:,0])
-	assert t > age_unq.min() and t < age_unq.max(), 'Age not in range'
-	assert metal > metal_unq.min() and metal < metal_unq.max(), 'Metalicity not in range'
+	assert t >= age_unq.min() and t <= age_unq.max(), 'Age not in range'
+	assert metal >= metal_unq.min() and metal <= metal_unq.max(), 'Metalicity not in range'
 	#get all ssp's with correct age range and metalicity
 	#min age range
 	if t - length/2. < age_unq.min():
@@ -258,13 +258,15 @@ def make_burst(length, t, metal, metal_unq, age_unq, spect, lib_vals):
 	for i in ages:
 		temp_param.append([metal, i ,1.])
 	ssp = get_model_fit_opt(nu.ravel(temp_param), lib_vals, age_unq, metal_unq, 
-							len(ages), spect, lib_vals)
+							len(ages), spect)
 	#sort for intergration
 	inters = []
 	#integrate ssp's
+	ssp.pop('wave')
 	for i in nu.sort(nu.int64(ssp.keys())):
+		if not nu.any(nu.isfinite(ssp[str(i)])):
+			continue
 		inters.append(ssp[str(i)])
-	
 	return simps(inters, ages, axis=0)/float(len(ages))
 	#return new ssp
 	

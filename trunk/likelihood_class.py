@@ -150,21 +150,30 @@ class VESPA_fit(object):
 			models = glob(spec_lib_path+spec_lib.lower()+'*'+imf+'*')
 		assert len(models) > 0, "Did not find any models"
         #crate ezgal class of models
-		self.SSP = gal.wrapper(models)
+		SSP = gal.wrapper(models)
         #extract seds from ezgal wrapper
-		spect, info = [], []
-		for i in self.SSP:
+		spect, info = [SSP.sed_ls], []
+		for i in SSP:
 			metal = float(i.meta_data['met'])
 			ages = nu.float64(i.ages)
 			for j in ages:
+				if j == 0:
+					continue
 				spect.append(i.get_sed(j,age_units='yrs'))
 				info.append([metal+0,j])
-		info,spect = nu.asarray(info),nu.asarray(spect)
+		info,self._spect = [nu.log10(info),None],nu.asarray(spect).T
+		#set hidden varibles
+		self._lib_vals = info
+		self._age_unq = nu.unique(info[0][:,1])
+		self._metal_unq = nu.unique(info[0][:,0])
+		self._lib_vals[0][:,0] = 10**self._lib_vals[0][:,0]
+		#params
+		self.curent_param = nu.empty(2)
+		self.models = {}
+		for i in xrange(min_sfh,max_sfh+1):
+			self.models[str(i)]= ['burst_length','mean_age', 'metal','norm'] * i
 		'''
-        if not nu.any(spect): 
-          spect,info = load_spec_lib(lib_path,spec_lib)
-        self.spect = nu.copy(spect)
-        self.data = nu.copy(data)
+		self.data = nu.copy(data)
         #normalized so area under curve is 1 to keep chi 
         #values resonalble
         #need to properly handel uncertanty
@@ -204,25 +213,47 @@ class VESPA_fit(object):
 			'''	
 		
     def proposal(self,mu,sigma):
-        '''(Example_lik_class, ndarray,ndarray) -> ndarray
-        Proposal distribution, draws steps for chain. Should use a symetric
-        distribution'''
-        
-        #return up_dated_param 
-        pass
+		'''(Example_lik_class, ndarray,ndarray) -> ndarray
+		Proposal distribution, draws steps for chain. Should use a symetric
+		distribution'''
+		#save length and mean age they don't change
+		t_out = nu.random.multivariate_normal(nu.ravel(mu),sigma[0])
+		bins = sigma[0].shape[0]/4
+		t_out = nu.reshape(t_out, (bins, 4))
+		#set length and age back to original and make norm positive
+		for i,j in enumerate(mu):
+			t_out[i][:2] = j[:2]
+			t_out[i][-1] = abs(t_out[i][-1])
 
-    def lik(self,param):
-        '''(Example_lik_class, ndarray) -> float
+		return t_out
+        
+
+    def lik(self,param, bins):
+		'''(Example_lik_class, ndarray) -> float
         Calculates likelihood for input parameters. Outuputs log-likelyhood'''
-        
-        #return loglik
-        pass
+		burst_model = {}
+		for i in param[bins]:
+			burst_model[str(i[1])] = i[3]*ag.make_burst(i[0],i[1],i[2],
+							self._metal_unq, self._age_unq, self._spect, self._lib_vals)
+		#do dust
 
-    def prior(self,param):
+		#do losvd
+
+		#get loglik
+		model = nu.sum(burst_model.values(),0)
+		#return loglik
+		if self.data.shape[1] == 3:
+			#uncertanty calc
+			pass
+		else:
+			prob = stats_dist.norm.logpdf(model,self.data[:,1]).sum()
+		return prob
+
+    def prior(self,param,bins):
         '''(Example_lik_class, ndarray) -> float
         Calculates log-probablity for prior'''
         #return logprior
-        pass
+        return 0.
 
 
     def model_prior(self,model):
@@ -233,12 +264,21 @@ class VESPA_fit(object):
         pass
 
     def initalize_param(self,model):
-        '''(Example_lik_class, any type) -> ndarray, ndarray
+		'''(Example_lik_class, any type) -> ndarray, ndarray
 
-        Used to initalize all starting points for run of RJMCMC and MCMC.
-        outputs starting point and starting step size'''
-        #return init_param, init_step
-        pass
+		Used to initalize all starting points for run of RJMCMC and MCMC.
+		outputs starting point and starting step size
+		'''
+
+		if not int(model) == 1:
+			return nu.empty(int(model)*4), nu.identity(4*int(model))
+		#make single burst for entire age length
+		self.cur_spec = [ ag.make_burst(self._age_unq.ptp(), nu.mean(self._age_unq), self._metal_unq.mean()
+										, self._metal_unq, self._age_unq, self._spect, self._lib_vals	)]
+		#make step size
+		sigma = nu.identity(4)
+		sigma[-1,-1] = 100
+		return nu.array([ self._age_unq.ptp(), nu.mean(self._age_unq), self._metal_unq.mean(), 1]), sigma
 
         
     def step_func(self,step_crit,param,step_size,model):
