@@ -92,7 +92,7 @@ class rj_dict(dict):
 
 def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=False):
     '''(likelihood object, running object, int, int, bool, bool) ->
-       dict(ndarray), dict(ndarray)
+    dict(ndarray), dict(ndarray)
 
     Runs Reversible jump markov chain monte carlo using to maximize
     the likelihood class.
@@ -109,24 +109,25 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
 
     outputs:
     dictonary of params, the different keys use different modesl.
-    dictornary of log of the likelihood*log-priors'''
+    dictornary of log of the likelihood*log-priors
+    '''
     #see if to use specific seed
     if seed is not None:
         nu.random.seed(seed)
-	#initalize parameters from class
-	active_param, sigma = rj_dict(), rj_dict()
-	param,chi = rj_dict(), rj_dict()
-	Nacept, Nreject = rj_dict(), rj_dict()
-	acept_rate, out_sigma = rj_dict(), rj_dict()
-	bayes_fact = rj_dict() #to calculate bayes factor
-	#simulated anneling param
-	T_cuurent = rj_dict()
-	for i in fun.models.keys(): ####todo add random combination of models
-		active_param[i], sigma[i] = [], []
-		temp = fun.initalize_param(i)
-		active_param[i].append(temp[0].copy())
-		sigma[i].append(temp[1].copy())
-	bins = '1' +''
+    #initalize parameters from class
+    active_param, sigma = rj_dict(), rj_dict()
+    param,chi = rj_dict(), rj_dict()
+    Nacept, Nreject = rj_dict(), rj_dict()
+    acept_rate, out_sigma = rj_dict(), rj_dict()
+    bayes_fact = rj_dict() #to calculate bayes factor
+    #simulated anneling param
+    T_cuurent = rj_dict()
+    for i in fun.models.keys(): ####todo add random combination of models
+        active_param[i], sigma[i] = [], []
+        temp = fun.initalize_param(i)
+        active_param[i].append(temp[0].copy())
+        sigma[i].append(temp[1].copy())
+    bins = '1' +''
 
     #set other RJ params
     Nacept[bins] , Nreject[bins] = 1.,1.
@@ -139,18 +140,19 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
     chi[bins] = [fun.lik(active_param,bins) + fun.prior(active_param,bins)]
     #check if starting off in bad place ie chi=inf or nan
     '''if not nu.isfinite(chi[bins][-1]):
-        continue
+         continue
     else:
-        break'''
-    #set best chi and param
+    break
+    '''
+	#set best chi and param
     '''if nu.isfinite(chi[str(bins)][-1]):
-        option.chibest[0] = chi[str(bins)][-1]+.0
-        for kk in range(len(option.parambest)):
-            if len(active_param[str(bins)]) > kk:
-                option.parambest[kk] = active_param[str(bins)][kk]
-            else:
-                    option.parambest[kk] = nu.nan'''
-    #set current swarm value
+		option.chibest[0] = chi[str(bins)][-1]+.0
+		for kk in range(len(option.parambest)):
+			if len(active_param[str(bins)]) > kk:
+				option.parambest[kk] = active_param[str(bins)][kk]
+			else:
+				option.parambest[kk] = nu.nan'''
+				#set current swarm value
     '''for kk in range(len(option.swarm[0])):
         if kk<bins*3+2+4:
             option.swarm[0][kk] = nu.hstack((active_param[str(bins)],
@@ -171,7 +173,7 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
         if T_cuurent[bins] % 20001 == 0:
             print acept_rate[bins][-1],chi[bins][-1],bins, option.current
             sys.stdout.flush()
-
+			
         #sample from distiburtion
         t_pro.append(Time.time())
         active_param[bins] = fun.proposal(active_param[bins], sigma[bins])
@@ -232,32 +234,42 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
         t_step[-1]-=Time.time()
         #############################decide if birth or death
         t_birth.append(Time.time())
+        
         if j >= j_timeleft:
-            active_param, temp_bins, attempt, critera, j, j_timeleft = fun.birth_death(birth_rate, bins, active_param)
+            active_param, temp_bins, attempt, critera = fun.birth_death(birth_rate, bins, active_param)
             if attempt:
                 #check if accept move
-                tchi = fun.lik(active_param[temp_bins])
+                tchi = fun.lik(active_param, temp_bins)
                 #likelihoods
                 rj_a = (-(chi[bins][-1]-tchi)/
-                              SA(trans_moves,100,5000.,T_stop))
+                        SA(trans_moves,100,5000.,T_stop))
                 #parameter priors
-                rj_a += (fun.prior(active_param[temp_bins]) - 
-                         fun.prior(active_param[bins]))
+                rj_a += (fun.prior(active_param, temp_bins) - 
+                         fun.prior(active_param, bins))
                 #model priors
                 rj_a += 0 #uniform
                 trans_moves += 1
-                #print rj_a , critera, temp_bins>bins
+                #print rj_a , active_param[temp_bins][:,-1],active_param[bins][:,-1]
                 if nu.exp(rj_a) * critera > nu.random.rand():
                     #accept move
-                    bins = temp_bins +0
+                    bins = temp_bins + ''
+                    #see if model has be created before
+                    if not chi.has_key(bins):
+                        chi[bins] ,param[bins] = [] ,[] 
+                        T_cuurent[bins] = 0
+                        acept_rate[bins] = [.5]
+                        Nacept[bins] , Nreject[bins] = 1., 1.
+                        out_sigma[bins] = []
                     chi[bins].append(tchi + 0)
                     param[bins].append(active_param[bins][:])
+                    print bins, active_param[bins].shape, sigma[bins][0].shape
                 else:
                     pass
-                j, j_timeleft
-                    #print T_cuurent[str(bins)],burnin,T_start,T_stop
+                j, j_timeleft = 0 , nu.random.exponential(100)
+                #print T_cuurent[str(bins)],burnin,T_start,T_stop
                 attempt = False
         t_birth[-1]-=Time.time()
+        
         #########################################change temperature
         T_cuurent[bins] += 1
         if T_cuurent[bins] == round(burnin):
@@ -288,14 +300,14 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
                 option.iter_stop = False
         #pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm),open('time_%i.pik'%option.rank_world,'w'),2)
     #####################################return once finished 
-    '''for i in param.keys():
-        chi[i]=nu.array(chi[i])
-        param[i]=nu.array(param[i])
-        ###correct metalicity and norm 
-        bayes_fact[i] = nu.array(bayes_fact[i])'''
-    #pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm,param,chi),open('time_%i.pik'%option.rank_world,'w'),2)
+	'''for i in param.keys():
+		chi[i]=nu.array(chi[i])
+		param[i]=nu.array(param[i])
+		###correct metalicity and norm 
+		bayes_fact[i] = nu.array(bayes_fact[i])'''
+		#pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm,param,chi),open('time_%i.pik'%option.rank_world,'w'),2)
     return param, chi, acept_rate, out_sigma, param.keys()
-
+		
 
 def death_birth(fun, birth_rate, bins, j,j_timeleft, active_param):
     #does birth or death moved

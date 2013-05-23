@@ -234,8 +234,12 @@ def make_burst(length, t, metal, metal_unq, age_unq, spect, lib_vals):
 		All terms are logrythmic.
 	'''
 	#lib_vals[0][:,0] = 10**nu.log10(lib_vals[0][:,0])
-	assert t >= age_unq.min() and t <= age_unq.max(), 'Age not in range'
-	assert metal >= metal_unq.min() and metal <= metal_unq.max(), 'Metalicity not in range'
+	if t < age_unq.min() or t > age_unq.max():
+		#Age not in range
+		return spect[:,0] + nu.inf
+	if metal < metal_unq.min() or metal > metal_unq.max():
+		#Metalicity not in range
+		return spect[:,0] + nu.inf
 	#get all ssp's with correct age range and metalicity
 	#min age range
 	if t - length/2. < age_unq.min():

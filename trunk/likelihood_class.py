@@ -139,7 +139,10 @@ class VESPA_fit(object):
         spec_lib_path - path to ssps
         sets up vespa like fits
 		'''
-		self.data = data
+		self.data = nu.copy(data)
+		#make mean value of data= 1000
+		self._norm = 1./(self.data[:,1].mean()/1000.)
+		self.data[:,1] *= self._norm
         #load models
 		cur_lib = ['basti', 'bc03', 'cb07','m05','c09','p2']
 		assert spec_lib.lower() in cur_lib, ('%s is not in ' %spec_lib.lower() + str(cur_lib))
@@ -167,6 +170,7 @@ class VESPA_fit(object):
 		self._age_unq = nu.unique(info[0][:,1])
 		self._metal_unq = nu.unique(info[0][:,0])
 		self._lib_vals[0][:,0] = 10**self._lib_vals[0][:,0]
+		self._min_sfh, self._max_sfh = min_sfh,max_sfh
 		#params
 		self.curent_param = nu.empty(2)
 		self.models = {}
@@ -217,7 +221,7 @@ class VESPA_fit(object):
 		Proposal distribution, draws steps for chain. Should use a symetric
 		distribution'''
 		#save length and mean age they don't change
-		t_out = nu.random.multivariate_normal(nu.ravel(mu),sigma[0])
+                t_out = nu.random.multivariate_normal(nu.ravel(mu),sigma[0])
 		bins = sigma[0].shape[0]/4
 		t_out = nu.reshape(t_out, (bins, 4))
 		#set length and age back to original and make norm positive
@@ -228,26 +232,31 @@ class VESPA_fit(object):
 		return t_out
         
 
-    def lik(self,param, bins):
-		'''(Example_lik_class, ndarray) -> float
+    def lik(self,param, bins,return_all=False):
+        '''(Example_lik_class, ndarray) -> float
         Calculates likelihood for input parameters. Outuputs log-likelyhood'''
-		burst_model = {}
-		for i in param[bins]:
-			burst_model[str(i[1])] = i[3]*ag.make_burst(i[0],i[1],i[2],
-							self._metal_unq, self._age_unq, self._spect, self._lib_vals)
+        burst_model = {}
+        for i in param[bins]:
+            burst_model[str(i[1])] = i[3]*ag.make_burst(i[0],i[1],i[2],
+                            self._metal_unq, self._age_unq, self._spect, self._lib_vals)
 		#do dust
 
 		#do losvd
 
 		#get loglik
-		model = nu.sum(burst_model.values(),0)
+            model = nu.sum(burst_model.values(),0)
 		#return loglik
-		if self.data.shape[1] == 3:
-			#uncertanty calc
-			pass
-		else:
-			prob = stats_dist.norm.logpdf(model,self.data[:,1]).sum()
-		return prob
+            if self.data.shape[1] == 3:
+                #uncertanty calc
+                pass
+            else:
+                prob = stats_dist.norm.logpdf(model,self.data[:,1]).sum()
+			#prob = -nu.sum((model -	self.data[:,1])**2)
+                #return
+            if 	return_all:
+                return prob, model
+            else:
+                return prob
 
     def prior(self,param,bins):
         '''(Example_lik_class, ndarray) -> float
@@ -261,7 +270,7 @@ class VESPA_fit(object):
         Calculates log-probablity prior for models. Not used in MCMC and
         is optional in RJMCMC.'''
         #return log_model
-        pass
+        return 0.
 
     def initalize_param(self,model):
 		'''(Example_lik_class, any type) -> ndarray, ndarray
@@ -277,8 +286,9 @@ class VESPA_fit(object):
 										, self._metal_unq, self._age_unq, self._spect, self._lib_vals	)]
 		#make step size
 		sigma = nu.identity(4)
-		sigma[-1,-1] = 100
-		return nu.array([ self._age_unq.ptp(), nu.mean(self._age_unq), self._metal_unq.mean(), 1]), sigma
+		#norm 10% of self._norm
+		sigma[-1,-1] = .1 * self._norm
+		return nu.array([ self._age_unq.ptp(), nu.mean(self._age_unq), self._metal_unq.mean(), self._norm]), sigma
 
         
     def step_func(self,step_crit,param,step_size,model):
@@ -288,13 +298,22 @@ class VESPA_fit(object):
         Evaluates step_criteria, with help of param and model and 
         changes step size during burn-in perior. Outputs new step size
         '''
-        #return new_step
-        pass
+        if step_crit > .60:
+            step_size[model][0] *= 1.05
+        elif step_crit < .2:
+            step_size[model][0] /= 1.05
+        #cov matrix
+        if len(param) % 2000 == 0 and len(param) > 0.:
+            new_shape = nu.prod(param[0].shape)
+            step_size[model] = [nu.cov(nu.asarray(param[-2000:]).reshape(2000,new_shape).T)]
+
+        return step_size[model]
+
 
     def birth_death(self,birth_rate, model, param):
         '''(Example_lik_class, float, any type, dict(ndarray)) -> 
-           dict(ndarray), any type, bool, float
-
+        dict(ndarray), any type, bool, float
+        
         For RJMCMC only. Does between model move. Birth rate is probablity to
         move from one model to another, models is current model and param is 
         dict of all localtions in param space. 
@@ -302,11 +321,81 @@ class VESPA_fit(object):
         whether of not to attempt model jump (False to make run as MCMC) and the
         Jocobian for move.
         '''
-        #for RJCMC
-        #return new_param, try_model, attemp_jump, Jocobian
-        #for MCMC
-        #return None, None, False, None
-        pass
+        if birth_rate > nu.random.rand() and self._max_sfh != int(model):
+            #birth!
+            temp_model = str(int(model) + 1)
+            #split component with higest weight
+            temp_param = nu.reshape(param[model], (int(model), 4))
+            index = nu.argmax(temp_param[:,-1])
+            u = nu.random.rand()
+            new_param = ([[temp_param[index,0]/2., 
+                           (2*temp_param[index,1] - temp_param[index,0]/2.)/2.,
+                           temp_param[index,2] + 0., temp_param[index,3] * u]])
+
+            new_param.append([temp_param[index,0]/2.,
+                              (2*temp_param[index,1] + temp_param[index,0]/2.)/2.,
+                              temp_param[index,2] + 0., temp_param[index,3] * (1 -u)])
+            #copy the rest
+            for i in range(int(model)):
+                if i == index:
+                    continue
+                new_param.append(temp_param[i].copy())
+            param[temp_model] = nu.asarray(new_param)
+
+        elif self._min_sfh != int(model):
+                #death!
+                temp_model = str(int(model) - 1)
+                #get lowest weight and give random amount to neighbor
+                index = param[model][:,-1].argmin()
+                new_param = []
+                split = param[model][index]
+                u = nu.random.rand()
+                if index - 1 > -1 :
+                    #combine with younger                    
+                    temp = param[model][index-1]
+                    new_param.append([temp[0] + split[0] * u, 0., temp[2] + split[2] * u,
+                                      temp[3] + split[3] * u])
+                    new_param[-1][1] = new_param[-1][0]/2. + temp[1] -temp[0]/2.
+                if index + 1 < int(model):
+                    #combine with older
+                    temp = param[model][index+1]
+                    new_param.append([temp[0] + split[0] * u, 0., temp[2] + split[2] * u,
+                                      temp[3] + split[3] * u])
+                    new_param[-1][1] =  new_param[-1][0]/2. + temp[1]-temp[0]/2.
+                for i in range(param[model].shape[0]):
+                    if i in range(1-index,index+2):
+                        continue
+                    new_param.append(nu.copy(param[model][i]))
+                #set for output
+                param[temp_model] = nu.asarray(new_param)
+
+                import cPickle as pik
+                pik.dump((birth_rate, model, param),open('birth.pik' ,'w'),2)
+                #combine smallest weight with other
+                return param, None, False, None
+        else:
+            #birth or death failed
+            return param, None, False, None
+        return param, temp_model, True, 1. #need to sort out jacobian
+
+    def make_sfh_plot(self,param, model=None):
+        '''(dict(ndarray)-> Nonetype
+        Make plot of sfh vs log age of all models in param 
+        '''
+        import pylab as lab
+        if not model is None:
+            x,y = [], []
+            for i in param[model]:
+                x.append(i[1]-i[0]/2.)
+                x.append(i[1]+i[0]/2.)
+                y.append(i[3])
+                y.append(i[3])
+            lab.plot(x,y,label=model)
+            lab.legend()
+            lab.show()
+        else:
+            for i in param.keys():
+                pass
 
 class Spectral_fit(object):
     '''Finds the age, metalicity, star formation history, 
