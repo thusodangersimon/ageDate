@@ -262,7 +262,22 @@ class VESPA_fit(object):
         '''(Example_lik_class, ndarray) -> float
         Calculates log-probablity for prior'''
         #return logprior
-        return 0.
+        out = 0.
+        #uniform priors
+        for i in param[bins]:
+            #length
+            out += stats_dist.uniform.logpdf(i[0],0.,self._age_unq.ptp())
+            #age
+            out += stats_dist.uniform.logpdf(i[1],self._age_unq.min(),self._age_unq.ptp())
+            #metals 
+            out += stats_dist.uniform.logpdf(i[2],self._metal_unq.min(),self._metal_unq.ptp())
+            #weight
+            if i[3] < 0:
+                out += -nu.inf
+            else:
+                out += -100.
+
+        return out
 
 
     def model_prior(self,model):
@@ -304,7 +319,7 @@ class VESPA_fit(object):
             step_size[model][0] /= 1.05
         #cov matrix
         if len(param) % 2000 == 0 and len(param) > 0.:
-            new_shape = nu.prod(param[0].shape)
+            new_shape = nu.prod(nu.asarray(param[0]).shape)
             step_size[model] = [nu.cov(nu.asarray(param[-2000:]).reshape(2000,new_shape).T)]
 
         return step_size[model]
@@ -345,6 +360,7 @@ class VESPA_fit(object):
         elif self._min_sfh != int(model):
                 #death!
                 temp_model = str(int(model) - 1)
+                
                 #get lowest weight and give random amount to neighbor
                 index = param[model][:,-1].argmin()
                 new_param = []
@@ -355,29 +371,37 @@ class VESPA_fit(object):
                     temp = param[model][index-1]
                     new_param.append([temp[0] + split[0] * u, 0., temp[2] + split[2] * u,
                                       temp[3] + split[3] * u])
-                    new_param[-1][1] = new_param[-1][0]/2. + temp[1] -temp[0]/2.
+                    new_param[-1][1] = temp[1] + (split[0] * u)/2.
+                    #make sure metalicity is in bounds
+                    if new_param[-1][2] < self._metal_unq.min():
+                        new_param[-1][2] = self._metal_unq.min() + 0.
+                    if new_param[-1][2] > self._metal_unq.max():
+                        new_param[-1][2] = self._metal_unq.max() + 0.
+
                 if index + 1 < int(model):
                     #combine with older
                     temp = param[model][index+1]
-                    new_param.append([temp[0] + split[0] * u, 0., temp[2] + split[2] * u,
+                    new_param.append([temp[0] + split[0] * (1-u), 0., temp[2] + split[2] * u,
                                       temp[3] + split[3] * u])
-                    new_param[-1][1] =  new_param[-1][0]/2. + temp[1]-temp[0]/2.
+                    new_param[-1][1] =  temp[1] - (split[0]*(1-u))/2.
+                    #make sure metalicity is in bounds
+                    if new_param[-1][2] < self._metal_unq.min():
+                        new_param[-1][2] = self._metal_unq.min() + 0.
+                    if new_param[-1][2] > self._metal_unq.max():
+                        new_param[-1][2] = self._metal_unq.max() + 0.
                 for i in range(param[model].shape[0]):
                     if i in range(1-index,index+2):
                         continue
                     new_param.append(nu.copy(param[model][i]))
                 #set for output
                 param[temp_model] = nu.asarray(new_param)
-
-                import cPickle as pik
-                pik.dump((birth_rate, model, param),open('birth.pik' ,'w'),2)
-                #combine smallest weight with other
-                return param, None, False, None
         else:
             #birth or death failed
             return param, None, False, None
+        #sort params by age
+        param[temp_model] = param[temp_model][nu.argsort(param[temp_model][:,1]),:]
         return param, temp_model, True, 1. #need to sort out jacobian
-
+    #tests
     def make_sfh_plot(self,param, model=None):
         '''(dict(ndarray)-> Nonetype
         Make plot of sfh vs log age of all models in param 
@@ -396,6 +420,21 @@ class VESPA_fit(object):
         else:
             for i in param.keys():
                 pass
+
+    def make_numeric(self, age, sfh, max_bins, metals=None):
+        '''(ndarray,ndarray,ndarray,int,ndarray or None) -> ndarray
+        Like EZGAL's function but with a vespa like framework.
+        Bins function into flat chunks of average of SFH of function in that range.
+        Can also put a function for metalicity to, otherwise will be random.
+        '''
+        age, sfh = nu.asarray(age), nu.asarray(sfh)
+        assert age.shape[0] == sft.shape[0], 'Age and SFH must have same shape'
+        #split up age range and give lengths
+        param = []
+        length = self._age_unq.ptp()/max_bins
+        for i in max_bins:
+            pass
+
 
 class Spectral_fit(object):
     '''Finds the age, metalicity, star formation history, 

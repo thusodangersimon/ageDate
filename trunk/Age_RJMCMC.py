@@ -262,7 +262,7 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
                         out_sigma[bins] = []
                     chi[bins].append(tchi + 0)
                     param[bins].append(active_param[bins][:])
-                    print bins, active_param[bins].shape, sigma[bins][0].shape
+                    #print bins, active_param[bins].shape, sigma[bins][0].shape
                 else:
                     pass
                 j, j_timeleft = 0 , nu.random.exponential(100)
