@@ -227,51 +227,54 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins,
     return out
 
 def make_burst(length, t, metal, metal_unq, age_unq, spect, lib_vals):
-	'''(float, float,float, ndarray(float),ndarray(float)
-		ndarray(float) tuple(ndarray(floats),ndarray(str))) -> ndarray(float)
-		Turns SSP into busrt of constant stellar formation and of length dt at
-		age t for a const metalicity 10**(t-9) - length/2 to 10**(t-9) + length/2.
-		All terms are logrythmic.
-	'''
+    '''(float, float,float, ndarray(float),ndarray(float)
+ndarray(float) tuple(ndarray(floats),ndarray(str))) -> ndarray(float)
+Turns SSP into busrt of constant stellar formation and of length dt at
+age t for a const metalicity 10**(t-9) - length/2 to 10**(t-9) + length/2.
+All terms are logrythmic.
+    '''
 	#lib_vals[0][:,0] = 10**nu.log10(lib_vals[0][:,0])
-	if t < age_unq.min() or t > age_unq.max():
+    if t < age_unq.min() or t > age_unq.max():
 		#Age not in range
 		return spect[:,0] + nu.inf
-	if metal < metal_unq.min() or metal > metal_unq.max():
+    if metal < metal_unq.min() or metal > metal_unq.max():
 		#Metalicity not in range
 		return spect[:,0] + nu.inf
 	#get all ssp's with correct age range and metalicity
 	#min age range
-	if t - length/2. < age_unq.min():
+    if t - length/2. < age_unq.min():
 		t_min = age_unq.min() + 0.
-	else:
+    else:
 		t_min = t- length/2.
 	#max age range
-	if 	t + length/2. > age_unq.max():
+    if 	t + length/2. > age_unq.max():
 		t_max = age_unq.max() + 0.
-	else:
+    else:
 		t_max = t + length/2.
-	index = nu.searchsorted(age_unq, [t_min,t_max])
-	ages = age_unq[index[0]:index[1]]
+    index = nu.searchsorted(age_unq, [t_min,t_max])
+    ages = age_unq[index[0]:index[1]]
 	#get SSP's
 	
 	#handel situation where stepsize is small
-	if len(ages) < 2:
-		pass
-	temp_param = []
-	for i in ages:
+    if len(ages) < 10:
+        ages = nu.linspace(t_min,t_max,10)
+    temp_param = []
+    #get ssp's
+    for i in ages:
 		temp_param.append([metal, i ,1.])
-	ssp = get_model_fit_opt(nu.ravel(temp_param), lib_vals, age_unq, metal_unq, 
-							len(ages), spect)
+    ssp = get_model_fit_opt(nu.ravel(temp_param), lib_vals, age_unq, metal_unq, 
+        len(ages), spect)
 	#sort for intergration
-	inters = []
+    inters = []
 	#integrate ssp's
-	ssp.pop('wave')
-	for i in nu.sort(nu.int64(ssp.keys())):
-		if not nu.any(nu.isfinite(ssp[str(i)])):
-			continue
-		inters.append(ssp[str(i)])
-	return simps(inters, ages, axis=0)/float(len(ages))
+    ssp.pop('wave')
+    for i in nu.sort(nu.int64(ssp.keys())):
+        if not nu.any(nu.isfinite(ssp[str(i)])):
+            continue
+        inters.append(ssp[str(i)])
+    if len(inters) == 0:
+        return spect[:,0] + nu.inf
+    return simps(inters, ages, axis=0)/float(len(ages))
 	#return new ssp
 	
 		

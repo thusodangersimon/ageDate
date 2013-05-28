@@ -170,14 +170,14 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
     #profiling
     t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm = [],[],[],[],[],[],[],[],[] 
     while option.iter_stop:
-        if T_cuurent[bins] % 20001 == 0:
+        if T_cuurent[bins] % 201 == 0:
             print acept_rate[bins][-1],chi[bins][-1],bins, option.current
             sys.stdout.flush()
 			
         #sample from distiburtion
         t_pro.append(Time.time())
+    
         active_param[bins] = fun.proposal(active_param[bins], sigma[bins])
-            
         t_pro[-1] -= Time.time()
         #swarm stuff
         t_swarm.append(Time.time())
@@ -237,19 +237,25 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
         
         if j >= j_timeleft:
             active_param, temp_bins, attempt, critera = fun.birth_death(birth_rate, bins, active_param)
+            #print bins, active_param[bins].shape, sigma[bins][0].shape
             if attempt:
                 #check if accept move
                 tchi = fun.lik(active_param, temp_bins)
                 #likelihoods
-                rj_a = (-(chi[bins][-1]-tchi)/
-                        SA(trans_moves,100,5000.,T_stop))
+                rj_a = (tchi - chi[bins][-1])
                 #parameter priors
                 rj_a += (fun.prior(active_param, temp_bins) - 
                          fun.prior(active_param, bins))
                 #model priors
                 rj_a += 0 #uniform
                 trans_moves += 1
-                #print rj_a , active_param[temp_bins][:,-1],active_param[bins][:,-1]
+                #simulated aneeling 
+                rj_a /= SA(trans_moves,50,abs(chi[bins][0]),T_stop)
+                print rj_a,temp_bins,bins
+                '''if acept_rate[bins][-1] < .17:
+                    import cPickle as pik
+                    pik.dump((active_param,temp_bins,bins),open('test.pik','w'),2)
+                '''
                 if nu.exp(rj_a) * critera > nu.random.rand():
                     #accept move
                     bins = temp_bins + ''
@@ -262,7 +268,7 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
                         out_sigma[bins] = []
                     chi[bins].append(tchi + 0)
                     param[bins].append(active_param[bins][:])
-                    #print bins, active_param[bins].shape, sigma[bins][0].shape
+                    print 'success',bins,trans_moves
                 else:
                     pass
                 j, j_timeleft = 0 , nu.random.exponential(100)

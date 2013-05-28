@@ -38,6 +38,8 @@ import scipy.stats as stats_dist
 import multiprocessing as multi
 from itertools import izip
 
+
+
 class Example_lik_class(object):
 
     '''exmaple class for use with RJCMCM or MCMC program, all methods are
@@ -129,7 +131,7 @@ class VESPA_fit(object):
     def __init__(self,data, min_sfh=1,max_sfh=16,lin_space=False,use_dust=True, 
 		use_losvd=True, spec_lib='p2',imf='salp',
 			spec_lib_path='/home/thuso/Phd/stellar_models/ezgal/'):
-		'''(VESPA_fitclass, ndarray,int,int) -> NoneType
+        '''(VESPA_fitclass, ndarray,int,int) -> NoneType
         data - spectrum to fit
         *_sfh - range number of burst to allow
         lin_space - make age bins linearly space or log spaced
@@ -138,25 +140,25 @@ class VESPA_fit(object):
         imf - inital mass function to use
         spec_lib_path - path to ssps
         sets up vespa like fits
-		'''
-		self.data = nu.copy(data)
-		#make mean value of data= 1000
-		self._norm = 1./(self.data[:,1].mean()/1000.)
-		self.data[:,1] *= self._norm
+        '''
+        self.data = nu.copy(data)
+		#make mean value of data= 100
+        self._norm = 1./(self.data[:,1].mean()/100.)
+        self.data[:,1] *= self._norm
         #load models
-		cur_lib = ['basti', 'bc03', 'cb07','m05','c09','p2']
-		assert spec_lib.lower() in cur_lib, ('%s is not in ' %spec_lib.lower() + str(cur_lib))
-		if not spec_lib_path.endswith('/') :
-			spec_lib_path += '/'
-		models = glob(spec_lib_path+spec_lib+'*'+imf+'*')
-		if len(models) == 0:
+        cur_lib = ['basti', 'bc03', 'cb07','m05','c09','p2']
+        assert spec_lib.lower() in cur_lib, ('%s is not in ' %spec_lib.lower() + str(cur_lib))
+        if not spec_lib_path.endswith('/') :
+            spec_lib_path += '/'
+        models = glob(spec_lib_path+spec_lib+'*'+imf+'*')
+        if len(models) == 0:
 			models = glob(spec_lib_path+spec_lib.lower()+'*'+imf+'*')
-		assert len(models) > 0, "Did not find any models"
+        assert len(models) > 0, "Did not find any models"
         #crate ezgal class of models
-		SSP = gal.wrapper(models)
+        SSP = gal.wrapper(models)
         #extract seds from ezgal wrapper
-		spect, info = [SSP.sed_ls], []
-		for i in SSP:
+        spect, info = [SSP.sed_ls], []
+        for i in SSP:
 			metal = float(i.meta_data['met'])
 			ages = nu.float64(i.ages)
 			for j in ages:
@@ -164,19 +166,25 @@ class VESPA_fit(object):
 					continue
 				spect.append(i.get_sed(j,age_units='yrs'))
 				info.append([metal+0,j])
-		info,self._spect = [nu.log10(info),None],nu.asarray(spect).T
+        info,self._spect = [nu.log10(info),None],nu.asarray(spect).T
+        #test if sorted
+        self._spect = self._spect[::-1,:]
+        #make spect match wavelengths of data
+        self._spect = ag.data_match_all(data,self._spect)[0]
 		#set hidden varibles
-		self._lib_vals = info
-		self._age_unq = nu.unique(info[0][:,1])
-		self._metal_unq = nu.unique(info[0][:,0])
-		self._lib_vals[0][:,0] = 10**self._lib_vals[0][:,0]
-		self._min_sfh, self._max_sfh = min_sfh,max_sfh
+        self._lib_vals = info
+        self._age_unq = nu.unique(info[0][:,1])
+        self._metal_unq = nu.unique(info[0][:,0])
+        self._lib_vals[0][:,0] = 10**self._lib_vals[0][:,0]
+        self._min_sfh, self._max_sfh = min_sfh,max_sfh +1
 		#params
-		self.curent_param = nu.empty(2)
-		self.models = {}
-		for i in xrange(min_sfh,max_sfh+1):
-			self.models[str(i)]= ['burst_length','mean_age', 'metal','norm'] * i
-		'''
+        self.curent_param = nu.empty(2)
+        self.models = {}
+        for i in xrange(min_sfh,max_sfh+1):
+            self.models[str(i)]= ['burst_length','mean_age', 'metal','norm'] * i
+        #multiple_block for bad performance
+        self._multi_block = False
+        '''
 		self.data = nu.copy(data)
         #normalized so area under curve is 1 to keep chi 
         #values resonalble
@@ -214,22 +222,23 @@ class VESPA_fit(object):
         self._metal_unq = nu.log10(nu.unique(nu.float64(self.SSP['met'])))
         #self._len_unq = nu.unique(nu.asarray(self.SSP.meta_data['length'],
 		#				dtype=float))
-			'''	
+        '''	
 		
     def proposal(self,mu,sigma):
-		'''(Example_lik_class, ndarray,ndarray) -> ndarray
+        '''(Example_lik_class, ndarray,ndarray) -> ndarray
 		Proposal distribution, draws steps for chain. Should use a symetric
-		distribution'''
-		#save length and mean age they don't change
-                t_out = nu.random.multivariate_normal(nu.ravel(mu),sigma[0])
-		bins = sigma[0].shape[0]/4
-		t_out = nu.reshape(t_out, (bins, 4))
-		#set length and age back to original and make norm positive
-		for i,j in enumerate(mu):
-			t_out[i][:2] = j[:2]
-			t_out[i][-1] = abs(t_out[i][-1])
+		distribution
+        '''
+		#save length and mean age they don't change  self._multi_block
+        t_out = nu.random.multivariate_normal(nu.ravel(mu),sigma[0])
+        bins = sigma[0].shape[0]/4
+        t_out = nu.reshape(t_out, (bins, 4))
+        #set length and age back to original and make norm positive
+        for i,j in enumerate(mu):
+            t_out[i][:2] = j[:2]
+            t_out[i][-1] = abs(t_out[i][-1])
 
-		return t_out
+        return t_out
         
 
     def lik(self,param, bins,return_all=False):
@@ -275,7 +284,7 @@ class VESPA_fit(object):
             if i[3] < 0:
                 out += -nu.inf
             else:
-                out += -100.
+                out += -10.
 
         return out
 
@@ -321,7 +330,9 @@ class VESPA_fit(object):
         if len(param) % 2000 == 0 and len(param) > 0.:
             new_shape = nu.prod(nu.asarray(param[0]).shape)
             step_size[model] = [nu.cov(nu.asarray(param[-2000:]).reshape(2000,new_shape).T)]
-
+        if step_crit < .18:
+            print step_size[model][0].diagonal()
+            #self._multi_block
         return step_size[model]
 
 
@@ -336,20 +347,28 @@ class VESPA_fit(object):
         whether of not to attempt model jump (False to make run as MCMC) and the
         Jocobian for move.
         '''
-        if birth_rate > nu.random.rand() and self._max_sfh != int(model):
+        if birth_rate > nu.random.rand() and self._max_sfh > 1+int(model):
             #birth!
             temp_model = str(int(model) + 1)
-            #split component with higest weight
+            jacob = 2.
+            #split component with prob proprotional to weights
             temp_param = nu.reshape(param[model], (int(model), 4))
-            index = nu.argmax(temp_param[:,-1])
+            prob = param[model][:,-1] / param[model][:,-1].sum()
+            index = nu.where(param[model][:,-1] ==
+                             nu.random.choice(param[model][:,-1],
+                                              p=prob))[0]
+            index = int(index)
             u = nu.random.rand()
+            #[len,t,metal,norm]
+            new_metal = [self._metal_unq.min()+nu.random.rand()*self._metal_unq.ptp(), temp_param[index,2] + 0]
+
             new_param = ([[temp_param[index,0]/2., 
                            (2*temp_param[index,1] - temp_param[index,0]/2.)/2.,
-                           temp_param[index,2] + 0., temp_param[index,3] * u]])
+                           new_metal[nu.random.randint(2)], temp_param[index,3] * u]])
 
             new_param.append([temp_param[index,0]/2.,
                               (2*temp_param[index,1] + temp_param[index,0]/2.)/2.,
-                              temp_param[index,2] + 0., temp_param[index,3] * (1 -u)])
+                              new_metal[nu.random.randint(2)], temp_param[index,3] * (1 -u)])
             #copy the rest
             for i in range(int(model)):
                 if i == index:
@@ -360,17 +379,25 @@ class VESPA_fit(object):
         elif self._min_sfh != int(model):
                 #death!
                 temp_model = str(int(model) - 1)
-                
+                jacob = 1/2.
                 #get lowest weight and give random amount to neighbor
-                index = param[model][:,-1].argmin()
+                prob = param[model][:,-1].sum()/param[model][:,-1] 
+                #inverse prob
+                prob /= prob.sum()
+                index = nu.where(param[model][:,-1] ==
+                             nu.random.choice(param[model][:,-1],
+                                              p=prob))[0]
+                index = int(index)
                 new_param = []
                 split = param[model][index]
                 u = nu.random.rand()
                 if index - 1 > -1 :
                     #combine with younger                    
                     temp = param[model][index-1]
-                    new_param.append([temp[0] + split[0] * u, 0., temp[2] + split[2] * u,
-                                      temp[3] + split[3] * u])
+                    new_metal = [self._metal_unq.min()+nu.random.rand()*self._metal_unq.ptp(), temp[2] + split[2] * u, temp[2]+0.,split[2]+0.]
+                    new_param.append([temp[0] + split[0] * u, 0., 
+                                     new_metal[nu.random.randint(4)],
+                                     temp[3] + split[3] * u])
                     new_param[-1][1] = temp[1] + (split[0] * u)/2.
                     #make sure metalicity is in bounds
                     if new_param[-1][2] < self._metal_unq.min():
@@ -381,7 +408,9 @@ class VESPA_fit(object):
                 if index + 1 < int(model):
                     #combine with older
                     temp = param[model][index+1]
-                    new_param.append([temp[0] + split[0] * (1-u), 0., temp[2] + split[2] * u,
+                    new_metal = [self._metal_unq.min()+nu.random.rand()*self._metal_unq.ptp(), temp[2] + split[2] * (1-u), temp[2]+0.,split[2]+0.]
+                    new_param.append([temp[0] + split[0] * (1-u), 0.,
+                                      new_metal[nu.random.randint(4)],
                                       temp[3] + split[3] * u])
                     new_param[-1][1] =  temp[1] - (split[0]*(1-u))/2.
                     #make sure metalicity is in bounds
@@ -390,7 +419,8 @@ class VESPA_fit(object):
                     if new_param[-1][2] > self._metal_unq.max():
                         new_param[-1][2] = self._metal_unq.max() + 0.
                 for i in range(param[model].shape[0]):
-                    if i in range(1-index,index+2):
+                    if i in range(index-1,index+2) or i == index:
+                        print i
                         continue
                     new_param.append(nu.copy(param[model][i]))
                 #set for output
@@ -400,8 +430,9 @@ class VESPA_fit(object):
             return param, None, False, None
         #sort params by age
         param[temp_model] = param[temp_model][nu.argsort(param[temp_model][:,1]),:]
-        return param, temp_model, True, 1. #need to sort out jacobian
+        return param, temp_model, True, jacob #need to sort out jacobian
     #tests
+    
     def make_sfh_plot(self,param, model=None):
         '''(dict(ndarray)-> Nonetype
         Make plot of sfh vs log age of all models in param 
@@ -428,14 +459,40 @@ class VESPA_fit(object):
         Can also put a function for metalicity to, otherwise will be random.
         '''
         age, sfh = nu.asarray(age), nu.asarray(sfh)
-        assert age.shape[0] == sft.shape[0], 'Age and SFH must have same shape'
+        assert age.shape[0] == sfh.shape[0], 'Age and SFH must have same shape'
+        if max_bins > len(age):
+            print 'Warning, more bins that ages not supported yet'
+            
         #split up age range and give lengths
         param = []
         length = self._age_unq.ptp()/max_bins
-        for i in max_bins:
-            pass
-
-
+        bins = nu.histogram(age,bins=max_bins)[1]
+        #need to get length, t, norm and metals if avalible
+        length, t, norm, metal = [], [] ,[] ,[]
+        for i in range(0,len(bins)-1):
+            index = nu.searchsorted(age,[bins[i],bins[i+1]])
+            length.append(age[index[0]:index[1]].ptp())
+            t.append(age[index[0]:index[1]].mean())
+            norm.append(sfh[index[0]:index[1]].mean())
+            if metals is None:
+                #no input metal choose random
+                metal.append(nu.random.choice(nu.linspace(self._metal_unq.min(),self._metal_unq.max())))
+            else:
+                pass
+        #normalize norm to 1
+        norm = nu.asarray(norm)/nu.sum(norm)
+        #get bursts
+        out = nu.zeros_like(self._spect[:,:2])
+        out[:,0] = self._spect[:,0].copy()
+        for i in range(len(t)):
+            out[:,1] += norm[i] * ag.make_burst(length[i],t[i],metal[i]
+                          ,self._metal_unq, self._age_unq, self._spect
+                          , self._lib_vals)
+        if metals is None:
+            return out,metal
+        else:
+            return out
+        
 class Spectral_fit(object):
     '''Finds the age, metalicity, star formation history, 
     dust obsorption and line of sight velocity distribution
