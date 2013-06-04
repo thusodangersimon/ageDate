@@ -52,34 +52,39 @@ from losvd_convolve import convolve
 #123456789012345678901234567890123456789012345678901234567890123456789
 ###decorators
 class memoized(object):
-   '''Decorator. Caches a function's return value each time it is called.
-   If called later with the same arguments, the cached value is returned
-   (not reevaluated).
-   '''
-   def __init__(self, func):
+    '''Decorator. Caches a function's return value each time it is called.
+    If called later with the same arguments, the cached value is returned
+    (not reevaluated).
+    '''
+    def __init__(self, func):
       self.func = func
       self.__doc__ = func.__doc__
       self.cache = {}
 
-   def __call__(self, *args):
+    def __call__(self, *args):
       #works different for different functions
       if self.func.__name__ == 'gauss1':
-         arg = str(args[1])
-         if arg in self.cache:
-            return self.cache[arg]
-         else:
-            value = self.func(*args)
-            self.cache[arg] = value
-            return value
+        arg = str(args[1])
+        if arg in self.cache:
+          return self.cache[arg]
+        else:
+          value = self.func(*args)
+          self.cache[arg] = value
+          return value
+      elif self.func.__name__ == 'make_burst':
+          arg = str((args[0],args[1],args[2]))
+          if not arg in self.cache:
+            self.cache[arg] = self.func(*args)
+          return self.cache[arg]
       else:
-         if args in self.cache:
+          if args in self.cache:
             return self.cache[args]
-         else:
+          else:
             value = self.func(*args)
             self.cache[args] = value
             return value
 
-   def __repr__(self):
+    def __repr__(self):
       '''Return the function's docstring.'''
       return self.func.__doc__
                   
@@ -226,6 +231,7 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins,
    #exit program
     return out
 
+@memoized
 def make_burst(length, t, metal, metal_unq, age_unq, spect, lib_vals):
     '''(float, float,float, ndarray(float),ndarray(float)
 ndarray(float) tuple(ndarray(floats),ndarray(str))) -> ndarray(float)

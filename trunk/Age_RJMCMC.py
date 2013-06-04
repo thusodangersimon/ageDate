@@ -35,62 +35,11 @@ from scipy.stats import levene, f_oneway,kruskal
 from anderson_darling import anderson_darling_k as ad_k
 from multiprocessing import *
 import time as Time
+import signal
 a=nu.seterr(all='ignore')
 
-class rj_dict(dict):
-    '''like built in dict, but has methods __add_ and __sub__ to add more key
-    words and subrtract them'''
-    def __add__(self,x):
-        '''Combines models together, keywords become almagination of the 2
-        '''
-        newkey = ''
-        new_vals = []
-        for i in x.keys():
-            newkey += i + ','
-            new_vals.append(x[i])
-        for i in self.keys():
-            newkey += i + ','
-            new_vals.append(self[i])
-        newkey = newkey[:-1]
-        out = rj_dict()
-        out[newkey] = new_vals
-        return out
-        #remove old key
-        
-    def __iadd__(self,x):
-        return __add__(x)
 
-    def __isub__(self,x):
-        return __sub__(x)
-
-    def __sub__(self,x):
-        '''removes keyword from dict does last one first
-        >>>a = rj_dict()
-        >>>a['1,2,1']=[[1],[2],[3]]
-        >>>a -'2'
-        {'1,1':[[1],[3]]}
-        >>>a - '1'
-        {'1,2':[[1],[2]]}'''
-        assert type(x) is str, "can only remove proper key value"
-        keys = self.keys()[0]
-        keys = keys.split(',')
-        vals = self.copy().values()[0][:]
-        max = -1
-        for i,j in enumerate(keys):
-            if j == x:
-                max = i
-        vals.pop(max)
-        keys.pop(max)
-        newkeys = ''
-        for i in keys:
-            newkeys += i + ','
-        newkeys = newkeys[:-1]
-        out = rj_dict()
-        out[newkeys] = vals
-        return out
-
-
-def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=False):
+def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False, model_prior=False):
     '''(likelihood object, running object, int, int, bool, bool) ->
     dict(ndarray), dict(ndarray)
 
@@ -111,6 +60,10 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
     dictonary of params, the different keys use different modesl.
     dictornary of log of the likelihood*log-priors
     '''
+    #set global for graceful exit
+    #stop = option.iter_stop
+    #global stop
+    #signal.signal(signal.SIGINT, signal_save_rjmcmc)
     #see if to use specific seed
     if seed is not None:
         nu.random.seed(seed)
@@ -123,11 +76,9 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
     #simulated anneling param
     T_cuurent = rj_dict()
     for i in fun.models.keys(): ####todo add random combination of models
-        active_param[i], sigma[i] = [], []
-        temp = fun.initalize_param(i)
-        active_param[i].append(temp[0].copy())
-        sigma[i].append(temp[1].copy())
-    bins = '1' +''
+        active_param[i], sigma[i] = fun.initalize_param(i)
+    #start with random model
+    bins = nu.random.choice(fun.models.keys())
 
     #set other RJ params
     Nacept[bins] , Nreject[bins] = 1.,1.
@@ -137,13 +88,24 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
     #set storage functions
     param[bins] = [active_param[bins][:]]
     #first lik calc
+    #print active_param[bins]
     chi[bins] = [fun.lik(active_param,bins) + fun.prior(active_param,bins)]
     #check if starting off in bad place ie chi=inf or nan
-    '''if not nu.isfinite(chi[bins][-1]):
-         continue
-    else:
-    break
-    '''
+    if not nu.isfinite(chi[bins][-1]):
+        t = Time.time()
+        print 'Inital possition failed retrying for 1 min'
+        #try different chi for 1 min and then give up
+        while Time.time() - t < 60:
+             active_param[bins], sigma[bins] = fun.initalize_param(bins)
+             temp = fun.lik(active_param,bins) + fun.prior(active_param,bins)
+             if nu.isfinite(temp):
+                 chi[bins][-1] = nu.copy(temp)
+                 param[bins][-1] = nu.copy(active_param[bins])
+                 print 'Good starting point found. Starting RJMCMC'
+                 break
+        else:
+            #didn't find good place exit program
+            raise ValueError('No good starting place found, check initalization')
 	#set best chi and param
     '''if nu.isfinite(chi[str(bins)][-1]):
 		option.chibest[0] = chi[str(bins)][-1]+.0
@@ -165,13 +127,15 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
     size,a = 0,0
     j,T,j_timeleft = 1,9.,nu.random.exponential(100)
     T_start,T_stop = 300, 1.
-    birth_rate = 0.5
     trans_moves = 0
     #profiling
     t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm = [],[],[],[],[],[],[],[],[] 
     while option.iter_stop:
         if T_cuurent[bins] % 201 == 0:
-            print acept_rate[bins][-1],chi[bins][-1],bins, option.current
+            show = ('%.2f,%e,%s,%i'
+                    %(acept_rate[bins][-1],chi[bins][-1],bins, option.current))
+            print show
+            
             sys.stdout.flush()
 			
         #sample from distiburtion
@@ -189,13 +153,19 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
         #calculate new model and chi
         t_lik.append(Time.time())
         chi[bins].append(0.)
-        chi[bins][-1] = fun.lik(active_param,bins) + fun.prior(active_param,bins)
+        try:
+            chi[bins][-1] = fun.lik(active_param,bins) + fun.prior(active_param,bins)
+        except TypeError:
+            print active_param[bins]
         #print chi[str(bins)][-2], chi[str(bins)][-1] ,sigma[str(bins)].diagonal()
         #decide to accept or not change from log lik to like
         #just lik part
-        a = ((chi[bins][-1] - chi[bins][-2]) / SA(T_cuurent[bins],burnin,abs(T_start),T_stop))
+        a = (chi[bins][-1] - chi[bins][-2]) 
         #model prior
         a += fun.model_prior(bins)
+        #simulated anneling
+        a /= SA(T_cuurent[bins],burnin,abs(T_start),T_stop)
+        #print a
         #print bins ,chi[str(bins)][-2], chi[str(bins)][-1], active_param[str(bins)]
         
         t_lik[-1]-=Time.time()
@@ -204,8 +174,10 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
         '''if nu.abs(nu.log10(T_start /chi[str(bins)][-1])) > 2 and T_cuurent[str(bins)] < burnin:
             T_start = option.chibest[0]'''
         #metropolis hastings
+        #print a
         if nu.exp(a) > nu.random.rand(): #acepted
-            param[bins].append(active_param[bins][:])
+            #print 'accept'
+            param[bins].append(nu.copy(active_param[bins]))
             Nacept[bins] += 1
            #see if global best fit
             '''if option.chibest < chi[str(bins)][-1] and nu.isfinite(chi[str(bins)][-1]):
@@ -217,16 +189,20 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
                         option.parambest[kk] = nu.nan'''
         else:
             try:
-                param[bins].append(param[bins][-1][:])
-                active_param[bins] = param[bins][-1][:] 
+                param[bins].append(nu.copy(param[bins][-1]))
+                active_param[bins] = nu.copy(param[bins][-1]) 
             except IndexError:
                 #if first time in new place
-                param[bins].append(active_param[bins][:])
+                param[bins].append(nu.copy(active_param[bins]))
             
             chi[bins][-1] = nu.copy(chi[bins][-2])
             Nreject[bins]+=1
         t_accept[-1]-=Time.time()
         ###########################step stuff
+        if acept_rate[bins][-1] < .18 and T_cuurent[str(bins)] > burnin + 5000:
+            import cPickle as pik
+            pik.dump((active_param,sigma,bins,param),open('dunm.pik','w'),2)
+            raise
         t_step.append(Time.time())
         if T_cuurent[str(bins)] < burnin + 5000:
             #only tune step if in burn-in
@@ -241,6 +217,7 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
             if attempt:
                 #check if accept move
                 tchi = fun.lik(active_param, temp_bins)
+                #fun.make_sfh_plot(active_param,temp_bins)
                 #likelihoods
                 rj_a = (tchi - chi[bins][-1])
                 #parameter priors
@@ -251,7 +228,7 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
                 trans_moves += 1
                 #simulated aneeling 
                 rj_a /= SA(trans_moves,50,abs(chi[bins][0]),T_stop)
-                print rj_a,temp_bins,bins
+                #print rj_a,temp_bins,bins
                 '''if acept_rate[bins][-1] < .17:
                     import cPickle as pik
                     pik.dump((active_param,temp_bins,bins),open('test.pik','w'),2)
@@ -267,7 +244,7 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
                         Nacept[bins] , Nreject[bins] = 1., 1.
                         out_sigma[bins] = []
                     chi[bins].append(tchi + 0)
-                    param[bins].append(active_param[bins][:])
+                    param[bins].append(nu.copy(active_param[bins]))
                     print 'success',bins,trans_moves
                 else:
                     pass
@@ -302,7 +279,7 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
         t_comm[-1]-=Time.time()
         #if mpi isn't on allow exit
         if option.comm_world.size == 1:
-            if option.current > 2*10**5:
+            if option.current > 10**5:
                 option.iter_stop = False
         #pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm),open('time_%i.pik'%option.rank_world,'w'),2)
     #####################################return once finished 
@@ -313,100 +290,6 @@ def RJMC_main(fun, option, burnin=5*10**3,seed=None, prior=False, model_prior=Fa
 		bayes_fact[i] = nu.array(bayes_fact[i])'''
 		#pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm,param,chi),open('time_%i.pik'%option.rank_world,'w'),2)
     return param, chi, acept_rate, out_sigma, param.keys()
-		
-
-def death_birth(fun, birth_rate, bins, j,j_timeleft, active_param):
-    #does birth or death moved
-        attempt = False
-        if ((birth_rate > nu.random.rand() and bins < fun._k_max and 
-             j > j_timeleft ) or (j > j_timeleft and bins == 1)):
-            #birth
-            attempt = True #so program knows to attempt a new model
-            rand_step = nu.random.rand(3)*[fun._metal_unq.ptp(), fun._age_unq.ptp(),1.]
-            rand_index = nu.random.randint(bins)
-            temp_bins = 1 + bins
-            #criteria for this step
-            critera = 1/4.**3 * birth_rate #(1/3.)**temp_bins
-            #new param step
-            for k in range(len(active_param[str(bins)])):
-                active_param[str(temp_bins)][k]=active_param[str(bins)][k]
-            #set last 3 and rand_index 3 to new
-            if .5 > nu.random.rand(): #x'=x+-u
-                active_param[str(temp_bins)][-3:] = (active_param[str(bins)][rand_index*3:rand_index*3+3] + 
-                                                     rand_step)
-                active_param[str(temp_bins)][rand_index*3:rand_index*3+3] = (
-                    active_param[str(bins)][rand_index*3:rand_index*3+3] - rand_step)
-                k = 0
-                #check to see if in bounds
-                while fun.prior(nu.hstack((active_param[str(temp_bins)],
-                                           nu.zeros(2)))): 
-                    k += 1
-                    if k < 100:
-                        rand_step = nu.random.rand(3) * [fun._metal_unq.ptp(), fun._age_unq.ptp(),1.]
-                    else:
-                        rand_step /= 2.
-                    active_param[str(temp_bins)][-3:] = (
-                        active_param[str(bins)][rand_index*3:rand_index*3+3] + rand_step)
-                    active_param[str(temp_bins)][rand_index*3:rand_index*3+3]=(
-                        active_param[str(bins)][rand_index*3:rand_index*3+3]-rand_step)
-            else: #draw new values randomly from param space
-                active_param[str(temp_bins)][-3:] = (nu.random.rand(3) * 
-                                                     nu.array([fun._metal_unq.ptp(), fun._age_unq.ptp(),5.]) + 
-                                                     nu.array([fun._metal_unq.min(), fun._age_unq.min(), 0]))
-        elif j > j_timeleft and bins > 1 and  0.01 < nu.random.rand():
-            #death
-            attempt = True #so program knows to attempt a new model
-            temp_bins = bins - 1
-            #criteria for this step
-            critera = 4.**3 * (1 - birth_rate) #3.**temp_bins
-            if .5 > nu.random.rand():
-                #remove bins with 1-N/Ntot probablitiy
-                Ntot = nu.sum(active_param[str(bins)][range(2,bins*3,3)])
-                rand_index = (rand_choice(active_param[str(bins)][range(2,bins*3,3)],
-                                          active_param[str(bins)][range(2,bins*3,3)]/Ntot))
-                k = 0
-                for ii in xrange(bins): #copy to lower dimestion
-                    if not ii == rand_index:
-                        active_param[str(temp_bins)][3*k:3*k+3] = nu.copy(active_param[str(bins)]
-                                                                        [3*ii:3*ii+3])
-                        k += 1
-            else: #average 2 componets together for new values
-                rand_index = nu.random.permutation(bins)[:2] #2 random indeci
-                k = 0
-                for ii in xrange(bins):
-                    if not any(ii == rand_index):
-                        active_param[str(temp_bins)][3*k:3*k+3] = nu.copy(active_param[str(bins)]
-                                                                        [3*ii:3*ii+3])
-                        k += 1
-                active_param[str(temp_bins)][3*k:3*k+3] = (active_param[str(bins)][3*rand_index[0]:3*rand_index[0]+3]+active_param[str(bins)] [3*rand_index[1]:3*rand_index[1]+3])/2.
-        '''elif j > j_timeleft: #move to global bestfit
-            attempt = True
-            #extract best fit from global array
-            best_param = nu.array(option.parambest)
-            best_param = best_param[~nu.isnan(best_param)]
-            temp_bins = (len(best_param)-2-4)/3
-            #calculate occam factor * model select prob
-            critera = 4. **(bins - temp_bins) * 0.01
-            active_param[str(temp_bins)] = nu.copy(best_param[range(3*temp_bins)])
-            active_dust = nu.copy(best_param[-6:-4])
-            active_losvd = nu.copy(best_param[-4:])'''
-        if attempt:
-            return active_param, temp_bins, attempt, critera
-        else:
-            return active_param, None, attempt, None
-
-def is_required(s): 
-    '''(str) -> bool
-    Checks whither keys is from a required models or secondary model'''
-    
-    return s.upper() == s
-
-def is_duplicate(s,cmp,sep=','):
-    '''(str,str,str) -> bool
-
-    Checks whither cmp exsists inside s with speprators sep
-    '''
-    pass
 
 def SA(i,i_fin,T_start,T_stop):
     #temperature parameter for Simulated anneling (SA). 
@@ -432,51 +315,6 @@ def random_permute(seed):
         seed = str(seed)
     return int(seed)
 
-def Step_func(acept_rate, param, sigma, sigma_dust, sigma_losvd,
-              bins, j, isdust, islosvd):
-    #changes step size if needed
-    if  (acept_rate < 0.234 and all(sigma.diagonal() >= 10**-5)):
-               #too few aceptnce decrease sigma
-        sigma  /= 1.05
-        if isdust:
-            sigma_dust /= 1.05
-        if islosvd: 
-            sigma_losvd /= 1.05
-
-    elif (acept_rate > .040 and 
-          all(sigma.diagonal()[nu.array([range(1,bins*3,3),range(0,bins*3,3)]).ravel()] < 5.19)): #not enough
-        sigma *= 1.05
-            #dust step
-        if isdust:
-            sigma_dust *= 1.05
-            #losvd step
-        if islosvd:
-            sigma_losvd *= 1.05
-
-    #use covarnence matrix
-    if j %100 == 0 and j != 0: 
-        t_param = nu.array(param)
-        try:
-            tsigma = Covarence_mat(t_param[:,range(3*bins)],
-                                  t_param.shape[0]-1)
-            if isdust:
-                tsigma_dust = Covarence_mat(t_param[:,-6:-4],t_param.shape[0]-1)
-            if islosvd:
-                tsigma_losvd = Covarence_mat(t_param[:,-4:],t_param.shape[0]-1)
-        except IndexError:
-            print t_param.shape
-            #error handeling some time cov is nan
-        if  (nu.all(nu.isfinite(tsigma)) or 
-             nu.all(nu.isfinite(tsigma_dust)) or 
-             nu.all(nu.isfinite(tsigma_losvd))):
-                #set equal to last cov matirx
-            sigma = tsigma
-            if isdust:
-                sigma_dust = tsigma_dust
-            if islosvd:
-                sigma_losvd = tsigma_losvd
-
-    return sigma, sigma_dust, sigma_losvd
 
 def swarm_func(param,dust_param,chi,parambest,chibest,bins):
     #pushes current chain towards global best fit with streangth
@@ -503,47 +341,6 @@ def swarm_func(param,dust_param,chi,parambest,chibest,bins):
         weight *=  nu.sum(vect**2)**0.5/4.
     return (param + weight * vect, dust_param + weight_dust * vect_dust,
             0.5)
-
-def Covarence_mat(param,j):
-    #creates a covarence matrix for the step size 
-    #only takes cov of last 1000 itterations
-    if j-2000<0:
-        cov = nu.cov(param[:j,:].T)
-        if nu.any(nu.isnan(cov)):
-            return False
-        else:
-            return cov
-    else:
-        cov = nu.cov(param[j-5000:j,:].T)
-        if nu.any(nu.isnan(cov)):
-            return False
-        else:
-            return cov
-
-
-def rand_choice(x, prob):
-    #chooses value from x with probabity of prob**-1 
-    #so lower prob values are more likeliy
-    #x must be monotonically increasing
-    if not nu.sum(prob) == 1: #make sure prob equals 1
-        prob = prob / nu.sum(prob)
-    if nu.any(prob == 0): #get weird behavor when 0
-        #smallest value for float32 and 1/value!=inf
-        prob[prob == 0] = 6.4e-309 
-    #check is increasing
-    u = nu.random.rand()
-    if nu.all(x == nu.sort(x)): #if sorted easy
-        N = nu.cumsum(prob ** -1 / nu.sum(prob ** -1))
-        index = nu.array(range(len(x)))
-    else:
-        index = nu.argsort(x)
-        temp_x = nu.sort(x)
-        N = nu.cumsum(prob[index] ** -1 / nu.sum(prob[index] ** - 1))
-    try:
-        return index[nu.min(nu.abs(N - u)) == nu.abs(N - u)][0]
-    except IndexError:
-        print x,prob
-        raise
 
 def Convergence_tests(param,keys,n=1000):
     #uses Levene's test to see if var between chains are the same if that is True
@@ -602,46 +399,68 @@ def Convergence_tests(param,keys,n=1000):
                                                                 param[0][i].shape[1])
     return False
 
-def dic_data(temp,burnin):
-    '''processes data from rjmcmc, should be a list of tuples,
-    containin dicts'''
-    bayes_fac={}
-    for i in temp:
-        for j in i[2].keys():
-            try:
-                bayes_fac[j]=nu.concatenate((bayes_fac[j],i[2][j]))
-            except KeyError:
-                bayes_fac[j]=i[2][j]
+class rj_dict(dict):
+    '''like built in dict, but has methods __add_ and __sub__ to add more key
+    words and subrtract them'''
+    def __add__(self,x):
+        '''Combines models together, keywords become almagination of the 2
+        '''
+        newkey = ''
+        new_vals = []
+        for i in x.keys():
+            newkey += i + ','
+            new_vals.append(x[i])
+        for i in self.keys():
+            newkey += i + ','
+            new_vals.append(self[i])
+        newkey = newkey[:-1]
+        out = rj_dict()
+        out[newkey] = new_vals
+        return out
+        #remove old key
+        
+    def __iadd__(self,x):
+        return __add__(x)
 
-    fac=[]
-    for i in bayes_fac.keys():
-        if bayes_fac[i].shape[0]>0:
-            bayes_fac[i][bayes_fac[i]>1]=1. #accept critera is min(1,alpha)
-            fac.append([int(i),nu.mean(nu.nan_to_num(bayes_fac[i])),len(bayes_fac[i])])
-            #remove 1st bin for now#############
-    fac=nu.array(fac)
-    #grab chains with best fit and chech to see if mixed properly
-    outparam,outchi={},{}
-    for i in fac[:,0]:
-        outparam[str(int(i))],outchi[str(int(i))]=nu.zeros([2,3*i+2+4]),nu.array([nu.inf])
-    for i in temp:
-        for j in fac[:,0]:
-            try:
-                outparam[str(int(j))]=nu.concatenate((outparam[str(int(j))],i[0][str(int(j))][~nu.isinf(i[1][str(int(j))][1:]),:]),axis=0)
-                outchi[str(int(j))]=nu.concatenate((outchi[str(int(j))],i[1][str(int(j))][~nu.isinf(i[1][str(int(j))])]))
-            except ValueError: #if empty skip
-                pass
-    for j in nu.int64(fac[:,0]): #post processing
-        outparam[str(int(j))],outchi[str(int(j))]=outparam[str(int(j))][2+burnin:,:],outchi[str(int(j))][1+burnin:]
-    #remove empty bins
-    for i in outparam.keys():
-        if not nu.any(outparam[i]):
-            outparam.pop(i)
-            outchi.pop(i)
-            fac= fac[fac[:,0]!=int(i)]
+    def __isub__(self,x):
+        return __sub__(x)
+
+    def __sub__(self,x):
+        '''removes keyword from dict does last one first
+        >>>a = rj_dict()
+        >>>a['1,2,1']=[[1],[2],[3]]
+        >>>a -'2'
+        {'1,1':[[1],[3]]}
+        >>>a - '1'
+        {'1,2':[[1],[2]]}'''
+        assert type(x) is str, "can only remove proper key value"
+        keys = self.keys()[0]
+        keys = keys.split(',')
+        vals = self.copy().values()[0][:]
+        max = -1
+        for i,j in enumerate(keys):
+            if j == x:
+                max = i
+        vals.pop(max)
+        keys.pop(max)
+        newkeys = ''
+        for i in keys:
+            newkeys += i + ','
+        newkeys = newkeys[:-1]
+        out = rj_dict()
+        out[newkeys] = vals
+        return out
+
+#gracefull exit
+#####signal catcher so can exit anytime and save results
+def signal_save_rjmcmc(signal, frame):
+    print 'Stopping run'
+    global stop
+    print stop
+    stop = False
+    Time.sleep(5)
+    raise
     
-    return outparam,outchi,fac[fac[:,0].argsort(),:]
-
 if __name__=='__main__':
 
     #profiling

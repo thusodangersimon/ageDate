@@ -184,45 +184,7 @@ class VESPA_fit(object):
             self.models[str(i)]= ['burst_length','mean_age', 'metal','norm'] * i
         #multiple_block for bad performance
         self._multi_block = False
-        '''
-		self.data = nu.copy(data)
-        #normalized so area under curve is 1 to keep chi 
-        #values resonalble
-        #need to properly handel uncertanty
-        self.norms = self.area_under_curve(data) * 10 ** -5 #need to turn off
-        self.data[:,1] = self.data[:, 1] / self.norms
 
-        #initalize bound varables
-        lib_vals = get_fitting_info(lib_path)
-        #to keep roundoff error constistant
-        lib_vals[0][:,0] = nu.log10(lib_vals[0][:, 0]) 
-        metal_unq = nu.unique(lib_vals[0][:, 0])
-        #get boundary of parameters
-        self.hull = bound.find_boundary(lib_vals[0])
-        lib_vals[0][:,0] = 10**lib_vals[0][:,0]
-        age_unq = nu.unique(lib_vals[0][:, 1])
-        self._lib_vals = lib_vals
-        self._age_unq = age_unq
-        self._metal_unq = metal_unq
-        self._option = option
-        self._cpus = cpus
-        self.bins = bins
-        self._burnin = burnin
-        self._iter = itter
-        #set prior info for age, and metalicity
-        self.metal_bound = nu.array([metal_unq.min(),metal_unq.max()])
-        #dust options
-        self._dust = use_dust
-        self.dust_bound = nu.array([0., 4.])
-        #line of sight velocity despersion stuff
-        self._losvd = use_lovsd
-        self._velocityscale = (nu.diff(self.data[:,0]).mean()
-                               / self.data[:,0].mean() * 299792.458)
-        #check to see if properties are the same
-        self._metal_unq = nu.log10(nu.unique(nu.float64(self.SSP['met'])))
-        #self._len_unq = nu.unique(nu.asarray(self.SSP.meta_data['length'],
-		#				dtype=float))
-        '''	
 		
     def proposal(self,mu,sigma):
         '''(Example_lik_class, ndarray,ndarray) -> ndarray
@@ -230,42 +192,56 @@ class VESPA_fit(object):
 		distribution
         '''
 		#save length and mean age they don't change  self._multi_block
-        t_out = nu.random.multivariate_normal(nu.ravel(mu),sigma[0])
-        bins = sigma[0].shape[0]/4
+        try:
+            t_out = nu.random.multivariate_normal(nu.ravel(mu),sigma)
+        except nu.linalg.LinAlgError:
+            print sigma
+            raise
+        self._sigma = nu.copy(sigma)
+        bins = sigma.shape[0]/4
         t_out = nu.reshape(t_out, (bins, 4))
+        t_out[:,:2] = nu.abs(t_out[:,:2])
         #set length and age back to original and make norm positive
-        for i,j in enumerate(mu):
+        '''for i,j in enumerate(mu):
             t_out[i][:2] = j[:2]
-            t_out[i][-1] = abs(t_out[i][-1])
-
+            t_out[i][-1] = abs(t_out[i][-1])'''
+        bins = str(bins)
+        t_out = self._make_square({bins:t_out},bins)
         return t_out
         
-
+    def multi_try_all(self,param,bins,N=15):
+        '''(VESPA_class,ndarray,str,int)-> float
+        Does all things for multi try (proposal,lik, and selects best param'''
+        temp_param = map(self.proposal,[param]*N, [self._sigma]*N)
+    
+        
     def lik(self,param, bins,return_all=False):
         '''(Example_lik_class, ndarray) -> float
         Calculates likelihood for input parameters. Outuputs log-likelyhood'''
+        if not nu.any(self._make_square(param,bins) == param[bins]):
+            return -nu.inf
         burst_model = {}
         for i in param[bins]:
-            burst_model[str(i[1])] = i[3]*ag.make_burst(i[0],i[1],i[2],
-                            self._metal_unq, self._age_unq, self._spect, self._lib_vals)
+            burst_model[str(i[1])] =  10**i[3]*ag.make_burst(i[0],i[1],i[2],
+            self._metal_unq, self._age_unq, self._spect, self._lib_vals)
 		#do dust
 
 		#do losvd
 
 		#get loglik
-            model = nu.sum(burst_model.values(),0)
+        model = nu.sum(burst_model.values(),0)
 		#return loglik
-            if self.data.shape[1] == 3:
-                #uncertanty calc
-                pass
-            else:
-                prob = stats_dist.norm.logpdf(model,self.data[:,1]).sum()
-			#prob = -nu.sum((model -	self.data[:,1])**2)
-                #return
-            if 	return_all:
-                return prob, model
-            else:
-                return prob
+        if self.data.shape[1] == 3:
+            #uncertanty calc
+            pass
+        else:
+            prob = stats_dist.norm.logpdf(model,self.data[:,1]).sum()
+            #prob = -nu.sum((model -	self.data[:,1])**2)
+        #return
+        if 	return_all:
+            return prob, model
+        else:
+            return prob
 
     def prior(self,param,bins):
         '''(Example_lik_class, ndarray) -> float
@@ -281,11 +257,8 @@ class VESPA_fit(object):
             #metals 
             out += stats_dist.uniform.logpdf(i[2],self._metal_unq.min(),self._metal_unq.ptp())
             #weight
-            if i[3] < 0:
-                out += -nu.inf
-            else:
-                out += -10.
-
+            out += stats_dist.uniform.logpdf(i[3], -100, 200)
+        
         return out
 
 
@@ -297,22 +270,26 @@ class VESPA_fit(object):
         return 0.
 
     def initalize_param(self,model):
-		'''(Example_lik_class, any type) -> ndarray, ndarray
+        '''(Example_lik_class, any type) -> ndarray, ndarray
 
 		Used to initalize all starting points for run of RJMCMC and MCMC.
 		outputs starting point and starting step size
-		'''
+        '''
+        #any amount of splitting
+        out = []
+        age, metal, norm =  self._age_unq,self._metal_unq, self._norm
+        lengths = self._age_unq.ptp()/float(model)
+        for i in range(int(model)):
+            out.append([lengths, (i+.5)*lengths + age.min(),0,nu.log10(self._norm*nu.random.rand())])
+            #metals
+            out[-1][2] = nu.random.rand()*metal.ptp()+metal.min()
+        out = nu.asarray(out)
+        #make step size
+        sigma = nu.identity(out.size)
 
-		if not int(model) == 1:
-			return nu.empty(int(model)*4), nu.identity(4*int(model))
-		#make single burst for entire age length
-		self.cur_spec = [ ag.make_burst(self._age_unq.ptp(), nu.mean(self._age_unq), self._metal_unq.mean()
-										, self._metal_unq, self._age_unq, self._spect, self._lib_vals	)]
-		#make step size
-		sigma = nu.identity(4)
-		#norm 10% of self._norm
-		sigma[-1,-1] = .1 * self._norm
-		return nu.array([ self._age_unq.ptp(), nu.mean(self._age_unq), self._metal_unq.mean(), self._norm]), sigma
+        #make coorrect shape
+        out = self._make_square({model:out},model)
+        return out, sigma
 
         
     def step_func(self,step_crit,param,step_size,model):
@@ -323,16 +300,22 @@ class VESPA_fit(object):
         changes step size during burn-in perior. Outputs new step size
         '''
         if step_crit > .60:
-            step_size[model][0] *= 1.05
-        elif step_crit < .2:
-            step_size[model][0] /= 1.05
+            step_size[model] *= 1.05
+        elif step_crit < .2 and nu.any(step_size[model].diagonal() > 10**-6):
+            step_size[model] /= 1.05
         #cov matrix
-        if len(param) % 2000 == 0 and len(param) > 0.:
+        if len(param) % 200 == 0 and len(param) > 0.:
             new_shape = nu.prod(nu.asarray(param[0]).shape)
-            step_size[model] = [nu.cov(nu.asarray(param[-2000:]).reshape(2000,new_shape).T)]
+            temp = nu.cov(nu.asarray(param[-200:]).reshape(200,new_shape).T)
+            #make sure not stuck
+            if nu.any(temp.diagonal() > 10**-6):
+                step_size[model] = temp
         if step_crit < .18:
-            print step_size[model][0].diagonal()
-            #self._multi_block
+            #print step_size[model][0].diagonal()
+            #self._multi_blocpass
+            step_size[model][step_size[model] < 10**-3] = 10**-3
+            
+        
         return step_size[model]
 
 
@@ -347,13 +330,15 @@ class VESPA_fit(object):
         whether of not to attempt model jump (False to make run as MCMC) and the
         Jocobian for move.
         '''
-        if birth_rate > nu.random.rand() and self._max_sfh > 1+int(model):
+        step = nu.random.choice(['birth','death','len_change'],p=birth_rate)
+        if step == 'birth' and self._max_sfh > 1+int(model):
             #birth!
             temp_model = str(int(model) + 1)
             jacob = 2.
             #split component with prob proprotional to weights
             temp_param = nu.reshape(param[model], (int(model), 4))
-            prob = param[model][:,-1] / param[model][:,-1].sum()
+            prob = param[model][:,-1] - param[model][:,-1].min()
+            prob /= prob.sum()
             index = nu.where(param[model][:,-1] ==
                              nu.random.choice(param[model][:,-1],
                                               p=prob))[0]
@@ -375,13 +360,12 @@ class VESPA_fit(object):
                     continue
                 new_param.append(temp_param[i].copy())
             param[temp_model] = nu.asarray(new_param)
-
-        elif self._min_sfh != int(model):
+        elif step == 'death' and self._min_sfh != int(model):
                 #death!
                 temp_model = str(int(model) - 1)
                 jacob = 1/2.
                 #get lowest weight and give random amount to neighbor
-                prob = param[model][:,-1].sum()/param[model][:,-1] 
+                prob = 1/(param[model][:,-1] - param[model][:,-1].min()+1)
                 #inverse prob
                 prob /= prob.sum()
                 index = nu.where(param[model][:,-1] ==
@@ -420,18 +404,47 @@ class VESPA_fit(object):
                         new_param[-1][2] = self._metal_unq.max() + 0.
                 for i in range(param[model].shape[0]):
                     if i in range(index-1,index+2) or i == index:
-                        print i
                         continue
                     new_param.append(nu.copy(param[model][i]))
                 #set for output
                 param[temp_model] = nu.asarray(new_param)
+        elif step == 'len_change' :
+            #change lengths and update ages
+            temp_model = model[:]
+            jacob = 1.
+            norms = nu.random.rand(int(model))
+            norms /= norms.sum()
+            norms *= self._age_unq.ptp()
+            param[temp_model][:,0] = norms        
+            
         else:
             #birth or death failed
             return param, None, False, None
-        #sort params by age
-        param[temp_model] = param[temp_model][nu.argsort(param[temp_model][:,1]),:]
+        param[temp_model] = self._make_square(param,temp_model)
         return param, temp_model, True, jacob #need to sort out jacobian
     #tests
+
+    def _make_square(self,param,key):
+        '''(dict(ndarray),str)-> ndarray
+        Makes lengths and ages line up,sorts and makes sure length covers all length
+        '''
+        #sort params by age
+        out = nu.copy(param[key][nu.argsort(param[key][:,1]),:])
+        #check that lengths are correct 
+        if not out[:,0].sum() == self._age_unq.ptp():
+            out[:,0] =out[:,0]/out[:,0].sum()
+            out[:,0] *= self._age_unq.ptp()
+
+        #and cover full range of age space
+        for i in range(int(key)):
+            if i == 0:
+                out[i,1] = self._age_unq.min()+ out[i,0]/2.
+
+            else:
+                out[i,1] = self._age_unq.min()+out[:i,0].sum()
+                out[i,1] += out[i,0]/2.
+
+        return out
     
     def make_sfh_plot(self,param, model=None):
         '''(dict(ndarray)-> Nonetype
@@ -452,7 +465,7 @@ class VESPA_fit(object):
             for i in param.keys():
                 pass
 
-    def make_numeric(self, age, sfh, max_bins, metals=None):
+    def make_numeric(self, age, sfh, max_bins, metals=None, return_param=False):
         '''(ndarray,ndarray,ndarray,int,ndarray or None) -> ndarray
         Like EZGAL's function but with a vespa like framework.
         Bins function into flat chunks of average of SFH of function in that range.
@@ -484,12 +497,15 @@ class VESPA_fit(object):
         #get bursts
         out = nu.zeros_like(self._spect[:,:2])
         out[:,0] = self._spect[:,0].copy()
+        param = []
         for i in range(len(t)):
+            if return_param:
+                param.append([length[i],t[i],metal[i],norm[i]])
             out[:,1] += norm[i] * ag.make_burst(length[i],t[i],metal[i]
                           ,self._metal_unq, self._age_unq, self._spect
                           , self._lib_vals)
-        if metals is None:
-            return out,metal
+        if return_param:
+            return out, nu.asarray(param)
         else:
             return out
         
