@@ -200,11 +200,11 @@ class VESPA_fit(object):
         self._sigma = nu.copy(sigma)
         bins = sigma.shape[0]/4
         t_out = nu.reshape(t_out, (bins, 4))
-        t_out[:,:2] = nu.abs(t_out[:,:2])
+        #t_out[:,:2] = nu.abs(t_out[:,:2])
         #set length and age back to original and make norm positive
-        '''for i,j in enumerate(mu):
+        for i,j in enumerate(mu):
             t_out[i][:2] = j[:2]
-            t_out[i][-1] = abs(t_out[i][-1])'''
+            #t_out[i][-1] = t_out[i][-1])
         bins = str(bins)
         t_out = self._make_square({bins:t_out},bins)
         return t_out
@@ -257,7 +257,7 @@ class VESPA_fit(object):
             #metals 
             out += stats_dist.uniform.logpdf(i[2],self._metal_unq.min(),self._metal_unq.ptp())
             #weight
-            out += stats_dist.uniform.logpdf(i[3], -100, 200)
+            out += stats_dist.uniform.logpdf(i[3], -300, 500)
         
         return out
 
@@ -330,100 +330,150 @@ class VESPA_fit(object):
         whether of not to attempt model jump (False to make run as MCMC) and the
         Jocobian for move.
         '''
-        step = nu.random.choice(['birth','death','len_change'],p=birth_rate)
-        if step == 'birth' and self._max_sfh > 1+int(model):
-            #birth!
-            temp_model = str(int(model) + 1)
-            jacob = 2.
-            #split component with prob proprotional to weights
-            temp_param = nu.reshape(param[model], (int(model), 4))
-            prob = param[model][:,-1] - param[model][:,-1].min()
-            prob /= prob.sum()
-            index = nu.where(param[model][:,-1] ==
-                             nu.random.choice(param[model][:,-1],
-                                              p=prob))[0]
-            index = int(index)
-            u = nu.random.rand()
-            #[len,t,metal,norm]
-            new_metal = [self._metal_unq.min()+nu.random.rand()*self._metal_unq.ptp(), temp_param[index,2] + 0]
+        return param, None, False, None
+        step = nu.random.choice(['birth','split','merge','death'],p=birth_rate)
+        if step == 'birth' and int(model) + 1 < self._max_sfh:
+            new_param, jacob, temp_model = self._birth(param,model)
+        elif step == 'death' and int(model) - 1 > self._min_sfh :
+            new_param, jacob, temp_model = self._death(param,model)
+        elif step == 'merge' and int(model) - 2 > self._min_sfh:
+            new_param, jacob, temp_model = self._merge(param,model)
+        elif step == 'split' and int(model) + 1 < self._max_sfh:
+            new_param, jacob, temp_model = self._split(param,model)
+        else:
+            #failed, return nulls
+            return param, None, False, None
+        param[temp_model] = new_param
+        param[temp_model] = self._make_square(param,temp_model)
+        return param, temp_model, True, jacob #need to sort out jacobian
 
-            new_param = ([[temp_param[index,0]/2., 
+    def _merge(self,param,model):
+        '''(VESPA_Class,dict(ndarray),str)-> ndarray,float,str
+        Combines nearby bins together.
+        '''
+        temp_model = str(int(model) - 1)
+        #get lowest weight and give random amount to neighbor
+        #prob = nu.abs(1/(param[model][:,-1] - param[model][:,-1].min()+1))
+        #inverse prob
+        #prob /= prob.sum()
+        index = nu.where(param[model][:,-1] ==
+                        nu.random.choice(param[model][:,-1]))[0]
+        index = int(index)
+        new_param = []
+        split = param[model][index]
+        u = nu.random.rand()
+        num_comb = nu.random.randint(1,3)
+        comb = 0
+        if index - 1 > -1 :
+            #combine with younger
+            comb += 1                 
+            temp = param[model][index-1]
+            new_metal = [self._metal_unq.min()+nu.random.rand()*self._metal_unq.ptp(), temp[2] + split[2] * u, temp[2]+0.,split[2]+0.]
+            new_param.append([temp[0] + split[0] * u, 0., 
+                                new_metal[nu.random.randint(4)],
+                                temp[3] + split[3] * u])
+            new_param[-1][1] = temp[1] + (split[0] * u)/2.
+            #make sure metalicity is in bounds
+            if new_param[-1][2] < self._metal_unq.min():
+                new_param[-1][2] = self._metal_unq.min() + 0.
+            if new_param[-1][2] > self._metal_unq.max():
+                new_param[-1][2] = self._metal_unq.max() + 0.
+
+        if index + 1 < int(model) and comb != num_comb:
+                #combine with older
+                temp = param[model][index+1]
+                new_metal = [self._metal_unq.min()+nu.random.rand()*self._metal_unq.ptp(), temp[2] + split[2] * (1-u), temp[2]+0.,split[2]+0.]
+                new_param.append([temp[0] + split[0] * (1-u), 0.,
+                                new_metal[nu.random.randint(4)],
+                                temp[3] + split[3] * u])
+                new_param[-1][1] =  temp[1] - (split[0]*(1-u))/2.
+                #make sure metalicity is in bounds
+                if new_param[-1][2] < self._metal_unq.min():
+                    new_param[-1][2] = self._metal_unq.min() + 0.
+                if new_param[-1][2] > self._metal_unq.max():
+                    new_param[-1][2] = self._metal_unq.max() + 0.
+        for i in range(param[model].shape[0]):
+            if i in range(index-1,index+2) or i == index:
+                continue
+            new_param.append(nu.copy(param[model][i]))
+        #set for output
+        temp_model = str(nu.asarray(new_param).shape[0])
+        jacob = 2.**(-int(model))
+            
+        return nu.asarray(new_param), jacob, temp_model
+        
+    def _birth(self,param, model):
+        '''(VESPA_Class,dict(ndarray),str)-> ndarray,float,str
+        Creates a new bins, with parameters randomized.
+        '''
+        new_param = []
+        age, metal, norm =  self._age_unq,self._metal_unq, self._norm
+        lengths = self._age_unq.ptp()/float(model) * nu.random.rand()
+        new_param.append([lengths, 0.,0,nu.log10(self._norm*nu.random.rand())])
+        #metals
+        new_param[-1][2] = nu.random.rand()*metal.ptp()+metal.min()
+        #age
+        new_param[-1][1] = age.min()+nu.random.rand()*age.ptp()
+        for i in param[model]:
+            new_param.append(nu.copy(i))
+        temp_model = str(nu.asarray(new_param).shape[0])
+        jacob = 2**(int(temp_model))
+        
+        return nu.asarray(new_param), jacob, temp_model
+    
+    def _split(self, param, model):
+        '''(VESPA_Class,dict(ndarray),str)-> ndarray,float,str
+        Splits a bin into 2 with a random weight.
+        '''
+        #split component with prob proprotional to weights
+        temp_param = nu.reshape(param[model], (int(model), 4))
+        #prob = nu.abs(param[model][:,-1] - param[model][:,-1].min())
+        #prob /= prob.sum()
+        #if prob.sum() != 1. or nu.any(prob > 0):
+        #        prob[:] = 1.
+        #        prob /= prob.sum()
+        index = nu.where(param[model][:,-1] ==
+                             nu.random.choice(param[model][:,-1]))[0]
+        index = int(index)
+        u = nu.random.rand()
+        #[len,t,metal,norm]
+        new_metal = [self._metal_unq.min()+nu.random.rand()*self._metal_unq.ptp(), temp_param[index,2] + 0]
+
+        new_param = ([[temp_param[index,0]/2., 
                            (2*temp_param[index,1] - temp_param[index,0]/2.)/2.,
                            new_metal[nu.random.randint(2)], temp_param[index,3] * u]])
 
-            new_param.append([temp_param[index,0]/2.,
+        new_param.append([temp_param[index,0]/2.,
                               (2*temp_param[index,1] + temp_param[index,0]/2.)/2.,
                               new_metal[nu.random.randint(2)], temp_param[index,3] * (1 -u)])
-            #copy the rest
-            for i in range(int(model)):
-                if i == index:
-                    continue
-                new_param.append(temp_param[i].copy())
-            param[temp_model] = nu.asarray(new_param)
-        elif step == 'death' and self._min_sfh != int(model):
-                #death!
-                temp_model = str(int(model) - 1)
-                jacob = 1/2.
-                #get lowest weight and give random amount to neighbor
-                prob = 1/(param[model][:,-1] - param[model][:,-1].min()+1)
-                #inverse prob
-                prob /= prob.sum()
-                index = nu.where(param[model][:,-1] ==
-                             nu.random.choice(param[model][:,-1],
-                                              p=prob))[0]
-                index = int(index)
-                new_param = []
-                split = param[model][index]
-                u = nu.random.rand()
-                if index - 1 > -1 :
-                    #combine with younger                    
-                    temp = param[model][index-1]
-                    new_metal = [self._metal_unq.min()+nu.random.rand()*self._metal_unq.ptp(), temp[2] + split[2] * u, temp[2]+0.,split[2]+0.]
-                    new_param.append([temp[0] + split[0] * u, 0., 
-                                     new_metal[nu.random.randint(4)],
-                                     temp[3] + split[3] * u])
-                    new_param[-1][1] = temp[1] + (split[0] * u)/2.
-                    #make sure metalicity is in bounds
-                    if new_param[-1][2] < self._metal_unq.min():
-                        new_param[-1][2] = self._metal_unq.min() + 0.
-                    if new_param[-1][2] > self._metal_unq.max():
-                        new_param[-1][2] = self._metal_unq.max() + 0.
+        temp_model = str(nu.asarray(new_param).shape[0])
+        jacob = 2.**int(model)
+        return nu.asarray(new_param), jacob, temp_model
+    
+    def _death(self,param, model):
+        '''(VESPA_Class,dict(ndarray),str)-> ndarray,float,str
+        Removes a bin from array.
+        '''
+        index = nu.random.randint(int(model))
+        new_param = []
+        for i in range(param[model].shape[0]):
+            if i == index: 
+                continue
+            new_param.append(nu.copy(param[model][i]))
+        temp_model = str(nu.asarray(new_param).shape[0])
+        jacob = 2.**(-int(temp_model))
 
-                if index + 1 < int(model):
-                    #combine with older
-                    temp = param[model][index+1]
-                    new_metal = [self._metal_unq.min()+nu.random.rand()*self._metal_unq.ptp(), temp[2] + split[2] * (1-u), temp[2]+0.,split[2]+0.]
-                    new_param.append([temp[0] + split[0] * (1-u), 0.,
-                                      new_metal[nu.random.randint(4)],
-                                      temp[3] + split[3] * u])
-                    new_param[-1][1] =  temp[1] - (split[0]*(1-u))/2.
-                    #make sure metalicity is in bounds
-                    if new_param[-1][2] < self._metal_unq.min():
-                        new_param[-1][2] = self._metal_unq.min() + 0.
-                    if new_param[-1][2] > self._metal_unq.max():
-                        new_param[-1][2] = self._metal_unq.max() + 0.
-                for i in range(param[model].shape[0]):
-                    if i in range(index-1,index+2) or i == index:
-                        continue
-                    new_param.append(nu.copy(param[model][i]))
-                #set for output
-                param[temp_model] = nu.asarray(new_param)
-        elif step == 'len_change' :
-            #change lengths and update ages
-            temp_model = model[:]
-            jacob = 1.
-            norms = nu.random.rand(int(model))
-            norms /= norms.sum()
-            norms *= self._age_unq.ptp()
-            param[temp_model][:,0] = norms        
-            
-        else:
-            #birth or death failed
-            return param, None, False, None
-        param[temp_model] = self._make_square(param,temp_model)
-        return param, temp_model, True, jacob #need to sort out jacobian
+        return nu.asarray(new_param), jacob, temp_model
+    
+    def _make_block(self,param,bins):
+        '''VESPA_Class,dict(list),str) ->NoneType
+        Groups parameters into correlated blocks to help with mixing rate.
+        Uses correlation to group parameters
+        '''
+        pass
     #tests
 
+    
     def _make_square(self,param,key):
         '''(dict(ndarray),str)-> ndarray
         Makes lengths and ages line up,sorts and makes sure length covers all length
@@ -443,7 +493,7 @@ class VESPA_fit(object):
             else:
                 out[i,1] = self._age_unq.min()+out[:i,0].sum()
                 out[i,1] += out[i,0]/2.
-
+                
         return out
     
     def make_sfh_plot(self,param, model=None):

@@ -78,7 +78,7 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
     for i in fun.models.keys(): ####todo add random combination of models
         active_param[i], sigma[i] = fun.initalize_param(i)
     #start with random model
-    bins = nu.random.choice(fun.models.keys())
+    bins = '1' #nu.random.choice(fun.models.keys())
 
     #set other RJ params
     Nacept[bins] , Nreject[bins] = 1.,1.
@@ -126,14 +126,14 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
     Nexchange_ratio = 1.0
     size,a = 0,0
     j,T,j_timeleft = 1,9.,nu.random.exponential(100)
-    T_start,T_stop = 300, 1.
+    T_start,T_stop = chi[bins][-1]+0, 1.
     trans_moves = 0
     #profiling
     t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm = [],[],[],[],[],[],[],[],[] 
     while option.iter_stop:
         if T_cuurent[bins] % 201 == 0:
-            show = ('%.2f,%e,%s,%i'
-                    %(acept_rate[bins][-1],chi[bins][-1],bins, option.current))
+            show = ('acpt = %.2f,log lik = %e, bins = %s, steps = %i,burnin iter= %i'
+                    %(acept_rate[bins][-1],chi[bins][-1],bins, option.current,T_cuurent[bins]))
             print show
             
             sys.stdout.flush()
@@ -153,10 +153,7 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
         #calculate new model and chi
         t_lik.append(Time.time())
         chi[bins].append(0.)
-        try:
-            chi[bins][-1] = fun.lik(active_param,bins) + fun.prior(active_param,bins)
-        except TypeError:
-            print active_param[bins]
+        chi[bins][-1] = fun.lik(active_param,bins) + fun.prior(active_param,bins)
         #print chi[str(bins)][-2], chi[str(bins)][-1] ,sigma[str(bins)].diagonal()
         #decide to accept or not change from log lik to like
         #just lik part
@@ -171,8 +168,8 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
         t_lik[-1]-=Time.time()
         t_accept.append(Time.time())
         #put temperature on order of chi calue
-        '''if nu.abs(nu.log10(T_start /chi[str(bins)][-1])) > 2 and T_cuurent[str(bins)] < burnin:
-            T_start = option.chibest[0]'''
+        if T_start > chi[str(bins)][-1]:
+            T_start = chi[str(bins)][-1]+0
         #metropolis hastings
         #print a
         if nu.exp(a) > nu.random.rand(): #acepted
@@ -199,10 +196,10 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
             Nreject[bins]+=1
         t_accept[-1]-=Time.time()
         ###########################step stuff
-        if acept_rate[bins][-1] < .18 and T_cuurent[str(bins)] > burnin + 5000:
+        '''if acept_rate[bins][-1] < .18 and T_cuurent[str(bins)] > burnin + 5000:
             import cPickle as pik
             pik.dump((active_param,sigma,bins,param),open('dunm.pik','w'),2)
-            raise
+            raise'''
         t_step.append(Time.time())
         if T_cuurent[str(bins)] < burnin + 5000:
             #only tune step if in burn-in
