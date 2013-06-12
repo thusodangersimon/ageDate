@@ -130,9 +130,9 @@ def find_az_box(param, age_unq, metal_unq):
         age.append(age_unq[age_unq == param[1]][0])
     else: #not on age line
         index = nu.searchsorted(age_unq,param[1])
-        if index <= 0 or index >= len(age_unq): #out of bounds
-            print 'age param is out of bounds'
-            raise
+        if index <= 0 or index >= len(age_unq):
+            #out of bounds
+            raise ValueError('age param is out of bounds')
         age.append(age_unq[index])
         age.append(age_unq[index - 1])
     age *= 2
@@ -268,8 +268,12 @@ All terms are logrythmic.
     #get ssp's
     for i in ages:
 		temp_param.append([metal, i ,1.])
-    ssp = get_model_fit_opt(nu.ravel(temp_param), lib_vals, age_unq, metal_unq, 
+    try:
+        ssp = get_model_fit_opt(nu.ravel(temp_param), lib_vals, age_unq, metal_unq, 
         len(ages), spect)
+    except ValueError:
+        #interp failed
+        return spect[:,0] + nu.inf
 	#sort for intergration
     inters = []
 	#integrate ssp's

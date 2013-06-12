@@ -86,7 +86,7 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
     #bayes_fact[bins] = #something
     T_cuurent[bins] = 0
     #set storage functions
-    param[bins] = [active_param[bins][:]]
+    param[bins] = [nu.copy(active_param[bins])]
     #first lik calc
     #print active_param[bins]
     chi[bins] = [fun.lik(active_param,bins) + fun.prior(active_param,bins)]
@@ -201,7 +201,7 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
             pik.dump((active_param,sigma,bins,param),open('dunm.pik','w'),2)
             raise'''
         t_step.append(Time.time())
-        if T_cuurent[str(bins)] < burnin + 5000:
+        if T_cuurent[bins] < burnin + 5000 or acept_rate[bins][-1]<.11:
             #only tune step if in burn-in
             sigma[bins] =  fun.step_func(acept_rate[bins][-1] ,param[bins], sigma,bins)
         t_step[-1]-=Time.time()
@@ -243,6 +243,10 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
                     chi[bins].append(tchi + 0)
                     param[bins].append(nu.copy(active_param[bins]))
                     print 'success',bins,trans_moves
+                    #allow for quick tuneing of sigma
+                    if T_cuurent[bins] > burnin + 5000:
+                        T_cuurent[bins] = burnin + 4800
+                        Nacept[bins] , Nreject[bins] = 1., 1.
                 else:
                     pass
                 j, j_timeleft = 0 , nu.random.exponential(100)
@@ -256,6 +260,7 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
         if  (acept_rate[bins][-1] < .15
                                  and T_cuurent[bins] > burnin):
             if not fun._multi_block:
+                print T_cuurent[bins] , burnin
                 print "acceptance is bad starting multi-block"
                 fun._multi_block = True
         ################turn off burnin after N itterations

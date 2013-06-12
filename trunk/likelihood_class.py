@@ -156,6 +156,7 @@ class VESPA_fit(object):
         assert len(models) > 0, "Did not find any models"
         #crate ezgal class of models
         SSP = gal.wrapper(models)
+        self.SSP = SSP
         #extract seds from ezgal wrapper
         spect, info = [SSP.sed_ls], []
         for i in SSP:
@@ -185,6 +186,8 @@ class VESPA_fit(object):
         #multiple_block for bad performance
         self._multi_block = False
         self._multi_block_i = 0
+        #max total length of bins constraints
+        self._max_age = self._age_unq.ptp()
 		
     def proposal(self,mu,sigma):
         '''(Example_lik_class, ndarray,ndarray) -> ndarray
@@ -192,19 +195,21 @@ class VESPA_fit(object):
 		distribution
         '''
 		#save length and mean age they don't change  self._multi_block
+        self._sigma = nu.copy(sigma)
+        self._mu = nu.copy(mu)
         try:
             t_out = nu.random.multivariate_normal(nu.ravel(mu),sigma)
         except nu.linalg.LinAlgError:
             print sigma
-            raise
-        self._sigma = nu.copy(sigma)
-        self._mu = nu.copy(mu)
+            
         bins = sigma.shape[0]/4
         t_out = nu.reshape(t_out, (bins, 4))
         #set length and age back to original and make norm positive
-        for i,j in enumerate(mu):
+        '''for i,j in enumerate(mu):
             t_out[i][:2] = j[:2]
-            #bad performance update by
+            #bad performance update by'''
+        #make lengths positve
+        t_out[:,0] = nu.abs(t_out[:,0])
         if self._multi_block:
             if self._multi_block_i >= bins:
                 self._multi_block_i = 0
@@ -213,8 +218,8 @@ class VESPA_fit(object):
                     t_out[k] = nu.copy(mu[k])
             self._multi_block_i += 1
             #print self._multi_block_i
-        bins = str(bins)
-        t_out = self._make_square({bins:t_out},bins)
+        #bins = str(bins)
+        #t_out = self._make_square({bins:t_out},bins)
         return t_out
         
     def multi_try_all(self,param,bins,N=15):
@@ -226,7 +231,7 @@ class VESPA_fit(object):
     def lik(self,param, bins,return_all=False):
         '''(Example_lik_class, ndarray) -> float
         Calculates likelihood for input parameters. Outuputs log-likelyhood'''
-        if not nu.any(self._make_square(param,bins) == param[bins]):
+        if not self._check_len(param,bins):
             return -nu.inf
         burst_model = {}
         for i in param[bins]:
@@ -256,6 +261,9 @@ class VESPA_fit(object):
         Calculates log-probablity for prior'''
         #return logprior
         out = 0.
+        #make sure shape is ok
+        if not self._check_len(param,bins):
+            return -nu.inf
         #uniform priors
         for i in param[bins]:
             #length
@@ -321,7 +329,7 @@ class VESPA_fit(object):
         if step_crit < .18:
             #print step_size[model][0].diagonal()
             #self._multi_blocpass
-            step_size[model][step_size[model] < 10**-3] = 10**-3
+            step_size[model][step_size[model] < 10**-6] = 10**-6
             
         
         return step_size[model]
@@ -339,15 +347,15 @@ class VESPA_fit(object):
         whether of not to attempt model jump (False to make run as MCMC) and the
         Jocobian for move.
 
-        Brith_rate is ['birth','split','merge','death','len_chng']
+        Brith_rate is ['birth','split','merge','death']
         '''
         
-        step = nu.random.choice(['birth','split','merge','death','len_chng'],p=birth_rate)
+        step = nu.random.choice(['birth','split','merge','death'],p=birth_rate)
         if step == 'birth' and int(model) + 1 < self._max_sfh:
             new_param, jacob, temp_model = self._birth(param,model)
-        elif step == 'death' and int(model) - 1 > self._min_sfh :
+        elif step == 'death' and int(model) - 1 >= self._min_sfh :
             new_param, jacob, temp_model = self._death(param,model)
-        elif step == 'merge' and int(model) - 1 > self._min_sfh:
+        elif step == 'merge' and int(model) - 1 >= self._min_sfh:
             new_param, jacob, temp_model = self._merge(param,model)
         elif step == 'split' and int(model) + 1 < self._max_sfh:
             new_param, jacob, temp_model = self._split(param,model)
@@ -359,8 +367,8 @@ class VESPA_fit(object):
         if new_param is None:
             #if change didn't work return nulls
             return param, None, False, None
-        param[temp_model] = new_param
-        param[temp_model] = self._make_square(param,temp_model)
+        param[temp_model] = new_param[nu.argsort(new_param[:,1])]
+        #param[temp_model] = self._make_square(param,temp_model)
         return param, temp_model, True, abs(jacob) 
         
     def _len_chng(self, param, model):
@@ -455,11 +463,11 @@ class VESPA_fit(object):
             
         new_param.append([temp[0] + split[0], 0., 0., 0.])
         #age
-        new_param[-1][1] = temp[1] + (split[0] * u)/2.
+        new_param[-1][1] = ((1-u)*temp[1] + split[1] * u)
         #metal
-        new_param[-1][2] = nu.mean((split[2],temp[2]))
-        #norm (assumes logs)
-        new_param[-1][3] =nu.log10(nu.mean((10**split[3],10**temp[3])))
+        new_param[-1][2] = ((1-u)*temp[2] + split[2] * u)
+        #norm * correction factior(assumes logs)
+        new_param[-1][3] =nu.log10(10**split[3]+10**temp[3]*5*u)
         #make sure metalicity is in bounds
         if new_param[-1][2] < self._metal_unq.min():
                 new_param[-1][2] = self._metal_unq.min() + 0.
@@ -493,8 +501,9 @@ class VESPA_fit(object):
             new_param.append(nu.copy(i))
         temp_model = str(nu.asarray(new_param).shape[0])
         jacob = metal.ptp()*age.ptp()**2/float(model)
+        new_param = nu.asarray(new_param)
         
-        return nu.asarray(new_param), jacob, temp_model
+        return new_param, jacob, temp_model
     
     def _split(self, param, model):
         '''(VESPA_Class,dict(ndarray),str)-> ndarray,float,str
@@ -554,7 +563,9 @@ class VESPA_fit(object):
     
     def _make_square(self,param,key):
         '''(dict(ndarray),str)-> ndarray
-        Makes lengths and ages line up,sorts and makes sure length covers all length
+        DEPRICATED!
+        Makes lengths and ages line up,sorts and makes sure length
+        covers all length
         '''
         #sort params by age
         out = nu.copy(param[key][nu.argsort(param[key][:,1]),:])
@@ -573,7 +584,51 @@ class VESPA_fit(object):
                 out[i,1] += out[i,0]/2.
                 
         return out
-    
+
+    def _check_len(self, param, key):
+        '''(VESPA_class, dict(ndarray),str)-> ndarray
+        Make sure parameters ahere to criterion listed below:
+        1. bins cannot overlap
+        2. total length of bins must be less than length of age_unq
+        '''
+        #make sure age is sorted
+        if not self.issorted(param[key][:,1]):
+            return False
+        #make sure bins do not overlap fix if they are
+        for i in xrange(param[key].shape[0]-1):
+            #assume orderd by age
+            max_age = param[key][i,0]/2. + param[key][i,1]
+            min_age_i = param[key][i+1,1] - param[key][i+1,0]/2.
+            if max_age > min_age_i:
+                #overlap
+                #make sure overlap is significant
+                if not nu.allclose(max_age, min_age_i):
+                    return False
+            #check if in age bounds
+            if i == 0:
+                if self._age_unq.min() > param[key][i,1] - param[key][i,0]/2.:
+                    return False
+        else:
+            if self._age_unq.max() < param[key][-1,1] + param[key][-1,0]/2.:
+                return False
+        #check if length is less than age_unq.ptp()
+        if param[key][:,0].sum() > self._age_unq.ptp():
+            return False
+        #make sure age is in bounds
+        
+        #passed all tests
+        return True
+
+    def issorted(self,l):
+        '''(list or ndarray) -> bool
+        Returns True is array is sorted
+        '''
+        for i in xrange(len(l)-1):
+            if not l[i] <= l[i+1]:
+                return False
+        return True
+        
+        
     def make_sfh_plot(self,param, model=None):
         '''(dict(ndarray)-> Nonetype
         Make plot of sfh vs log age of all models in param 
@@ -582,17 +637,24 @@ class VESPA_fit(object):
         if not model is None:
             x,y = [], []
             for i in param[model]:
+                x,y = [] , []
+                #make square bracket
+                x.append(i[1]-i[0]/2.)
                 x.append(i[1]-i[0]/2.)
                 x.append(i[1]+i[0]/2.)
+                x.append(i[1]+i[0]/2.)
+                y.append(i[3]-50)
                 y.append(i[3])
                 y.append(i[3])
-            lab.plot(x,y,label=model)
+                y.append(i[3]-50)
+                lab.plot(x,y,'b',label=model)
             lab.legend()
             lab.show()
         else:
             for i in param.keys():
                 pass
-
+        return x,y
+            
     def make_numeric(self, age, sfh, max_bins, metals=None, return_param=False):
         '''(ndarray,ndarray,ndarray,int,ndarray or None) -> ndarray
         Like EZGAL's function but with a vespa like framework.
