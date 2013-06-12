@@ -78,7 +78,7 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
     for i in fun.models.keys(): ####todo add random combination of models
         active_param[i], sigma[i] = fun.initalize_param(i)
     #start with random model
-    bins = '1' #nu.random.choice(fun.models.keys())
+    bins = nu.random.choice(fun.models.keys())
 
     #set other RJ params
     Nacept[bins] , Nreject[bins] = 1.,1.
@@ -168,7 +168,7 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
         t_lik[-1]-=Time.time()
         t_accept.append(Time.time())
         #put temperature on order of chi calue
-        if T_start > chi[str(bins)][-1]:
+        if T_start < chi[str(bins)][-1]:
             T_start = chi[str(bins)][-1]+0
         #metropolis hastings
         #print a
@@ -196,7 +196,7 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
             Nreject[bins]+=1
         t_accept[-1]-=Time.time()
         ###########################step stuff
-        '''if acept_rate[bins][-1] < .18 and T_cuurent[str(bins)] > burnin + 5000:
+        '''if chi[bins][-1] > -500:
             import cPickle as pik
             pik.dump((active_param,sigma,bins,param),open('dunm.pik','w'),2)
             raise'''
@@ -252,9 +252,17 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
         
         #########################################change temperature
         T_cuurent[bins] += 1
-        if T_cuurent[bins] == round(burnin):
-            pass#print 'done with cooling from %i' %global_rank 
-
+        ###################bad performance notifier
+        if  (acept_rate[bins][-1] < .15
+                                 and T_cuurent[bins] > burnin):
+            if not fun._multi_block:
+                print "acceptance is bad starting multi-block"
+                fun._multi_block = True
+        ################turn off burnin after N itterations
+        if option.current == 5 * 10**4:
+            for i in T_cuurent.keys():
+                if not T_cuurent[i] > burnin:
+                    T_cuurent[i] = burnin + 1
         ##############################convergece assment
        
         ##############################house keeping

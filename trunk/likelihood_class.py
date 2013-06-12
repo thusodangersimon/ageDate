@@ -184,7 +184,7 @@ class VESPA_fit(object):
             self.models[str(i)]= ['burst_length','mean_age', 'metal','norm'] * i
         #multiple_block for bad performance
         self._multi_block = False
-
+        self._multi_block_i = 0
 		
     def proposal(self,mu,sigma):
         '''(Example_lik_class, ndarray,ndarray) -> ndarray
@@ -198,13 +198,21 @@ class VESPA_fit(object):
             print sigma
             raise
         self._sigma = nu.copy(sigma)
+        self._mu = nu.copy(mu)
         bins = sigma.shape[0]/4
         t_out = nu.reshape(t_out, (bins, 4))
-        #t_out[:,:2] = nu.abs(t_out[:,:2])
         #set length and age back to original and make norm positive
         for i,j in enumerate(mu):
             t_out[i][:2] = j[:2]
-            #t_out[i][-1] = t_out[i][-1])
+            #bad performance update by
+        if self._multi_block:
+            if self._multi_block_i >= bins:
+                self._multi_block_i = 0
+            for k in range(bins):
+                if k != self._multi_block_i:
+                    t_out[k] = nu.copy(mu[k])
+            self._multi_block_i += 1
+            #print self._multi_block_i
         bins = str(bins)
         t_out = self._make_square({bins:t_out},bins)
         return t_out
@@ -325,33 +333,91 @@ class VESPA_fit(object):
         
         For RJMCMC only. Does between model move. Birth rate is probablity to
         move from one model to another, models is current model and param is 
-        dict of all localtions in param space. 
+        dict of all localtions in param space.
+        
         Returns new param array with move updated, key for new model moving to,
         whether of not to attempt model jump (False to make run as MCMC) and the
         Jocobian for move.
+
+        Brith_rate is ['birth','split','merge','death','len_chng']
         '''
-        return param, None, False, None
-        step = nu.random.choice(['birth','split','merge','death'],p=birth_rate)
+        
+        step = nu.random.choice(['birth','split','merge','death','len_chng'],p=birth_rate)
         if step == 'birth' and int(model) + 1 < self._max_sfh:
             new_param, jacob, temp_model = self._birth(param,model)
         elif step == 'death' and int(model) - 1 > self._min_sfh :
             new_param, jacob, temp_model = self._death(param,model)
-        elif step == 'merge' and int(model) - 2 > self._min_sfh:
+        elif step == 'merge' and int(model) - 1 > self._min_sfh:
             new_param, jacob, temp_model = self._merge(param,model)
         elif step == 'split' and int(model) + 1 < self._max_sfh:
             new_param, jacob, temp_model = self._split(param,model)
+        elif step == 'len_chng' and int(model) > 1 :
+            new_param, jacob, temp_model = self._len_chng(param,model)
         else:
             #failed, return nulls
             return param, None, False, None
+        if new_param is None:
+            #if change didn't work return nulls
+            return param, None, False, None
         param[temp_model] = new_param
         param[temp_model] = self._make_square(param,temp_model)
-        return param, temp_model, True, jacob #need to sort out jacobian
+        return param, temp_model, True, abs(jacob) 
+        
+    def _len_chng(self, param, model):
+        '''(VESPA_Class,dict(ndarray),str)-> ndarray,float,str
+        Stays at same dimesnsion just changes length parameters
+        '''
+        #randoms
+        U1,U2,u = nu.random.rand(3)
+        index = nu.random.randint(int(model))
+        if U1 > .5:
+            #increase size
+            if index > 0 and index < int(model) - 1 :
+                if U2 > .5:
+                    #take from higher index
+                    param[model][index,0] += u*param[model][index+1,0]
+                    param[model][index+1,0] = param[model][index+1,0] * (1-u)
+                else:
+                    #take from lower index
+                    param[model][index,0] += u*param[model][index-1,0]
+                    param[model][index+1,0] = param[model][index-1,0] * (1-u)
+            elif index == 0:
+                #can only take from higher
+                param[model][index,0] += u*param[model][index+1,0]
+                param[model][index+1,0] = param[model][index+1,0] * (1-u)
+            elif index == int(model)-1:
+                #can only take from lower
+                param[model][index,0] += u*param[model][index-1,0]
+                param[model][index-1,0] = param[model][index-1,0] * (1-u)
+        else:
+            #decrease size
+            if index > 0 and index < int(model) -1 :
+                if U2 > .5:
+                    #take from higher index
+                    param[model][index+1,0] += param[model][index,0]*u
+                    param[model][index,0] =(1- u)*param[model][index,0]
+                else:
+                    #take from lower index
+                    param[model][index-1,0] += param[model][index,0]*u
+                    param[model][index,0] =(1- u)*param[model][index,0]
 
+            elif index == 0:
+                #can only take from higher
+                param[model][index+1,0] += param[model][index,0]*u
+                param[model][index,0] =(1- u)*param[model][index,0]
+
+            elif index == int(model) -1 :
+                #can only take from lower
+                param[model][index-1,0] += param[model][index,0]*u
+                param[model][index,0] =(1- u)*param[model][index,0]
+
+        return param[model], 1., model
+        
     def _merge(self,param,model):
         '''(VESPA_Class,dict(ndarray),str)-> ndarray,float,str
         Combines nearby bins together.
         '''
-        temp_model = str(int(model) - 1)
+        #temp_model = str(int(model) - 1)
         #get lowest weight and give random amount to neighbor
         #prob = nu.abs(1/(param[model][:,-1] - param[model][:,-1].min()+1))
         #inverse prob
@@ -361,44 +427,53 @@ class VESPA_fit(object):
         index = int(index)
         new_param = []
         split = param[model][index]
-        u = nu.random.rand()
-        num_comb = nu.random.randint(1,3)
-        comb = 0
-        if index - 1 > -1 :
-            #combine with younger
-            comb += 1                 
-            temp = param[model][index-1]
-            new_metal = [self._metal_unq.min()+nu.random.rand()*self._metal_unq.ptp(), temp[2] + split[2] * u, temp[2]+0.,split[2]+0.]
-            new_param.append([temp[0] + split[0] * u, 0., 
-                                new_metal[nu.random.randint(4)],
-                                temp[3] + split[3] * u])
-            new_param[-1][1] = temp[1] + (split[0] * u)/2.
-            #make sure metalicity is in bounds
-            if new_param[-1][2] < self._metal_unq.min():
-                new_param[-1][2] = self._metal_unq.min() + 0.
-            if new_param[-1][2] > self._metal_unq.max():
-                new_param[-1][2] = self._metal_unq.max() + 0.
-
-        if index + 1 < int(model) and comb != num_comb:
+        u,U = nu.random.rand(2)
+        if  U > .5:
+            if index - 1 > -1 :
+                #combine with younger
+                temp = param[model][index-1]
+            else:
+                try:
+                    index += 1
+                    temp = param[model][index-1]
+                except:
+                    return None,None,None          
+                
+        elif U < .5:
+            if index + 1 < int(model):
                 #combine with older
                 temp = param[model][index+1]
-                new_metal = [self._metal_unq.min()+nu.random.rand()*self._metal_unq.ptp(), temp[2] + split[2] * (1-u), temp[2]+0.,split[2]+0.]
-                new_param.append([temp[0] + split[0] * (1-u), 0.,
-                                new_metal[nu.random.randint(4)],
-                                temp[3] + split[3] * u])
-                new_param[-1][1] =  temp[1] - (split[0]*(1-u))/2.
-                #make sure metalicity is in bounds
-                if new_param[-1][2] < self._metal_unq.min():
-                    new_param[-1][2] = self._metal_unq.min() + 0.
-                if new_param[-1][2] > self._metal_unq.max():
-                    new_param[-1][2] = self._metal_unq.max() + 0.
-        for i in range(param[model].shape[0]):
-            if i in range(index-1,index+2) or i == index:
+            else:
+                try:
+                    index -= 1
+                    temp = param[model][index-1]
+                except:
+                    return None,None,None  
+        else:
+            #return Null
+            return None,None,None
+            
+        new_param.append([temp[0] + split[0], 0., 0., 0.])
+        #age
+        new_param[-1][1] = temp[1] + (split[0] * u)/2.
+        #metal
+        new_param[-1][2] = nu.mean((split[2],temp[2]))
+        #norm (assumes logs)
+        new_param[-1][3] =nu.log10(nu.mean((10**split[3],10**temp[3])))
+        #make sure metalicity is in bounds
+        if new_param[-1][2] < self._metal_unq.min():
+                new_param[-1][2] = self._metal_unq.min() + 0.
+        if new_param[-1][2] > self._metal_unq.max():
+                new_param[-1][2] = self._metal_unq.max() + 0.
+        #copy the rest of the params
+        for i in param[model]:
+            if nu.all(temp == i) or nu.all(split == i):
                 continue
-            new_param.append(nu.copy(param[model][i]))
+            new_param.append(nu.copy(i))
         #set for output
         temp_model = str(nu.asarray(new_param).shape[0])
-        jacob = 2.**(-int(model))
+        #inverse of split
+        jacob = ((u-1)*u*nu.log(10))/((2*u-1)*new_param[0][0])
             
         return nu.asarray(new_param), jacob, temp_model
         
@@ -408,7 +483,7 @@ class VESPA_fit(object):
         '''
         new_param = []
         age, metal, norm =  self._age_unq,self._metal_unq, self._norm
-        lengths = self._age_unq.ptp()/float(model) * nu.random.rand()
+        lengths = age.ptp()/float(model) * nu.random.rand()
         new_param.append([lengths, 0.,0,nu.log10(self._norm*nu.random.rand())])
         #metals
         new_param[-1][2] = nu.random.rand()*metal.ptp()+metal.min()
@@ -417,7 +492,7 @@ class VESPA_fit(object):
         for i in param[model]:
             new_param.append(nu.copy(i))
         temp_model = str(nu.asarray(new_param).shape[0])
-        jacob = 2**(int(temp_model))
+        jacob = metal.ptp()*age.ptp()**2/float(model)
         
         return nu.asarray(new_param), jacob, temp_model
     
@@ -437,17 +512,28 @@ class VESPA_fit(object):
         index = int(index)
         u = nu.random.rand()
         #[len,t,metal,norm]
-        new_metal = [self._metal_unq.min()+nu.random.rand()*self._metal_unq.ptp(), temp_param[index,2] + 0]
+        new_param = [[0,0,0,0]]
+        new_param.append([0.,0.,0.,0.])
+        #metal
+        new_param[0][2] = temp_param[index,2] + 0.
+        new_param[1][2] = temp_param[index,2] + 0.
+        #length
+        new_param[0][0] = temp_param[index,0] * u
+        new_param[1][0] = temp_param[index,0] * (1 - u)
+        #age
+        new_param[0][1] = temp_param[index,1] - new_param[0][0]/2. 
+        new_param[1][1] = temp_param[index,1] + new_param[1][0]/2
+        #norm
+        new_param[0][3] = nu.log10(10**temp_param[index,3] * u)
+        new_param[1][3] = nu.log10(10**temp_param[index,3] * (1 - u))
+        #copy the rest of the params
+        for i in param[model]:
+            if nu.all(temp_param[index] == i):
+                continue
+            new_param.append(nu.copy(i))
 
-        new_param = ([[temp_param[index,0]/2., 
-                           (2*temp_param[index,1] - temp_param[index,0]/2.)/2.,
-                           new_metal[nu.random.randint(2)], temp_param[index,3] * u]])
-
-        new_param.append([temp_param[index,0]/2.,
-                              (2*temp_param[index,1] + temp_param[index,0]/2.)/2.,
-                              new_metal[nu.random.randint(2)], temp_param[index,3] * (1 -u)])
         temp_model = str(nu.asarray(new_param).shape[0])
-        jacob = 2.**int(model)
+        jacob = ((2*u-1)*temp_param[index,0])/((u-1)*u*nu.log(10))
         return nu.asarray(new_param), jacob, temp_model
     
     def _death(self,param, model):
@@ -461,18 +547,10 @@ class VESPA_fit(object):
                 continue
             new_param.append(nu.copy(param[model][i]))
         temp_model = str(nu.asarray(new_param).shape[0])
-        jacob = 2.**(-int(temp_model))
+        jacob = float(model)/(self._metal_unq.ptp()*self._age_unq.ptp()**2)
 
         return nu.asarray(new_param), jacob, temp_model
     
-    def _make_block(self,param,bins):
-        '''VESPA_Class,dict(list),str) ->NoneType
-        Groups parameters into correlated blocks to help with mixing rate.
-        Uses correlation to group parameters
-        '''
-        pass
-    #tests
-
     
     def _make_square(self,param,key):
         '''(dict(ndarray),str)-> ndarray
