@@ -37,7 +37,7 @@ import ezgal as gal
 import scipy.stats as stats_dist
 import multiprocessing as multi
 from itertools import izip
-
+from scipy.cluster.hierarchy import fcluster,linkage
 
 
 class Example_lik_class(object):
@@ -185,6 +185,8 @@ class VESPA_fit(object):
             self.models[str(i)]= ['burst_length','mean_age', 'metal','norm'] * i
         #multiple_block for bad performance
         self._multi_block = False
+        self._multi_block_param = {}
+        self._multi_block_index = {}
         self._multi_block_i = 0
         #max total length of bins constraints
         self._max_age = self._age_unq.ptp()
@@ -203,23 +205,37 @@ class VESPA_fit(object):
             print sigma
             
         bins = sigma.shape[0]/4
+        #save params for multi-block
+        if str(bins) not in self._multi_block_param.keys():
+            self._multi_block_param[str(bins)] = []
+        self._multi_block_param[str(bins)].append(nu.copy(mu))
         t_out = nu.reshape(t_out, (bins, 4))
-        #set length and age back to original and make norm positive
-        '''for i,j in enumerate(mu):
-            t_out[i][:2] = j[:2]
-            #bad performance update by'''
         #make lengths positve
         t_out[:,0] = nu.abs(t_out[:,0])
+        #if rjmcmc see that performance is bad will turn multi block on
+        #finds correlated parameters and changes them together
+        bins = str(bins)
         if self._multi_block:
-            if self._multi_block_i >= bins:
+            #see if need initalization
+            if bins not in self._multi_block_index.keys():
+                self._multi_block_index[bins] = self.cov_sort(
+                    self._multi_block_param[bins], int(bins))
+                self._hist[bins] = []
+            #update params to change correlated params
+            if len(self._multi_block_param[bins]) % 200 ==0:
+                if int(bins) > 3:
+                    self._multi_block_index[bins] = self.cov_sort(
+                        self._multi_block_param[bins], int(bins))
+                else:
+                    self._multi_block_index[bins] = self.cov_sort(
+                        self._multi_block_param[bins], 3)
+            #set all non-changing params to original
+            if self._multi_block_i >= len(self._multi_block_index[bins]):
                 self._multi_block_i = 0
-            for k in range(bins):
-                if k != self._multi_block_i:
-                    t_out[k] = nu.copy(mu[k])
+            mu[self._multi_block_index[bins][self._multi_block_i]] = t_out[self._multi_block_index[bins][self._multi_block_i]]
+            t_out = nu.copy(mu)
+            #check iteratior
             self._multi_block_i += 1
-            #print self._multi_block_i
-        #bins = str(bins)
-        #t_out = self._make_square({bins:t_out},bins)
         return t_out
         
     def multi_try_all(self,param,bins,N=15):
@@ -326,11 +342,6 @@ class VESPA_fit(object):
             #make sure not stuck
             if nu.any(temp.diagonal() > 10**-6):
                 step_size[model] = temp
-        if step_crit < .18:
-            #print step_size[model][0].diagonal()
-            #self._multi_blocpass
-            step_size[model][step_size[model] < 10**-6] = 10**-6
-            
         
         return step_size[model]
 
@@ -427,9 +438,6 @@ class VESPA_fit(object):
         '''
         #temp_model = str(int(model) - 1)
         #get lowest weight and give random amount to neighbor
-        #prob = nu.abs(1/(param[model][:,-1] - param[model][:,-1].min()+1))
-        #inverse prob
-        #prob /= prob.sum()
         index = nu.where(param[model][:,-1] ==
                         nu.random.choice(param[model][:,-1]))[0]
         index = int(index)
@@ -511,11 +519,6 @@ class VESPA_fit(object):
         '''
         #split component with prob proprotional to weights
         temp_param = nu.reshape(param[model], (int(model), 4))
-        #prob = nu.abs(param[model][:,-1] - param[model][:,-1].min())
-        #prob /= prob.sum()
-        #if prob.sum() != 1. or nu.any(prob > 0):
-        #        prob[:] = 1.
-        #        prob /= prob.sum()
         index = nu.where(param[model][:,-1] ==
                              nu.random.choice(param[model][:,-1]))[0]
         index = int(index)
@@ -590,6 +593,9 @@ class VESPA_fit(object):
         Make sure parameters ahere to criterion listed below:
         1. bins cannot overlap
         2. total length of bins must be less than length of age_unq
+        3. ages must be in increseing order
+        4. make sure bins are with in age range
+        5. No bin is larger than the age range
         '''
         #make sure age is sorted
         if not self.issorted(param[key][:,1]):
@@ -610,10 +616,12 @@ class VESPA_fit(object):
                     return False
         else:
             if self._age_unq.max() < param[key][-1,1] + param[key][-1,0]/2.:
-                return False
+                if not nu.allclose(param[key][-1,1] + param[key][-1,0]/2,self._age_unq.max()):
+                    return False
         #check if length is less than age_unq.ptp()
         if param[key][:,0].sum() > self._age_unq.ptp():
-            return False
+            if not nu.allclose( param[key][:,0].sum(),self._age_unq.ptp()):
+                return False
         #make sure age is in bounds
         
         #passed all tests
@@ -628,7 +636,28 @@ class VESPA_fit(object):
                 return False
         return True
         
-        
+    def cov_sort(self, param, k):
+        '''(VESPA class, ndarray, int) -> ndarray
+        groups params by their correlation to each other.
+        Cov array and number of groups to have
+        '''
+        #make correlation matrix
+        p = nu.asarray(param)
+        l,w,h = p.shape
+        p = nu.reshape(p,(l,w*h))
+        Sigma = nu.corrcoef(p.T)
+        #clusters by their correlation
+        z = linkage(Sigma,'single','correlation')
+        #returns which cluster each param belongs to
+        clusters = fcluster(z,k,'maxclust').reshape(w,h)
+        #sort clusters into indexs
+        loc = []
+        for i in range(k):
+            loc.append(nu.where(clusters == i+1))
+
+        self._loc = loc
+        return loc
+   
     def make_sfh_plot(self,param, model=None):
         '''(dict(ndarray)-> Nonetype
         Make plot of sfh vs log age of all models in param 
