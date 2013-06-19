@@ -171,7 +171,10 @@ class VESPA_fit(object):
         #test if sorted
         self._spect = self._spect[::-1,:]
         #make spect match wavelengths of data
-        self._spect = ag.data_match_all(data,self._spect)[0]
+        #self._spect = ag.data_match_all(data,self._spect)[0]
+        #extra models to use
+        self._has_dust = use_dust
+        self._has_losvd = use_losvd
 		#set hidden varibles
         self._lib_vals = info
         self._age_unq = nu.unique(info[0][:,1])
@@ -191,14 +194,15 @@ class VESPA_fit(object):
         #max total length of bins constraints
         self._max_age = self._age_unq.ptp()
 		
-    def proposal(self,mu,sigma):
+    def proposal(self,Mu,Sigma):
         '''(Example_lik_class, ndarray,ndarray) -> ndarray
 		Proposal distribution, draws steps for chain. Should use a symetric
 		distribution
         '''
 		#save length and mean age they don't change  self._multi_block
-        self._sigma = nu.copy(sigma)
-        self._mu = nu.copy(mu)
+        self._sigma = nu.copy(Sigma)
+        self._mu = nu.copy(Mu)
+        #extract out of dict
         try:
             t_out = nu.random.multivariate_normal(nu.ravel(mu),sigma)
         except nu.linalg.LinAlgError:
@@ -247,18 +251,31 @@ class VESPA_fit(object):
     def lik(self,param, bins,return_all=False):
         '''(Example_lik_class, ndarray) -> float
         Calculates likelihood for input parameters. Outuputs log-likelyhood'''
-        if not self._check_len(param,bins):
+        if not self._check_len(param[bins]['gal'],bins):
             return -nu.inf
         burst_model = {}
-        for i in param[bins]:
+        for i in param[bins]['gal']:
             burst_model[str(i[1])] =  10**i[3]*ag.make_burst(i[0],i[1],i[2],
             self._metal_unq, self._age_unq, self._spect, self._lib_vals)
 		#do dust
-
+        if self._has_dust:
+            #dust requires wavelengths
+            burst_model['wave'] = nu.copy(self._spect[:,0])
+            #not correct
+            burst_model = ag.dust(param[bins]['dust'],burst_model)
 		#do losvd
-
+        if self._has_losvd:
+            #check if wavelength exsist
+            if 'wave' not in burst_model.keys():
+                burst_model['wave'] = nu.copy(self._spect[:,0])
+            #make buffer for edge effects
+            wave_range = [self.data[:,0].min(),self.data[:,0].max()]
+            burst_model = ag.LOSVD(burst_model, param[bins]['losvd'], wave_range)
+        #need to match data wavelength ranges and wavelengths
 		#get loglik
+        burst_model = ag.data_match(self.data,burst_model,bins)
         model = nu.sum(burst_model.values(),0)
+        
 		#return loglik
         if self.data.shape[1] == 3:
             #uncertanty calc
@@ -278,10 +295,11 @@ class VESPA_fit(object):
         #return logprior
         out = 0.
         #make sure shape is ok
-        if not self._check_len(param,bins):
+        if not self._check_len(param[bins]['gal'],bins):
             return -nu.inf
         #uniform priors
-        for i in param[bins]:
+        #gal priors
+        for i in param[bins]['gal']:
             #length
             out += stats_dist.uniform.logpdf(i[0],0.,self._age_unq.ptp())
             #age
@@ -290,7 +308,18 @@ class VESPA_fit(object):
             out += stats_dist.uniform.logpdf(i[2],self._metal_unq.min(),self._metal_unq.ptp())
             #weight
             out += stats_dist.uniform.logpdf(i[3], -300, 500)
-        
+        #dust
+        if self._has_dust:
+            #uniform priors
+            out += stats_dist.uniform.logpdf(param[bins]['dust'],0,4).sum()
+        #losvd
+        if self._has_losvd:
+            #sigma
+            out += stats_dist.uniform.logpdf(param[bins]['losvd'][0],0,5)
+            #z
+            out += stats_dist.uniform.logpdf(param[bins]['losvd'][1],0,2)
+            #h3 and h4
+            out += stats_dist.uniform.logpdf(param[bins]['losvd'][2:],0,8).sum()
         return out
 
 
@@ -308,19 +337,27 @@ class VESPA_fit(object):
 		outputs starting point and starting step size
         '''
         #any amount of splitting
-        out = []
+        out = {'gal':[], 'losvd':[],'dust':[]}
+        #gal param
         age, metal, norm =  self._age_unq,self._metal_unq, self._norm
         lengths = self._age_unq.ptp()/float(model)
         for i in range(int(model)):
-            out.append([lengths, (i+.5)*lengths + age.min(),0,nu.log10(self._norm*nu.random.rand())])
+            out['gal'].append([lengths, (i+.5)*lengths + age.min(),0,nu.log10(self._norm*nu.random.rand())])
             #metals
-            out[-1][2] = nu.random.rand()*metal.ptp()+metal.min()
-        out = nu.asarray(out)
+            out['gal'][-1][2] = nu.random.rand()*metal.ptp()+metal.min()
+        out['gal'] = nu.asarray(out['gal'])
+        #losvd param
+        if self._has_dust:
+            out['dust'] = nu.random.rand(2)*4
+        #dust param
+        if self._has_losvd:
+            #[log10(sigma), v (redshift), h3, h4]
+            out['losvd'] = nu.asarray([nu.random.rand()*4,0.,0.,0.])
         #make step size
-        sigma = nu.identity(out.size)
+        sigma = nu.identity(len([j for i in out.values() for j in nu.ravel(i)]))
 
         #make coorrect shape
-        out = self._make_square({model:out},model)
+        out['gal'] = self._make_square({model:out['gal']},model)
         return out, sigma
 
         
@@ -588,8 +625,8 @@ class VESPA_fit(object):
                 
         return out
 
-    def _check_len(self, param, key):
-        '''(VESPA_class, dict(ndarray),str)-> ndarray
+    def _check_len(self, tparam, key):
+        '''(VESPA_class, dict(ndarray) or ndarray,str)-> ndarray
         Make sure parameters ahere to criterion listed below:
         1. bins cannot overlap
         2. total length of bins must be less than length of age_unq
@@ -597,6 +634,14 @@ class VESPA_fit(object):
         4. make sure bins are with in age range
         5. No bin is larger than the age range
         '''
+        
+        #check input type
+        if type(tparam) == dict:
+            param = tparam.copy()
+        elif  type(tparam) == nu.ndarray:
+            param = {key:tparam}
+        else:
+            raise TypeError('input must be dict or ndarray')
         #make sure age is sorted
         if not self.issorted(param[key][:,1]):
             return False

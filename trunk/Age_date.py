@@ -44,10 +44,8 @@ from scipy.integrate import simps
 #from scipy.signal import fftconvolve
 import time as Time
 import boundary as bound
-#import Age_MCMC as mc
-#import Age_RJMCMC as rjmc
 from losvd_convolve import convolve
-#import Age_hybrid as hy
+
 
 #123456789012345678901234567890123456789012345678901234567890123456789
 ###decorators
@@ -76,6 +74,11 @@ class memoized(object):
           if not arg in self.cache:
             self.cache[arg] = self.func(*args)
           return self.cache[arg]
+      elif self.func.__name__ == 'f_dust':
+        arg = str(args)
+        if not arg in self.cache:
+          self.cache[arg] = self.func(*args)
+        return self.cache[arg]
       else:
           if args in self.cache:
             return self.cache[args]
@@ -346,19 +349,25 @@ def data_match_all(data, spect):
     return spect, out_data
 
 def data_match(data, model, bins, keep_wave=False):
-   #makes sure data and model have same wavelength range 
-   #and points but with a dictionary
-   #assumes spect_lib is longer than data
+   '''(ndarray,dict(ndarray),int,bool) -> dict(ndarray)
+   Makes sure data and model have same wavelength range 
+    and points but with a dictionary
+    assumes model wavelength range is longer than data.
+    Uses linear interpolation to match wavelengths'''
    ####add resolution downgrading!!!
    out = {}
     #if they have the same x-axis
    if nu.all(model['wave'] == data[:, 0]):
-      for i in xrange(bins):
-         out[str(i)] = model[str(i)]
+      for i in model.keys():
+          if i == 'wave':
+              continue
+          out[i] = model[i]
    else: #not same shape, interp 
-      for i in xrange(bins):
-         out[str(i)] = spectra_lin_interp(model['wave'],
-                                          model[str(i)], data[:,0])
+      for i in model.keys():
+        if i == 'wave':
+          continue
+        out[i] = spectra_lin_interp(model['wave'],
+                                    model[i], data[:,0])
    if keep_wave:
       out['wave'] = nu.copy(data[:,0])
    return out
@@ -486,29 +495,36 @@ def dict_size(dic):
     return size
 
 def dust(param, model):
-   '''(ndarray or list, dict(ndarray)) -> ndarray
-
-   Applies 2 componet dust model following charlot and fall 2000 on model
-   returns same shape as model
-   '''
-   t_bc = 7.4771212547196626 #log10(.03*10**9)
-   if nu.any(param[-2:] <= 0):
-      return model
+    '''(ndarray, dict(ndarray)) -> ndarray
+    
+    Applies 2 componet dust model following charlot and fall 2000 on model
+    returns same shape as model
+    
+    Keys of the model dict should be age of ssp.
+    
+    param is dust parameters [tau_bc, tau_ism]
+    '''
+    t_bc = 7.4771212547196626 #log10(.03*10**9)
+    if nu.any(param[-2:] <= 0):
+        return model
     #set all itterated varibles for speed
-   bins = (param.shape[0] - 2) / 3
-   tau_lam = (model['wave'] / 5500.) ** (-.7)
-   T_ism = f_dust(param[-2] * tau_lam)
-   T_bc = f_dust(param[-1] * tau_lam)
-   for i in xrange(bins): 
-      #choose which combo of dust models to use
-      if param[3 * i + 1] <= t_bc: 
-         #fdust*fbc
-         model[str(i)] *= T_ism * T_bc
-      else:
-         #fdust
-         model[str(i)] *= T_ism
-   return model
+    bins = (param.shape[0] - 2) / 3
+    tau_lam = (model['wave'] / 5500.) ** (-.7)
+    T_ism = f_dust(param[1] * tau_lam)
+    T_bc = f_dust(param[0] * tau_lam)
+    for i in model.keys():
+        if i == 'wave':
+            continue 
+        #choose which combo of dust models to use
+        if float(i) <= t_bc: 
+            #fdust*fbc
+            model[i] *= T_ism * T_bc
+        else:
+            #fdust
+            model[str(i)] *= T_ism
+    return model
 
+@memoized
 def f_dust(tau): 
     '''(ndarray) -> ndarray
     Dust extinction functin'''
@@ -556,11 +572,19 @@ def gauss_kernel(velscale,sigma=1,h3=0,h4=0):
        slitout /= nu.sum(slitout)
     return slitout
 
-def LOSVD(model,param,wave_range):
-    '''convolves data with a gausian with dispersion of sigma, and hermite poly
-    of h3 and h4'''
+def LOSVD(model, param, wave_range, convlve='python'):
+    '''(dict(ndarray), ndarray, ndarray) -> dict(ndarray)
+
+    Convolves data with a gausian with dispersion of sigma, and hermite poly
+    of h3 and h4
+
+    model is dict of ssp with ages being the keys
+    param is a 4x1 flat array with params of losvd [log10(sigma), v (redshift), h3, h4]
+    wave_range is gives edge support for convolution
+
+    Has option for c++ wrapped convolution (50x faster than python) doesn't work with parallel processing
+    or python convolutin'''
     #unlog sigma
-    #import pylab as lab
     tparam = param.copy()
     tparam[0] = 10**tparam[0]
     tmodel = model.copy()
@@ -568,6 +592,7 @@ def LOSVD(model,param,wave_range):
     wave_range = nu.array(wave_range)/(1. + tparam[1]) - [100, -100]
     index = nu.searchsorted(model['wave'], [wave_range[0], wave_range[1]])
     try:
+        #calculate resolution
        wave_diff = nu.diff(model['wave'][index[0]:index[1]]).min()
     except ValueError:
        #model and data range are off
@@ -578,12 +603,13 @@ def LOSVD(model,param,wave_range):
     for i in model.keys():
         if i == 'wave':
             continue
-        #python convlve
-        model[i] = spectra_lin_interp(model['wave'], model[i], wave)
-        tmodel[i] = convolve_python_fast(wave, nu.ascontiguousarray(model[i]), tparam)
-        #c++ convolve
-        #tmodel[i] = spectra_lin_interp(tmodel['wave'], tmodel[i], wave)
-        #convolve(wave, tmodel[i], tparam ,tmodel[i])
+        if 'python' == convlve:
+            model[i] = spectra_lin_interp(model['wave'], model[i], wave)
+            tmodel[i] = convolve_python_fast(wave, nu.ascontiguousarray(model[i]), tparam)
+        else:
+            #c++ convolve
+            tmodel[i] = spectra_lin_interp(tmodel['wave'], tmodel[i], wave)
+            convolve(wave, tmodel[i], tparam ,tmodel[i])
     #apply redshift
     tmodel['wave'] = redshift(wave,tparam[1])
     #uncertanty convolve
