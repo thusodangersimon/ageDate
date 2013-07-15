@@ -175,6 +175,12 @@ class VESPA_fit(object):
         #extra models to use
         self._has_dust = use_dust
         self._has_losvd = use_losvd
+        #key order
+        self._key_order = ['gal']
+        if use_dust:
+            self._key_order.append('dust')
+        if use_losvd:
+            self._key_order.append('losvd')
 		#set hidden varibles
         self._lib_vals = info
         self._age_unq = nu.unique(info[0][:,1])
@@ -194,28 +200,26 @@ class VESPA_fit(object):
         #max total length of bins constraints
         self._max_age = self._age_unq.ptp()
 		
-    def proposal(self,Mu,Sigma):
+    def proposal(self,Mu,sigma):
         '''(Example_lik_class, ndarray,ndarray) -> ndarray
 		Proposal distribution, draws steps for chain. Should use a symetric
 		distribution
         '''
 		#save length and mean age they don't change  self._multi_block
-        self._sigma = nu.copy(Sigma)
+        self._sigma = nu.copy(sigma)
         self._mu = nu.copy(Mu)
         #extract out of dict
+        
+        mu = nu.hstack([i for j in self._key_order for i in Mu[j] ])
         try:
-            t_out = nu.random.multivariate_normal(nu.ravel(mu),sigma)
+            t_out = nu.random.multivariate_normal(mu,sigma)
         except nu.linalg.LinAlgError:
             print sigma
-            
-        bins = sigma.shape[0]/4
+        bins = Mu['gal'].shape[0]
         #save params for multi-block
         if str(bins) not in self._multi_block_param.keys():
             self._multi_block_param[str(bins)] = []
         self._multi_block_param[str(bins)].append(nu.copy(mu))
-        t_out = nu.reshape(t_out, (bins, 4))
-        #make lengths positve
-        t_out[:,0] = nu.abs(t_out[:,0])
         #if rjmcmc see that performance is bad will turn multi block on
         #finds correlated parameters and changes them together
         bins = str(bins)
@@ -226,7 +230,7 @@ class VESPA_fit(object):
                     self._multi_block_param[bins], int(bins))
                 self._hist[bins] = []
             #update params to change correlated params
-            if len(self._multi_block_param[bins]) % 200 ==0:
+            if len(self._multi_block_param[bins]) % 200 == 0:
                 if int(bins) > 3:
                     self._multi_block_index[bins] = self.cov_sort(
                         self._multi_block_param[bins], int(bins))
@@ -234,13 +238,34 @@ class VESPA_fit(object):
                     self._multi_block_index[bins] = self.cov_sort(
                         self._multi_block_param[bins], 3)
             #set all non-changing params to original
-            if self._multi_block_i >= len(self._multi_block_index[bins]):
-                self._multi_block_i = 0
-            mu[self._multi_block_index[bins][self._multi_block_i]] = t_out[self._multi_block_index[bins][self._multi_block_i]]
+            if self._multi_block_i > self._multi_block_index[bins].max():
+                self._multi_block_i = 1
+            index = self._multi_block_index[bins] == self._multi_block_i
+            mu[index] = t_out[index]
             t_out = nu.copy(mu)
             #check iteratior
             self._multi_block_i += 1
-        return t_out
+
+        #extract out of mu into correct dict shape
+        out = {}
+        i,bins = 0,int(bins)
+        for j in self._key_order:
+            #gal
+            if j == 'gal':
+                out[j] = nu.reshape(t_out[i:i+bins*4], (bins, 4))
+                i+= bins*4
+            #dust
+            if j == 'dust':
+                out[j] = t_out[i:i+2]
+                i += 2
+            #losvd
+            if j == 'losvd':
+                out[j] = t_out[i:i+4]
+                i+=4
+        #gal lengths must be positve
+        out['gal'][:,0] = nu.abs(out['gal'][:,0])
+
+        return out
         
     def multi_try_all(self,param,bins,N=15):
         '''(VESPA_class,ndarray,str,int)-> float
@@ -342,7 +367,7 @@ class VESPA_fit(object):
         age, metal, norm =  self._age_unq,self._metal_unq, self._norm
         lengths = self._age_unq.ptp()/float(model)
         for i in range(int(model)):
-            out['gal'].append([lengths, (i+.5)*lengths + age.min(),0,nu.log10(self._norm*nu.random.rand())])
+            out['gal'].append([lengths*nu.random.rand(), (i+.5)*lengths + age.min(),0,nu.log10(self._norm*nu.random.rand())])
             #metals
             out['gal'][-1][2] = nu.random.rand()*metal.ptp()+metal.min()
         out['gal'] = nu.asarray(out['gal'])
@@ -358,6 +383,8 @@ class VESPA_fit(object):
 
         #make coorrect shape
         out['gal'] = self._make_square({model:out['gal']},model)
+        #make numpy record array
+        
         return out, sigma
 
         
@@ -374,8 +401,7 @@ class VESPA_fit(object):
             step_size[model] /= 1.05
         #cov matrix
         if len(param) % 200 == 0 and len(param) > 0.:
-            new_shape = nu.prod(nu.asarray(param[0]).shape)
-            temp = nu.cov(nu.asarray(param[-200:]).reshape(200,new_shape).T)
+            temp = nu.cov(self.list_dict_to(param[-2000:]).T)
             #make sure not stuck
             if nu.any(temp.diagonal() > 10**-6):
                 step_size[model] = temp
@@ -383,7 +409,7 @@ class VESPA_fit(object):
         return step_size[model]
 
 
-    def birth_death(self,birth_rate, model, param):
+    def birth_death(self,birth_rate, model, Param):
         '''(Example_lik_class, float, any type, dict(ndarray)) -> 
         dict(ndarray), any type, bool, float
         
@@ -399,6 +425,7 @@ class VESPA_fit(object):
         '''
         
         step = nu.random.choice(['birth','split','merge','death'],p=birth_rate)
+        param = {model:Param[model]['gal'].copy()}
         if step == 'birth' and int(model) + 1 < self._max_sfh:
             new_param, jacob, temp_model = self._birth(param,model)
         elif step == 'death' and int(model) - 1 >= self._min_sfh :
@@ -411,13 +438,20 @@ class VESPA_fit(object):
             new_param, jacob, temp_model = self._len_chng(param,model)
         else:
             #failed, return nulls
-            return param, None, False, None
+            return Param, None, False, None
         if new_param is None:
             #if change didn't work return nulls
             return param, None, False, None
-        param[temp_model] = new_param[nu.argsort(new_param[:,1])]
+        if not Param.has_key(temp_model):
+            Param[temp_model] = {}
+        Param[temp_model]['gal'] = new_param[nu.argsort(new_param[:,1])]
+        #add dust and losvd to output
+        if self._has_dust:
+            Param[temp_model]['dust'] = Param[model]['dust'].copy()
+        if self._has_losvd:
+            Param[temp_model]['losvd'] = Param[model]['losvd'].copy()
         #param[temp_model] = self._make_square(param,temp_model)
-        return param, temp_model, True, abs(jacob) 
+        return Param, temp_model, True, abs(jacob) 
         
     def _len_chng(self, param, model):
         '''(VESPA_Class,dict(ndarray),str)-> ndarray,float,str
@@ -468,7 +502,7 @@ class VESPA_fit(object):
                 param[model][index,0] =(1- u)*param[model][index,0]
 
         return param[model], 1., model
-        
+
     def _merge(self,param,model):
         '''(VESPA_Class,dict(ndarray),str)-> ndarray,float,str
         Combines nearby bins together.
@@ -680,6 +714,15 @@ class VESPA_fit(object):
             if not l[i] <= l[i+1]:
                 return False
         return True
+
+    def list_dict_to(self, s,outtype='ndarray'):
+        '''(VESPA class list(dict(ndarray)),str) -> outtype
+        
+        Turns a list of dictoraies into a ndarray or type specified
+        '''
+        size = sum([j.size for j in s[0].values()])
+        out = nu.hstack([i for Mu in s for j in self._key_order for i in Mu[j] ])
+        return out.reshape((len(s),size))
         
     def cov_sort(self, param, k):
         '''(VESPA class, ndarray, int) -> ndarray
@@ -688,20 +731,23 @@ class VESPA_fit(object):
         '''
         #make correlation matrix
         p = nu.asarray(param)
-        l,w,h = p.shape
-        p = nu.reshape(p,(l,w*h))
+        #l,w,h = p.shape
+        #p = nu.reshape(p,(l,w*h))
         Sigma = nu.corrcoef(p.T)
+        #find nans and stuff and replace with 0's
+        Sigma[~nu.isfinite(Sigma)] = 0
         #clusters by their correlation
         z = linkage(Sigma,'single','correlation')
         #returns which cluster each param belongs to
-        clusters = fcluster(z,k,'maxclust').reshape(w,h)
-        #sort clusters into indexs
+        clusters = fcluster(z,k,'maxclust')
+        '''#sort clusters into indexs
         loc = []
         for i in range(k):
             loc.append(nu.where(clusters == i+1))
 
         self._loc = loc
-        return loc
+        return loc'''
+        return clusters
    
     def make_sfh_plot(self,param, model=None):
         '''(dict(ndarray)-> Nonetype

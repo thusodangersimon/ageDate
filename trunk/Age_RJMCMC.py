@@ -86,7 +86,7 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
     #bayes_fact[bins] = #something
     T_cuurent[bins] = 0
     #set storage functions
-    param[bins] = [nu.copy(active_param[bins])]
+    param[bins] = [active_param[bins].copy()]
     #first lik calc
     #print active_param[bins]
     chi[bins] = [fun.lik(active_param,bins) + fun.prior(active_param,bins)]
@@ -100,7 +100,7 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
              temp = fun.lik(active_param,bins) + fun.prior(active_param,bins)
              if nu.isfinite(temp):
                  chi[bins][-1] = nu.copy(temp)
-                 param[bins][-1] = nu.copy(active_param[bins])
+                 param[bins][-1] = active_param[bins].copy()
                  print 'Good starting point found. Starting RJMCMC'
                  break
         else:
@@ -140,7 +140,7 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
 			
         #sample from distiburtion
         t_pro.append(Time.time())
-    
+        
         active_param[bins] = fun.proposal(active_param[bins], sigma[bins])
         t_pro[-1] -= Time.time()
         #swarm stuff
@@ -154,16 +154,15 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
         t_lik.append(Time.time())
         chi[bins].append(0.)
         chi[bins][-1] = fun.lik(active_param,bins) + fun.prior(active_param,bins)
-        #print chi[str(bins)][-2], chi[str(bins)][-1] ,sigma[str(bins)].diagonal()
         #decide to accept or not change from log lik to like
         #just lik part
         a = (chi[bins][-1] - chi[bins][-2])
-        #print a, chi[bins][-1], chi[bins][-2]
         #model prior
         a += fun.model_prior(bins)
         #simulated anneling
         a /= SA(T_cuurent[bins],burnin,abs(T_start),T_stop)
-        #print a
+        '''if nu.isinf(a):
+            print active_param[bins]['gal'], param[bins][-1]['gal']'''
         #print bins ,chi[str(bins)][-2], chi[str(bins)][-1], active_param[str(bins)]
         
         t_lik[-1]-=Time.time()
@@ -173,29 +172,18 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
             T_start = chi[str(bins)][-1]+0
         #metropolis hastings
         #print a
-        if nu.exp(a) > nu.random.rand(): #acepted
-            #print 'accept'
-            param[bins].append(nu.copy(active_param[bins]))
+        if nu.exp(a) > nu.random.rand():
+            #acepted
+            param[bins].append(active_param[bins].copy())
             Nacept[bins] += 1
-           #see if global best fit
-            '''if option.chibest < chi[str(bins)][-1] and nu.isfinite(chi[str(bins)][-1]):
-                option.chibest[0] = chi[str(bins)][-1]+.0
-                for kk in range(len(option.parambest)):
-                    if len(active_param[str(bins)]) > kk:
-                        option.parambest[kk] = active_param[str(bins)][kk]
-                    else:
-                        option.parambest[kk] = nu.nan'''
         else:
-            param[bins].append(nu.copy(param[bins][-1]))
-            active_param[bins] = nu.copy(param[bins][-1]) 
+            #rejected
+            param[bins].append(param[bins][-1].copy())
+            active_param[bins] = param[bins][-1].copy()
             chi[bins][-1] = nu.copy(chi[bins][-2])
             Nreject[bins]+=1
         t_accept[-1]-=Time.time()
         ###########################step stuff
-        '''if chi[bins][-1] > -500:
-            import cPickle as pik
-            pik.dump((active_param,sigma,bins,param),open('dunm.pik','w'),2)
-            raise'''
         t_step.append(Time.time())
         if T_cuurent[bins] < burnin + 5000 or acept_rate[bins][-1]<.11:
             #only tune step if in burn-in
@@ -205,12 +193,13 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
         t_birth.append(Time.time())
         
         if j >= j_timeleft:
+            #print len(active_param[bins].keys())
             active_param, temp_bins, attempt, critera = fun.birth_death(birth_rate, bins, active_param)
+            #print len(active_param[bins].keys())
             #print bins, active_param[bins].shape, sigma[bins][0].shape
             if attempt:
                 #check if accept move
                 tchi = fun.lik(active_param, temp_bins)+fun.prior(active_param, temp_bins)
-                #fun.make_sfh_plot(active_param,temp_bins)
                 #likelihoods
                 rj_a = (tchi - chi[bins][-1])
                 #model priors
@@ -218,11 +207,8 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
                 trans_moves += 1
                 #simulated aneeling 
                 rj_a /= SA(trans_moves,50,abs(chi[bins][0]),T_stop)
-                #print rj_a,temp_bins,bins
-                '''if acept_rate[bins][-1] < .17:
-                    import cPickle as pik
-                    pik.dump((active_param,temp_bins,bins),open('test.pik','w'),2)
-                '''
+                #RJ-MH critera
+                #print active_param[temp_bins]
                 if nu.exp(rj_a) * critera > nu.random.rand():
                     #accept move
                     bins = temp_bins + ''
@@ -234,12 +220,12 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
                         Nacept[bins] , Nreject[bins] = 1., 1.
                         out_sigma[bins] = []
                     chi[bins].append(tchi + 0)
-                    param[bins].append(nu.copy(active_param[bins]))
-                    #print 'success',bins,trans_moves
+                    param[bins].append(active_param[bins].copy())
+                    
                     #allow for quick tuneing of sigma
-                    '''if T_cuurent[bins] > burnin + 5000:
+                    if T_cuurent[bins] > burnin + 5000:
                         T_cuurent[bins] = burnin + 4800
-                        Nacept[bins] , Nreject[bins] = 1., 1.'''
+                        Nacept[bins] , Nreject[bins] = 1., 1.
                 else:
                     pass
                 j, j_timeleft = 0 , 1#nu.random.exponential(100)
@@ -253,14 +239,12 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
         if  (acept_rate[bins][-1] < .15
                                  and T_cuurent[bins] > burnin):
             if not fun._multi_block:
-                print T_cuurent[bins] , burnin
                 print "acceptance is bad starting multi-block"
                 fun._multi_block = True
                 Nacept[bins] , Nreject[bins] = 1., 1.
                 #T_cuurent[bins] = burnin + 4000 
         ################turn off burnin after N itterations
         if option.current == 5 * 10**4:
-            print 'here'
             for i in T_cuurent.keys():
                 if not T_cuurent[i] > burnin:
                     T_cuurent[i] = burnin + 1
