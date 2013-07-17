@@ -282,10 +282,11 @@ class VESPA_fit(object):
         for i in param[bins]['gal']:
             burst_model[str(i[1])] =  10**i[3]*ag.make_burst(i[0],i[1],i[2],
             self._metal_unq, self._age_unq, self._spect, self._lib_vals)
+        burst_model['wave'] = nu.copy(self._spect[:,0])
 		#do dust
         if self._has_dust:
             #dust requires wavelengths
-            burst_model['wave'] = nu.copy(self._spect[:,0])
+            
             #not correct
             burst_model = ag.dust(param[bins]['dust'],burst_model)
 		#do losvd
@@ -298,6 +299,7 @@ class VESPA_fit(object):
             burst_model = ag.LOSVD(burst_model, param[bins]['losvd'], wave_range)
         #need to match data wavelength ranges and wavelengths
 		#get loglik
+        
         burst_model = ag.data_match(self.data,burst_model,bins)
         model = nu.sum(burst_model.values(),0)
         
@@ -720,7 +722,7 @@ class VESPA_fit(object):
         
         Turns a list of dictoraies into a ndarray or type specified
         '''
-        size = sum([j.size for j in s[0].values()])
+        size = sum([nu.size(j) for j in s[0].values()])
         out = nu.hstack([i for Mu in s for j in self._key_order for i in Mu[j] ])
         return out.reshape((len(s),size))
         

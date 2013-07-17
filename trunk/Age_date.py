@@ -158,9 +158,8 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins,
             age = age[0]
             #find spectra
             for i in 10 ** metal:
-                index = nu.nonzero(nu.logical_and(lib_vals[0][:,0] ==
-                                                  i, lib_vals[0][:,1]
-                                                  == age))[0]
+                index = nu.nonzero(nu.logical_and(lib_vals[0][:,0] == i
+                                                  ,lib_vals[0][:,1] ==age))[0]
                 if len(index)<1: #if not in lib_vals return dummy array
                     out[str(ii)] = spect[:,0] + nu.inf
                     interp = False
@@ -236,7 +235,8 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins,
 
 @memoized
 def make_burst(length, t, metal, metal_unq, age_unq, spect, lib_vals):
-    '''(float, float,float, ndarray(float),ndarray(float)
+    '''def make_burst(length, t, metal, metal_unq, age_unq, spect, lib_vals)
+    (float, float,float, ndarray(float),ndarray(float)
 ndarray(float) tuple(ndarray(floats),ndarray(str))) -> ndarray(float)
 Turns SSP into busrt of constant stellar formation and of length dt at
 age t for a const metalicity 10**(t-9) - length/2 to 10**(t-9) + length/2.
@@ -292,7 +292,8 @@ All terms are logrythmic.
 	
 		
 def random_permute(seed):
-    #does random sequences to produice a random seed for parallel programs
+    '''(seed (int)) -> int
+    does random sequences to produice a random seed for parallel programs'''
     ##middle squared method
     seed = str(seed**2)
     while len(seed) < 7:
@@ -300,6 +301,10 @@ def random_permute(seed):
     #do more randomization
     ##multiply with carry
     a,b,c = int(seed[-1]), 2**32, int(seed[-3])
+    i = 0
+    while a == 0:
+        a = int(seed[-i])
+        i+=1
     j = nu.random.random_integers(4, len(seed))
     for i in range(int(seed[-j:-j+3])):
         seed = (a*int(seed) + c) % b
