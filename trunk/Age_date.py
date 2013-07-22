@@ -44,7 +44,7 @@ from scipy.integrate import simps
 #from scipy.signal import fftconvolve
 import time as Time
 import boundary as bound
-from losvd_convolve import convolve
+#from losvd_convolve import convolve
 
 
 #123456789012345678901234567890123456789012345678901234567890123456789
@@ -233,7 +233,7 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins,
    #exit program
     return out
 
-@memoized
+#@memoized
 def make_burst(length, t, metal, metal_unq, age_unq, spect, lib_vals):
     '''def make_burst(length, t, metal, metal_unq, age_unq, spect, lib_vals)
     (float, float,float, ndarray(float),ndarray(float)

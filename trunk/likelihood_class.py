@@ -228,7 +228,7 @@ class VESPA_fit(object):
             if bins not in self._multi_block_index.keys():
                 self._multi_block_index[bins] = self.cov_sort(
                     self._multi_block_param[bins], int(bins))
-                self._hist[bins] = []
+                #self._hist[bins] = []
             #update params to change correlated params
             if len(self._multi_block_param[bins]) % 200 == 0:
                 if int(bins) > 3:
