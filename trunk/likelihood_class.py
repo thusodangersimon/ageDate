@@ -38,7 +38,7 @@ import scipy.stats as stats_dist
 import multiprocessing as multi
 from itertools import izip
 from scipy.cluster.hierarchy import fcluster,linkage
-
+import os
 
 class Example_lik_class(object):
 
@@ -119,6 +119,161 @@ class Example_lik_class(object):
         #return None, None, False, None
         pass
 
+#===========================================    
+#catacysmic varible fitting
+class CV_Fit(object):
+
+    '''Fits cv spectrum using fortran codes to generate model spectra.
+    Runs with only MCMC'''
+
+    def __init__(self,data,model_name='thuso',spec_path='/home/thuso/Phd/other_codes/Valerio'):
+        '''(Example_lik_class,#user defined) -> NoneType or userdefined
+
+        initalize class, can do whatever you want. User to define functions'''
+        self.data = data
+        #move to working dir
+        os.chdir(spec_path)
+        #load in conf files and store
+        self.conf_file_name = '%i.5'%os.getpid()
+        temp = open(model_name + '.5')
+        #make temp dir
+        if not os.path.exists('temp/'):
+            os.mkdir('temp/')
+        batch_file = open('temp/'+self.conf_file_name,'wr+')
+        self.org_file = []
+        for i in temp:
+            batch_file.write(i)
+            self.org_file.append(i)
+        batch_file.flush()
+        batch_file.seek(0)
+        self.temp_model = 'temp/'+self.conf_file_name
+        #find number of abn are used
+        while batch_file.next() != '* mode abn modpf\n':
+            pass
+        self._no_abn = 0
+        for i in batch_file :
+            if i.lstrip().split(' ' )[0] == '2':
+                #count
+                self._no_abn += 1
+            elif i.startswith('*'):
+                #if finished with section
+                break
+        batch_file.close()
+            
+    def proposal(self,mu,sigma):
+        '''(Example_lik_class, ndarray,ndarray) -> ndarray
+        Proposal distribution, draws steps for chain. Should use a symetric
+        distribution'''
+        
+        #return up_dated_param 
+        pass
+
+    def lik(self,param):
+        '''(Example_lik_class, ndarray) -> float
+        Calculates likelihood for input parameters. Outuputs log-likelyhood'''
+        #param = [T,g,abn...]
+        #overwrite new param to temp file
+        batch_file = open(self.temp_model,'wr+')
+        #set temp, g
+        batch_file.write(' %2.1f   %2.1f\n' %(param[0],param[1]))
+        #write to abn
+        i = 1
+        while self.org_file[i] != '* mode abn modpf\n':
+            batch_file.write(self.org_file[i])
+            i += 1
+        batch_file.write(self.org_file[i])
+        #set abn if mode == 2
+        j = 2
+        i += 1
+        for ii,k in enumerate(self.org_file[i:]):
+            #print i.split(' ' )
+            if k.lstrip().split(' ' )[0] == '2':
+                #find what to add at end
+                adn = k.rstrip().split(' ')[-1]
+                if not adn.isalpha():
+                    #make sure it's just a letter
+                    adn = adn.split()[-1]
+                    if not adn.isalpha():
+                        #still not a letter?
+                        adn = adn.split()[-1].replace('!','')
+                #write
+                batch_file.write('2 %1.1f 0\t! %s\n'%(param[j],adn))
+                j += 1
+            elif k.startswith('*'):
+                #if finished with section
+                break
+            else:
+                #write non param
+                batch_file.write(k)
+        #write remaining file
+        for k in range(i+ii,len(self.org_file)):
+            batch_file.write(self.org_file[k])
+        batch_file.close()
+        #call Tl on Tl path
+        #os.popen()
+        #return loglik
+        
+
+    def prior(self,param):
+        '''(Example_lik_class, ndarray) -> float
+        Calculates log-probablity for prior'''
+        #return logprior
+        out = 0.
+        #param = [T,g,abn...]
+        #uniform priors
+        #T prior
+        out += stats_dist.uniform.logpdf(param[0],2*10**4,4*10**4)
+        #g
+        out += stats_dist.uniform.logpdf(i[1],4,8)
+        #abns
+        out += stats_dist.uniform.logpdf(i[2],self._metal_unq.min(),self._metal_unq.ptp())
+  
+
+
+    def model_prior(self,model):
+        '''(Example_lik_class, any type) -> float
+        Calculates log-probablity prior for models. Not used in MCMC and
+        is optional in RJMCMC.'''
+        #return log_model
+        pass
+
+    def initalize_param(self,model):
+        '''(Example_lik_class, any type) -> ndarray, ndarray
+
+        Used to initalize all starting points for run of RJMCMC and MCMC.
+        outputs starting point and starting step size'''
+        #return init_param, init_step
+        pass
+
+        
+    def step_func(self,step_crit,param,step_size,model):
+        '''(Example_lik_class, float, ndarray or list, ndarray, any type) ->
+        ndarray
+
+        Evaluates step_criteria, with help of param and model and 
+        changes step size during burn-in perior. Outputs new step size
+        '''
+        #return new_step
+        pass
+
+    def birth_death(self,birth_rate, model, param):
+        '''(Example_lik_class, float, any type, dict(ndarray)) -> 
+           dict(ndarray), any type, bool, float
+
+        For RJMCMC only. Does between model move. Birth rate is probablity to
+        move from one model to another, models is current model and param is 
+        dict of all localtions in param space. 
+        Returns new param array with move updated, key for new model moving to,
+        whether of not to attempt model jump (False to make run as MCMC) and the
+        Jocobian for move.
+        '''
+        #for RJCMC
+        #return new_param, try_model, attemp_jump, Jocobian
+        #for MCMC
+        #return None, None, False, None
+        pass
+
+    
 #=============================================
 #spectral fitting with RJCMC Class
 class VESPA_fit(object):

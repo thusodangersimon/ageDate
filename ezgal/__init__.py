@@ -20,9 +20,11 @@ astro_filter = src.astro_filter.astro_filter
 ezgal_light = src.ezgal_light.ezgal_light
 wrapper = src.wrapper.wrapper
 weight = src.weight.weight
+utils = src.utils
+sfhs = src.sfhs
 
 __all__ = ["model", "utils", "wrapper", "sfhs", "weight"]
-del src
+
 
 
 def interpolate( values, xs, models=None, key=None, return_wrapper=False ):
@@ -55,3 +57,40 @@ def interpolate( values, xs, models=None, key=None, return_wrapper=False ):
 
 	# return interpolated models
 	return wrapper( models, extra_data=xs, extra_name='interp' ).interpolate( 'interp', values, return_wrapper=return_wrapper )
+
+
+def add_meta_data_batch(infiles, outfile):
+    '''ezgal.add_meta_data( infile, outfile, model, metallicity, imf, sfh)
+
+    If a model does not come with meta data, this program will add it in.
+    model is refence name for model eg. bc03, miles ...
+    metallicity is metallicity of model spectra
+    imf is the inital mass funtion.
+    SFH tells if model is an ssp or other type
+
+    Returns Nonetype'''
+    from glob import glob
+    #get file list
+    if not outfile.endswith('/'):
+        outfile += '/'
+    if not infiles.endswith('/'):
+        infiles += '/'
+        
+    files = glob(infiles + '*.model')
+    for i in files:
+        temp_models = model(i)
+        if temp_models.has_meta_data:
+            continue
+        #get meta data from name
+        meta_data = {}
+        #remove path and other stuff
+        temp_name = i[i.rfind('/')+1:i.rfind('.')]
+        try:
+            meta_data['model'],meta_data['sfh'],junk,meta_data['met'],meta_data['imf'] = temp_name.split('_')
+        except ValueError:
+            #basti has 1 more alpha enhansment param wich i will put in
+            meta_data['model'],meta_data['sfh'],junk,meta_data['alpha'],junk,meta_data['met'],meta_data['imf'] = temp_name.split('_')
+        #save model in outfiles
+        temp_models.set_meta_data(meta_data)
+        temp_models.save_model(outfile + temp_name + '.model')
+        print "setting %s.model with meta data:"%temp_name,meta_data
