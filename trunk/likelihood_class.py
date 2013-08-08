@@ -38,7 +38,8 @@ import scipy.stats as stats_dist
 import multiprocessing as multi
 from itertools import izip
 from scipy.cluster.hierarchy import fcluster,linkage
-import os
+import os, sys
+np=nu
 
 class Example_lik_class(object):
 
@@ -51,6 +52,9 @@ class Example_lik_class(object):
 
         initalize class, can do whatever you want. User to define functions'''
         #return #whatever you want or optional
+        #needs to have the following as the right types
+        
+        #self.models = {'name of model':[param names or other junk],'name2':nu.asarray([junk])} #initalizes models
         pass
 
 
@@ -62,14 +66,14 @@ class Example_lik_class(object):
         #return up_dated_param 
         pass
 
-    def lik(self,param):
+    def lik(self,param,bins):
         '''(Example_lik_class, ndarray) -> float
         Calculates likelihood for input parameters. Outuputs log-likelyhood'''
         
         #return loglik
         pass
 
-    def prior(self,param):
+    def prior(self,param,bins):
         '''(Example_lik_class, ndarray) -> float
         Calculates log-probablity for prior'''
         #return logprior
@@ -159,6 +163,7 @@ class CV_Fit(object):
                 #if finished with section
                 break
         batch_file.close()
+        self.models = {'mcmc':[2+self._no_abn]}
             
     def proposal(self,mu,sigma):
         '''(Example_lik_class, ndarray,ndarray) -> ndarray
@@ -1182,7 +1187,408 @@ class Spectral_fit(object):
         #return new_param, try_model, attemp_jump, Jocobian
         #for MCMC
         #return None, None, False, None
+
+#=======UV source finder
+
+class UV_SOURCE(object):
+
+    '''exmaple class for use with RJCMCM or MCMC program, all methods are
+    required and inputs are required till the comma, and outputs are also
+    not mutable. The body of the class can be filled in to users delight'''
+
+    def __init__(self,):
+        '''(Example_lik_class,#user defined) -> NoneType or userdefined
+
+        initalize class, can do whatever you want. User to define functions'''
+        #imports from iniyan's program
+        import pyrap.tables
+        import scipy.constants as sc
+        #from math import log
+        from Timba import dmi
+        from Timba.Meq import meq
+        from Timba.Apps import meqserver
+        from Timba.TDL import Compile
+        from Timba.TDL import TDLOptions
+
+        #make globals into saved params
+        self._request #=?
+        self._ndomain #=?
+        self._data = None
+        self._mqs #=?
+
+        #initalize
+        # first time we're invoked, do startup and get data
+        # This starts a meqserver. Note how we pass the "-mt 2" option to run two threads.
+        # A proper pipeline script may want to get the value of "-mt" from its own arguments (sys.argv).
+        print "Starting meqserver"
+        mqs = meqserver.default_mqs(wait_init=10,extra=["-mt","16"]);
+        print "Loading config";
+        TDLOptions.config.read("tdlconf.profiles");
+        print "Compiling TDL script";
+        script = "mcmcsim.py";
+        mod,ns,msg = Compile.compile_file(self._mqs,script);
+
+        self._mqs.execute('VisDataMux',mod.mssel.create_io_request(),wait=True);
+        self._request = mqs.getnodestate("DT").request;
+        self._data = mqs.execute("DT",self._request,wait=True);
+
+
         
+
+    def call_meqtrees(params, hypothesis):
+        #global request,ndomain,data,mqs;
+
+        B = None;
+        lmn = None;
+        shape = None;
+      
+        # Specify l,m,n values in radians
+        # l = np.cos(dec) * np.sin(ra-ra0);
+        # m = np.sin(dec) * np.cos(dec0) - np.cos(dec) * np.sin(dec0) * np.cos(ra-ra0);
+
+        # Harcoded values for the phase centre - bad practice!!!
+        ra0 = 0.0; dec0 = 60.0 * deg2rad;
+
+        if hypothesis == 0:
+            B = np.array([[0.+0j,0],[0,0.]]);
+            lmn = np.array([0.,0,0]);
+            shape = np.array([0.,0,0]);
+
+        elif hypothesis == 1:
+            B = np.array([[[params[0],0.+0j],[0.+0j,params[0]]],[[params[3],0.+0j],[0.+0j,params[3]]]]);
+
+            l1 = np.cos(dec0+params[2]) * np.sin(params[1]);
+            m1 = np.sin(dec0+params[2]) * np.cos(dec0) - np.cos(dec0+params[2]) * np.sin(dec0) * np.cos(params[1]);
+            n1 = 0.0;
+            l2 = np.cos(dec0+params[5]) * np.sin(params[4]);
+            m2 = np.sin(dec0+params[5]) * np.cos(dec0) - np.cos(dec0+params[5]) * np.sin(dec0) * np.cos(params[4]);
+            n2 = 0.0;
+
+            lmn = np.array([[l1,m1,n1],[l2,m2,n2]]);
+
+            shape = np.array([[0.,0,0],[0.,0,0]]);
+    
+        elif hypothesis == 2:
+            B = np.array([[[params[0],0.+0j],[0.+0j,params[0]]]]);
+
+            l1 = np.cos(dec0+params[2]) * np.sin(params[1]);
+            m1 = np.sin(dec0+params[2]) * np.cos(dec0) - np.cos(dec0+params[2]) * np.sin(dec0) * np.cos(params[1]);
+            n1 = 0.0;
+            lmn = np.array([[l1,m1,n1]]);
+            shape = np.array([[params[4]*np.sin(params[3]),params[4]*np.cos(params[3]),float(params[5])/params[4]]]);
+
+        elif hypothesis == 3:
+            B = np.array([[[params[0],0.+0j],[0.+0j,params[0]]]]);
+
+            #l1 = np.cos(dec0+params[2]) * np.sin(params[1]);
+            #m1 = np.sin(dec0+params[2]) * np.cos(dec0) - np.cos(dec0+params[2]) * np.sin(dec0) * np.cos(params[1]);
+            l1=m1=n1 = 0.0;
+            lmn = np.array([[l1,m1,n1]]);
+
+            shape = np.array([[0.,0,0]]);
+
+        """print "B:\n",B
+        print "lmn:\n",lmn
+        print "shape:\n",shape
+        print "B:\n",type(B),len(B)
+        print "lmn:\n",type(lmn),len(lmn)
+        print "shape:\n",type(lmn),len(shape)"""
+          
+        mqs.setnodestate("BT0",dmi.record(value=B),sync=True);
+        mqs.setnodestate("lmnT0",dmi.record(value=lmn),sync=True);
+        mqs.setnodestate("shapeT0",dmi.record(value=shape),sync=True);
+
+        t0 = time.time();
+        mqs.clearcache("MT");
+        model = mqs.execute("MT",request,wait=True);
+        #print "model executed in",time.time()-t0,"s";
+    
+        #print "data: ",len(data.result.vellsets),len(data.result.vellsets[0]),len(data.result.vellsets[len(data.result.vellsets)-1])
+        #print "model: ",len(model.result.vellsets),len(model.result.vellsets[0]),len(model.result.vellsets[len(model.result.vellsets)-1])
+        #print data.result.vellsets
+        #print params[0], np.abs(data.result.vellsets[0].value[0][0]), np.abs(model.result.vellsets[0].value[0][0]) #, model.result.vellsets[0].value[0].shape #"""
+
+        return data, model
+
+    def proposal(self,mu,sigma):
+        '''(Example_lik_class, ndarray,ndarray) -> ndarray
+        Proposal distribution, draws steps for chain. Should use a symetric
+        distribution'''
+        
+        #return up_dated_param 
+        pass
+
+    def lik(self,param,bins):
+        '''(Example_lik_class, ndarray) -> float
+        Calculates likelihood for input parameters. Outuputs log-likelyhood'''
+        
+        #return loglik
+        #def myloglike(cube, ndim, nparams):
+        """
+        Simple chisq likelihood for straight-line fit (m=1,c=1)
+        
+        cube is the unit hypercube containing the current values of parameters
+        ndim is the number of dimensions of cube
+        nparams (>= ndim) allows extra derived parameters to be carried along
+        """
+        #Prior puts the parameters on the correct range
+        #params=[]
+        #for i in range(nparams):
+        #    params.append(cube[i])
+        #print params
+        #a=time.time()
+        data, model = self.call_meqtrees(params,bins)
+        #np.savetxt('dataarr.txt',data.result.vellsets[0].value);
+    
+        t0 = time.time();
+        chi2 = 0
+        ndata=0
+
+        # loop over arrays in data and model to form up chisq
+        for vd,vm in zip(data.result.vellsets,model.result.vellsets):
+            delta = vd.value-vm.value
+        #delta = np.abs(vd.value)-np.abs(vm.value)
+        #np.savetxt('deltaarr.txt',delta);
+        #ndata+=data.size
+        chi2 += (delta.real**2/sigma/sigma).sum() + (delta.imag**2/sigma/sigma).sum();
+        #chi2 += ((delta/sigma)**2.0).sum()
+
+        #print 'chi2',chi2,"in",time.time()-t0,"s"
+        #print "cubeval abs(data[0]) abs(model[0]) chi2\n"
+
+        loglike=-chi2/2.0 #- ndata*0.5*log(2.0*sc.pi*sigma**2.0)
+        #print params[0], data.result.vellsets[-1].value[0][0].real, model.result.vellsets[-1].value[0][0].real, vd.value[0][0].real, vm.value[0][0].real,   delta[0][0].real, chi2, loglike
+        #print params[0], np.abs(data.result.vellsets[-1].value[0][0]), np.abs(model.result.vellsets[-1].value[0][0]), np.abs(vd.value[0][0]), np.abs(vm.value[0][0]),  np.abs(delta[0][0]), delta[0][0].real, delta[0][0].imag, chi2, loglike
+        #print params[0], chi2, loglike    
+
+        return loglike
+
+    def prior(self,cube, hypothesis):
+        '''(Example_lik_class, ndarray) -> float
+        Calculates log-probablity for prior'''
+        #return logprior
+        """
+        This function just transforms parameters to the unit hypercube
+
+        cube is the unit hypercube containing the current values of parameters
+        ndim is the number of dimensions of cube
+        nparams (>= ndim) allows extra derived parameters to be carried along
+
+        You can use Priors from priors.py for convenience functions:
+
+        from priors import Priors
+        pri=Priors()
+        cube[0]=pri.UniformPrior(cube[0],x1,x2)
+        cube[1]=pri.GaussianPrior(cube[1],mu,sigma)
+        cube[2]=pri.DeltaFunctionPrior(cube[2],x1,anything_ignored)
+        """
+        #def myprior(cube, ndim, nparams):
+        #maxi=pi/180.0*200.0/3600.
+        #mini=-maxi
+        #for i in range(ndim):
+        #    cube[i] = cube[i] * (maxi-mini)+mini
+        logprior = 0.
+        
+        dxmin=-4.0; dxmax=+4.0; dymin=-4.0; dymax=+4.0 # arcsec
+        dxmin *= arcsec2rad;
+        dxmax *= arcsec2rad;
+        dymin *= arcsec2rad;
+        dymax *= arcsec2rad;
+
+        Smin=0.0; Smax=2.0 # Jy
+
+        # Need to convert RA, Dec to dra, ddec
+        #ra0 = 0.0; dec0 = 60.0; # user-specified (in degrees)
+        #ra0 = ra0 * deg2rad;
+        #dec0 = dec0 * deg2rad;
+        #ra = ra0 - cube[1]; dec = dec0 + cube[2];
+
+        # Model 0 (noise only) -- 3 params (all = 0.0)
+        if hypothesis == 0:
+            #not correct need to test if just noise
+            cube[0] = cube[0] * 0.0  # S0
+            cube[1] = cube[1] * 0.0  # dx0
+            cube[2] = cube[2] * 0.0  # dy0
+
+        # Model 1 (noise + source 1 + source 2) -- distinct position priors
+        elif hypothesis == 1:
+            #S
+            logprior += stats_dist.uniform.pdf([cube[0],cube[3]],Smin,(Smax-Smin)).sum()
+            #dx
+            logprior += stats_dist.uniform.pdf([cube[1],cube[4]],dxmin,(dxmax-dxmin)).sum()
+            #dy
+            logprior += stats_dist.uniform.pdf([cube[2],cube[5]],0,dymax).sum()
+            #cube[0] = cube[0] * (Smax-Smin)   + Smin   # S1
+            #cube[1] = cube[1] * (dxmax-dxmin) + dxmin  # dx1
+            #cube[2] = cube[2] * (dymax-0.0)   + 0.0    # dx2
+            #cube[3] = cube[3] * (Smax-Smin)   + Smin   # S2
+            #cube[4] = cube[4] * (dxmax-dxmin) + dxmin  # dx2
+            #cube[5] = cube[5] * (0.0-dymin)   + dymin  # dy2
+
+        # Model 2 (noise + source 3 [gaussian]) - Flux in Jy; Pos in ra/dec; PA
+        elif hypothesis == 2:
+            thetamin = 0.0 * deg2rad; thetamax = 180.0 * deg2rad;
+            e1min = 0.0; e1max = 10.0 * arcsec2rad;
+            e2min = 0.0; e2max = 10.0 * arcsec2rad;
+            """Smin = Smax = 0.993808;
+            thetamin = thetamax = 92.0 * deg2rad;
+            e1min = e1max = 7.0 * arcsec2rad;
+            e2min = e2max = 4.0 * arcsec2rad;"""
+
+            # Flux in Jy, angles in rad.
+            #S
+            logprior += stats_dist.uniform.pdf(cube[0],Smin,(Smax-Smin))
+            #dx
+            logprior += stats_dist.uniform.pdf(cube[1],dxmin,(dxmax-dxmin)).sum()
+            #dy
+            logprior += stats_dist.uniform.pdf(cube[2],dymin,(dymax-dymin)).sum()
+            #posn angle
+            logprior += stats_dist.uniform.pdf(cube[3],thetamin,(thetamax-thetamin)).sum()
+            #emaj
+            logprior += stats_dist.uniform.pdf(cube[4],e1min,(e1max-e1min) ).sum()
+            #emin
+            logprior += stats_dist.uniform.pdf(cube[5],e2min,(e2max-e2min)).sum()
+            #cube[0] = cube[0] * (Smax-Smin)   + Smin   # S3
+            #cube[1] = cube[1] * (dxmax-dxmin) + dxmin  # dx3
+            #cube[2] = cube[2] * (dymax-dymin) + dymin  # dy3
+            #cube[3] = cube[3] * (thetamax-thetamin) + thetamin  # posn angle
+            #cube[4] = cube[4] * (e1max-e1min)   + e1min   # emaj (e1)
+            #cube[5] = cube[5] * (e2max-e2min)   + e2min   # emin (e2)
+
+        # Model 3 (noise + source 1 [single atom] )
+        elif hypothesis == 3:
+            #Smax=Smin=5.0
+            dxmin=dxmax=dymin=dymax=0.0
+            #S
+            logprior += stats_dist.uniform.pdf(cube[0],Smin,(Smax-Smin)).sum()
+            #dx
+            logprior += stats_dist.uniform.pdf( cube[1],dxmin,(dxmax-dxmin)).sum()
+            #dy
+            logprior += stats_dist.uniform.pdf(cube[2],dymin,(dymax-dymin)).sum()
+            #cube[0] = cube[0] * (Smax-Smin)   + Smin   # S1
+            #cube[1] = cube[1] * (dxmax-dxmin) + dxmin  # dx1
+            #cube[2] = cube[2] * (dymax-dymin) + dymin  # dx1        
+            
+        else:
+            print '*** WARNING: Illegal hypothesis'
+            return -nu.inf
+
+        #print cube[0], cube[1],  cube[2],  cube[3], cube[4], cube[5]
+
+        return nu.sum(logprior)
+
+
+    def model_prior(self,model):
+        '''(Example_lik_class, any type) -> float
+        Calculates log-probablity prior for models. Not used in MCMC and
+        is optional in RJMCMC.'''
+        #return log_model
+        return 0.
+
+    def initalize_param(self, hypothesis):
+        '''(Example_lik_class, any type) -> ndarray, ndarray
+
+        Used to initalize all starting points for run of RJMCMC and MCMC.
+        outputs starting point and starting step size'''
+        #return init_param, init_step
+        if hypothesis == 1:
+            cube = nu.zeros(6)
+            step = nu.identity(6)
+            #S
+            cube[0],cube[3] = stats_dist.uniform.rvs(Smin,(Smax-Smin),2)
+            #dx
+            cube[1],cube[4] = stats_dist.uniform.rvs(dxmin,(dxmax-dxmin),2)
+            #dy
+            cube[2],cube[5] = stats_dist.uniform.rvs(0,dymax,2)
+            
+
+        # Model 2 (noise + source 3 [gaussian]) - Flux in Jy; Pos in ra/dec; PA
+        elif hypothesis == 2:
+            thetamin = 0.0 * deg2rad; thetamax = 180.0 * deg2rad;
+            e1min = 0.0; e1max = 10.0 * arcsec2rad;
+            e2min = 0.0; e2max = 10.0 * arcsec2rad;
+            """Smin = Smax = 0.993808;
+            thetamin = thetamax = 92.0 * deg2rad;
+            e1min = e1max = 7.0 * arcsec2rad;
+            e2min = e2max = 4.0 * arcsec2rad;"""
+            #make arrays
+            cube = nu.zeros(6)
+            step = nu.identity(6)
+            # Flux in Jy, angles in rad.
+            #S
+            logprior += stats_dist.uniform.pdf(cube[0],Smin,(Smax-Smin))
+            #dx
+            logprior += stats_dist.uniform.pdf(cube[1],dxmin,(dxmax-dxmin)).sum()
+            #dy
+            logprior += stats_dist.uniform.pdf(cube[2],dymin,(dymax-dymin)).sum()
+            #posn angle
+            logprior += stats_dist.uniform.pdf(cube[3],thetamin,(thetamax-thetamin)).sum()
+            #emaj
+            logprior += stats_dist.uniform.pdf(cube[4],e1min,(e1max-e1min) ).sum()
+            #emin
+            logprior += stats_dist.uniform.pdf(cube[5],e2min,(e2max-e2min)).sum()
+            #cube[0] = cube[0] * (Smax-Smin)   + Smin   # S3
+            #cube[1] = cube[1] * (dxmax-dxmin) + dxmin  # dx3
+            #cube[2] = cube[2] * (dymax-dymin) + dymin  # dy3
+            #cube[3] = cube[3] * (thetamax-thetamin) + thetamin  # posn angle
+            #cube[4] = cube[4] * (e1max-e1min)   + e1min   # emaj (e1)
+            #cube[5] = cube[5] * (e2max-e2min)   + e2min   # emin (e2)
+
+        # Model 3 (noise + source 1 [single atom] )
+        elif hypothesis == 3:
+            #Smax=Smin=5.0
+            dxmin=dxmax=dymin=dymax=0.0
+            #S
+            logprior += stats_dist.uniform.pdf(cube[0],Smin,(Smax-Smin)).sum()
+            #dx
+            logprior += stats_dist.uniform.pdf( cube[1],dxmin,(dxmax-dxmin)).sum()
+            #dy
+            logprior += stats_dist.uniform.pdf(cube[2],dymin,(dymax-dymin)).sum()
+            #cube[0] = cube[0] * (Smax-Smin)   + Smin   # S1
+            #cube[1] = cube[1] * (dxmax-dxmin) + dxmin  # dx1
+            #cube[2] = cube[2] * (dymax-dymin) + dymin  # dx1        
+
+
+        
+    def step_func(self,step_crit,param,step_size,model):
+        '''(Example_lik_class, float, ndarray or list, ndarray, any type) ->
+        ndarray
+
+        Evaluates step_criteria, with help of param and model and 
+        changes step size during burn-in perior. Outputs new step size
+        '''
+        #return new_step
+        if step_crit > .60:
+            step_size[model] *= 1.05
+        elif step_crit < .2 and nu.any(step_size[model].diagonal() > 10**-6):
+            step_size[model] /= 1.05
+        #cov matrix
+        if len(param) % 200 == 0 and len(param) > 0.:
+            temp = nu.cov(self.list_dict_to(param[-2000:]).T)
+            #make sure not stuck
+            if nu.any(temp.diagonal() > 10**-6):
+                step_size[model] = temp
+        
+        return step_size[model]
+
+
+    def birth_death(self,birth_rate, model, param):
+        '''(Example_lik_class, float, any type, dict(ndarray)) -> 
+           dict(ndarray), any type, bool, float
+
+        For RJMCMC only. Does between model move. Birth rate is probablity to
+        move from one model to another, models is current model and param is 
+        dict of all localtions in param space. 
+        Returns new param array with move updated, key for new model moving to,
+        whether of not to attempt model jump (False to make run as MCMC) and the
+        Jocobian for move.
+        '''
+        #for RJCMC
+        #return new_param, try_model, attemp_jump, Jocobian
+        #for MCMC
+        #return None, None, False, None
+        pass
+
 #######other functions
 
 #used for class_map
