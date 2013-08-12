@@ -30,7 +30,10 @@
 
 from Age_date import MC_func
 from Age_RJMCMC import *
-from mpi4py import MPI as mpi
+try:
+    from mpi4py import MPI as mpi
+except ImportError('Warrning: Not detecting mpi4py. No mpi will be avalible')
+    mpi = None
 import time as Time
 import cPickle as pik
 import csv
@@ -976,12 +979,22 @@ class Topologies(object):
 
     def Single(self):
         #Using mpi but want to run chains independantly
-        self.comm = mpi.COMM_SELF
-        self.size = self.comm.Get_size()
-        self.rank = self.comm.Get_rank()
-        self.comm_world = mpi.COMM_SELF
-        self.rank_world = self.comm_world.Get_rank()
-        self.size_world = self.comm_world.Get_size()
+        #if mpi is avalible
+        if not mpi is None:
+            self.comm = mpi.COMM_SELF
+            self.size = self.comm.Get_size()
+            self.rank = self.comm.Get_rank()
+            self.comm_world = mpi.COMM_SELF
+            self.rank_world = self.comm_world.Get_rank()
+            self.size_world = self.comm_world.Get_size()
+        else:
+            self.comm = None
+            self.size = 1
+            self.rank = 0
+            self.comm_world = None
+            self.rank_world = 0
+            self.size_world = 1
+
 
 
     def All(self):
@@ -1258,9 +1271,14 @@ class Topologies(object):
         self.global_iter = 0
         #number of workers to create
         #local_cpu = cpu_count()
-        comm = mpi.COMM_WORLD
-        size = comm.Get_size()
-        rank = comm.Get_rank()
+        if not mpi is None:
+            comm = mpi.COMM_WORLD
+            size = comm.Get_size()
+            rank = comm.Get_rank()
+        else:
+            comm = None
+            size = 1
+            rank = 0
         #commuication buffers
         #[(param,source),(chi,source)]
         self.buffer = []
@@ -1284,8 +1302,12 @@ class Topologies(object):
         elif top.lower() == 'single':
             self.Single()
         #print self.iter_stop
-        self.make_swarm()
-        self.init_sync_var()
+        try:
+            self.make_swarm()
+            self.init_sync_var()
+        except:
+            pass
+                
 
 if __name__ == '__main__':
     import Age_date as ag
