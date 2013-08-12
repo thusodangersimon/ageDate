@@ -1189,7 +1189,6 @@ class Spectral_fit(object):
         #return None, None, False, None
 
 #=======UV source finder
-
 class UV_SOURCE(object):
 
     '''exmaple class for use with RJCMCM or MCMC program, all methods are
@@ -1211,17 +1210,17 @@ class UV_SOURCE(object):
         from Timba.TDL import TDLOptions
 
         #make globals into saved params
-        self._request #=?
+        """self._request #=?
         self._ndomain #=?
         self._data = None
-        self._mqs #=?
+        self._mqs #=?"""
 
         #initalize
         # first time we're invoked, do startup and get data
         # This starts a meqserver. Note how we pass the "-mt 2" option to run two threads.
         # A proper pipeline script may want to get the value of "-mt" from its own arguments (sys.argv).
         print "Starting meqserver"
-        mqs = meqserver.default_mqs(wait_init=10,extra=["-mt","16"]);
+        self._mqs = meqserver.default_mqs(wait_init=10,extra=["-mt","16"]);
         print "Loading config";
         TDLOptions.config.read("tdlconf.profiles");
         print "Compiling TDL script";
@@ -1229,13 +1228,13 @@ class UV_SOURCE(object):
         mod,ns,msg = Compile.compile_file(self._mqs,script);
 
         self._mqs.execute('VisDataMux',mod.mssel.create_io_request(),wait=True);
-        self._request = mqs.getnodestate("DT").request;
-        self._data = mqs.execute("DT",self._request,wait=True);
+        self._request = self._mqs.getnodestate("DT").request;
+        self._data = self._mqs.execute("DT",self._request,wait=True);
 
 
         
 
-    def call_meqtrees(params, hypothesis):
+    def call_meqtrees(self, params, hypothesis):
         #global request,ndomain,data,mqs;
 
         B = None;
@@ -1294,13 +1293,13 @@ class UV_SOURCE(object):
         print "lmn:\n",type(lmn),len(lmn)
         print "shape:\n",type(lmn),len(shape)"""
           
-        mqs.setnodestate("BT0",dmi.record(value=B),sync=True);
-        mqs.setnodestate("lmnT0",dmi.record(value=lmn),sync=True);
-        mqs.setnodestate("shapeT0",dmi.record(value=shape),sync=True);
+        self._mqs.setnodestate("BT0",dmi.record(value=B),sync=True);
+        self._mqs.setnodestate("lmnT0",dmi.record(value=lmn),sync=True);
+        self._mqs.setnodestate("shapeT0",dmi.record(value=shape),sync=True);
 
         t0 = time.time();
-        mqs.clearcache("MT");
-        model = mqs.execute("MT",request,wait=True);
+        self._mqs.clearcache("MT");
+        model = self._mqs.execute("MT",request,wait=True);
         #print "model executed in",time.time()-t0,"s";
     
         #print "data: ",len(data.result.vellsets),len(data.result.vellsets[0]),len(data.result.vellsets[len(data.result.vellsets)-1])
@@ -1318,7 +1317,7 @@ class UV_SOURCE(object):
         #return up_dated_param 
         pass
 
-    def lik(self,param,bins):
+    def lik(self,cube, hypothesis):
         '''(Example_lik_class, ndarray) -> float
         Calculates likelihood for input parameters. Outuputs log-likelyhood'''
         
@@ -1337,12 +1336,12 @@ class UV_SOURCE(object):
         #    params.append(cube[i])
         #print params
         #a=time.time()
-        data, model = self.call_meqtrees(params,bins)
+        data, model = self.call_meqtrees(cube, hypothesis)
         #np.savetxt('dataarr.txt',data.result.vellsets[0].value);
     
         t0 = time.time();
-        chi2 = 0
-        ndata=0
+        chi2 = 0.
+        ndata = 0
 
         # loop over arrays in data and model to form up chisq
         for vd,vm in zip(data.result.vellsets,model.result.vellsets):
@@ -1356,7 +1355,7 @@ class UV_SOURCE(object):
         #print 'chi2',chi2,"in",time.time()-t0,"s"
         #print "cubeval abs(data[0]) abs(model[0]) chi2\n"
 
-        loglike=-chi2/2.0 #- ndata*0.5*log(2.0*sc.pi*sigma**2.0)
+        loglike = -chi2/2.0 #- ndata*0.5*log(2.0*sc.pi*sigma**2.0)
         #print params[0], data.result.vellsets[-1].value[0][0].real, model.result.vellsets[-1].value[0][0].real, vd.value[0][0].real, vm.value[0][0].real,   delta[0][0].real, chi2, loglike
         #print params[0], np.abs(data.result.vellsets[-1].value[0][0]), np.abs(model.result.vellsets[-1].value[0][0]), np.abs(vd.value[0][0]), np.abs(vm.value[0][0]),  np.abs(delta[0][0]), delta[0][0].real, delta[0][0].imag, chi2, loglike
         #print params[0], chi2, loglike    
@@ -1418,12 +1417,7 @@ class UV_SOURCE(object):
             logprior += stats_dist.uniform.pdf([cube[1],cube[4]],dxmin,(dxmax-dxmin)).sum()
             #dy
             logprior += stats_dist.uniform.pdf([cube[2],cube[5]],0,dymax).sum()
-            #cube[0] = cube[0] * (Smax-Smin)   + Smin   # S1
-            #cube[1] = cube[1] * (dxmax-dxmin) + dxmin  # dx1
-            #cube[2] = cube[2] * (dymax-0.0)   + 0.0    # dx2
-            #cube[3] = cube[3] * (Smax-Smin)   + Smin   # S2
-            #cube[4] = cube[4] * (dxmax-dxmin) + dxmin  # dx2
-            #cube[5] = cube[5] * (0.0-dymin)   + dymin  # dy2
+       
 
         # Model 2 (noise + source 3 [gaussian]) - Flux in Jy; Pos in ra/dec; PA
         elif hypothesis == 2:
@@ -1437,7 +1431,7 @@ class UV_SOURCE(object):
 
             # Flux in Jy, angles in rad.
             #S
-            logprior += stats_dist.uniform.pdf(cube[0],Smin,(Smax-Smin))
+            logprior += stats_dist.uniform.pdf(cube[0],Smin,(Smax-Smin)).sum()
             #dx
             logprior += stats_dist.uniform.pdf(cube[1],dxmin,(dxmax-dxmin)).sum()
             #dy
@@ -1445,15 +1439,10 @@ class UV_SOURCE(object):
             #posn angle
             logprior += stats_dist.uniform.pdf(cube[3],thetamin,(thetamax-thetamin)).sum()
             #emaj
-            logprior += stats_dist.uniform.pdf(cube[4],e1min,(e1max-e1min) ).sum()
+            logprior += stats_dist.uniform.pdf(cube[4],e1min,(e1max-e1min)).sum()
             #emin
             logprior += stats_dist.uniform.pdf(cube[5],e2min,(e2max-e2min)).sum()
-            #cube[0] = cube[0] * (Smax-Smin)   + Smin   # S3
-            #cube[1] = cube[1] * (dxmax-dxmin) + dxmin  # dx3
-            #cube[2] = cube[2] * (dymax-dymin) + dymin  # dy3
-            #cube[3] = cube[3] * (thetamax-thetamin) + thetamin  # posn angle
-            #cube[4] = cube[4] * (e1max-e1min)   + e1min   # emaj (e1)
-            #cube[5] = cube[5] * (e2max-e2min)   + e2min   # emin (e2)
+          
 
         # Model 3 (noise + source 1 [single atom] )
         elif hypothesis == 3:
@@ -1465,9 +1454,7 @@ class UV_SOURCE(object):
             logprior += stats_dist.uniform.pdf( cube[1],dxmin,(dxmax-dxmin)).sum()
             #dy
             logprior += stats_dist.uniform.pdf(cube[2],dymin,(dymax-dymin)).sum()
-            #cube[0] = cube[0] * (Smax-Smin)   + Smin   # S1
-            #cube[1] = cube[1] * (dxmax-dxmin) + dxmin  # dx1
-            #cube[2] = cube[2] * (dymax-dymin) + dymin  # dx1        
+                 
             
         else:
             print '*** WARNING: Illegal hypothesis'
@@ -1516,39 +1503,32 @@ class UV_SOURCE(object):
             step = nu.identity(6)
             # Flux in Jy, angles in rad.
             #S
-            logprior += stats_dist.uniform.pdf(cube[0],Smin,(Smax-Smin))
+            cube[0] = stats_dist.uniform.rvs(Smin,(Smax-Smin))
             #dx
-            logprior += stats_dist.uniform.pdf(cube[1],dxmin,(dxmax-dxmin)).sum()
+            cube[1] = stats_dist.uniform.rvs(dxmin,(dxmax-dxmin))
             #dy
-            logprior += stats_dist.uniform.pdf(cube[2],dymin,(dymax-dymin)).sum()
+            cube[2] = stats_dist.uniform.rvs(dymin,(dymax-dymin))
             #posn angle
-            logprior += stats_dist.uniform.pdf(cube[3],thetamin,(thetamax-thetamin)).sum()
+            cube[3] = stats_dist.uniform.rvs(thetamin,(thetamax-thetamin))
             #emaj
-            logprior += stats_dist.uniform.pdf(cube[4],e1min,(e1max-e1min) ).sum()
+            cube[4] = stats_dist.uniform.rvs(e1min,(e1max-e1min))
             #emin
-            logprior += stats_dist.uniform.pdf(cube[5],e2min,(e2max-e2min)).sum()
-            #cube[0] = cube[0] * (Smax-Smin)   + Smin   # S3
-            #cube[1] = cube[1] * (dxmax-dxmin) + dxmin  # dx3
-            #cube[2] = cube[2] * (dymax-dymin) + dymin  # dy3
-            #cube[3] = cube[3] * (thetamax-thetamin) + thetamin  # posn angle
-            #cube[4] = cube[4] * (e1max-e1min)   + e1min   # emaj (e1)
-            #cube[5] = cube[5] * (e2max-e2min)   + e2min   # emin (e2)
+            cube[5] = stats_dist.uniform.rvs(e2min,(e2max-e2min))
 
         # Model 3 (noise + source 1 [single atom] )
         elif hypothesis == 3:
             #Smax=Smin=5.0
+            cube = nu.zeros(3)
+            step = nu.identity(3)
             dxmin=dxmax=dymin=dymax=0.0
             #S
-            logprior += stats_dist.uniform.pdf(cube[0],Smin,(Smax-Smin)).sum()
+            cube[0] = stats_dist.uniform.rvs(Smin,(Smax-Smin))
             #dx
-            logprior += stats_dist.uniform.pdf( cube[1],dxmin,(dxmax-dxmin)).sum()
+            cube[1] = stats_dist.uniform.rvs(dxmin,(dxmax-dxmin))
             #dy
-            logprior += stats_dist.uniform.pdf(cube[2],dymin,(dymax-dymin)).sum()
-            #cube[0] = cube[0] * (Smax-Smin)   + Smin   # S1
-            #cube[1] = cube[1] * (dxmax-dxmin) + dxmin  # dx1
-            #cube[2] = cube[2] * (dymax-dymin) + dymin  # dx1        
+            cube[2] = stats_dist.uniform.rvs(dymin,(dymax-dymin))
 
-
+        return cube
         
     def step_func(self,step_crit,param,step_size,model):
         '''(Example_lik_class, float, ndarray or list, ndarray, any type) ->
@@ -1588,6 +1568,7 @@ class UV_SOURCE(object):
         #for MCMC
         #return None, None, False, None
         pass
+
 
 #######other functions
 
