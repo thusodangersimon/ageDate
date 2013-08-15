@@ -596,6 +596,9 @@ def LOSVD(model, param, wave_range, convlve='python'):
     #resample specturm so resolution is same at all places
     wave_range = nu.array(wave_range)/(1. + tparam[1]) - [100, -100]
     index = nu.searchsorted(model['wave'], [wave_range[0], wave_range[1]])
+    #if not in range
+    if index[1] == len(model['wave']):
+        index[1] -= 1
     try:
         #calculate resolution
        wave_diff = nu.diff(model['wave'][index[0]:index[1]]).min()
@@ -603,7 +606,7 @@ def LOSVD(model, param, wave_range, convlve='python'):
        #model and data range are off
        return tmodel
     wave = nu.arange(model['wave'][index[0]], model['wave'][index[1]], wave_diff)
-    #print wave.min(),wave.max(),redshift(wave[[0,-1]],tparam[1])
+    
     #convolve individual spectra
     for i in model.keys():
         if i == 'wave':

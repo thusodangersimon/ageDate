@@ -32,7 +32,7 @@ from Age_date import MC_func
 from Age_RJMCMC import *
 try:
     from mpi4py import MPI as mpi
-except ImportError('Warrning: Not detecting mpi4py. No mpi will be avalible')
+except ImportError('Warrning: Not detecting mpi4py. No mpi will be avalible'):
     mpi = None
 import time as Time
 import cPickle as pik

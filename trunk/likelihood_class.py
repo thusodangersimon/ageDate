@@ -1566,8 +1566,8 @@ class UV_SOURCE(object):
         #for RJCMC
         #return new_param, try_model, attemp_jump, Jocobian
         #for MCMC
-        #return None, None, False, None
-        pass
+        return None, None, False, None
+        
 
 
 #######other functions
