@@ -424,6 +424,10 @@ class VESPA_fit(object):
                 i+=4
         #gal lengths must be positve
         out['gal'][:,0] = nu.abs(out['gal'][:,0])
+        #chech if only 1 metalicity
+        if len(self._metal_unq) == 1:
+            #set all metalicites to only value
+            out['gal'][:,2] = nu.copy(self._metal_unq)
 
         return out
         
@@ -491,8 +495,10 @@ class VESPA_fit(object):
             out += stats_dist.uniform.logpdf(i[0],0.,self._age_unq.ptp())
             #age
             out += stats_dist.uniform.logpdf(i[1],self._age_unq.min(),self._age_unq.ptp())
-            #metals 
-            out += stats_dist.uniform.logpdf(i[2],self._metal_unq.min(),self._metal_unq.ptp())
+            #metals
+            if len(self._metal_unq) > 1:
+                #if has metal range
+                out += stats_dist.uniform.logpdf(i[2],self._metal_unq.min(),self._metal_unq.ptp())
             #weight
             out += stats_dist.uniform.logpdf(i[3], -300, 500)
         #dust
@@ -545,8 +551,11 @@ class VESPA_fit(object):
 
         #make coorrect shape
         out['gal'] = self._make_square({model:out['gal']},model)
-        #make numpy record array
-        
+        #check if only 1 metalicity
+        if len(self._metal_unq) == 1:
+            #set all metalicites to only value
+            out['gal'][:,2] = nu.copy(self._metal_unq)
+            
         return out, sigma
 
         
