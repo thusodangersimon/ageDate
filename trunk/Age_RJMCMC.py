@@ -131,7 +131,7 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
     #profiling
     t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm = [],[],[],[],[],[],[],[],[] 
     while option.iter_stop:
-        if T_cuurent[bins] % 201 == 0:
+        if T_cuurent[bins] % 501 == 0:
             show = ('acpt = %.2f,log lik = %e, bins = %s, steps = %i,burnin iter= %i'
                     %(acept_rate[bins][-1],chi[bins][-1],bins, option.current,T_cuurent[bins]))
             print show
@@ -203,7 +203,7 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
                 #likelihoods
                 rj_a = (tchi - chi[bins][-1])
                 #model priors
-                rj_a += 0 #uniform
+                rj_a += (fun.model_prior(temp_bins) - fun.model_prior(bins))
                 trans_moves += 1
                 #simulated aneeling 
                 rj_a /= SA(trans_moves,50,abs(chi[bins][0]),T_stop)

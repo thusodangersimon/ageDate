@@ -285,7 +285,8 @@ All terms are logrythmic.
         if not nu.any(nu.isfinite(ssp[str(i)])):
             continue
         inters.append(ssp[str(i)])
-    if len(inters) == 0:
+    #check if any arrays are bad
+    if len(inters) == 0 or len(inters) != len(ages):
         return spect[:,0] + nu.inf
     return simps(inters, ages, axis=0)/float(len(ages))
 	#return new ssp

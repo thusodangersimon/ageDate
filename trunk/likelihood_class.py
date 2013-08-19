@@ -521,8 +521,14 @@ class VESPA_fit(object):
         '''(Example_lik_class, any type) -> float
         Calculates log-probablity prior for models. Not used in MCMC and
         is optional in RJMCMC.'''
-        #return log_model
-        return 0.
+        #peak around 5 bins with heavy tail
+        #can't allow for -inf
+        out = stats_dist.maxwell.logpdf(int(model),2,3)+1
+        if nu.isfinite(out):
+            return out
+        else:
+            return -7.78061839
+        #return stats_dist.maxwell.logpdf(int(model),2,3)+1
 
     def initalize_param(self,model):
         '''(Example_lik_class, any type) -> ndarray, ndarray
