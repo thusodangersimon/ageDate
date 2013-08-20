@@ -367,7 +367,7 @@ class VESPA_fit(object):
         '''
 		#save length and mean age they don't change  self._multi_block
         self._sigma = nu.copy(sigma)
-        self._mu = nu.copy(Mu)
+        self._mu = Mu.copy()
         #extract out of dict
         
         mu = nu.hstack([i for j in self._key_order for i in Mu[j] ])
@@ -391,12 +391,16 @@ class VESPA_fit(object):
                 #self._hist[bins] = []
             #update params to change correlated params
             if len(self._multi_block_param[bins]) % 200 == 0:
+                
                 if int(bins) > 3:
                     self._multi_block_index[bins] = self.cov_sort(
                         self._multi_block_param[bins], int(bins))
                 else:
                     self._multi_block_index[bins] = self.cov_sort(
                         self._multi_block_param[bins], 3)
+                #if multiblock not working make random block
+                if nu.unique(self._multi_block_index[bins]).size == 1:
+                    self._multi_block_index[bins] = nu.random.choice(range(3),self._multi_block_index[bins].size)
             #set all non-changing params to original
             if self._multi_block_i > self._multi_block_index[bins].max():
                 self._multi_block_i = 1
@@ -914,10 +918,15 @@ class VESPA_fit(object):
         Sigma = nu.corrcoef(p.T)
         #find nans and stuff and replace with 0's
         Sigma[~nu.isfinite(Sigma)] = 0
+        #if all values are now 0
         #clusters by their correlation
         z = linkage(Sigma,'single','correlation')
         #returns which cluster each param belongs to
-        clusters = fcluster(z,k,'maxclust')
+        try:
+            clusters = fcluster(z,k,'maxclust')
+        except ValueError:
+            #failed to run successfully
+            return nu.zeros(Sigma.shape[0])
         '''#sort clusters into indexs
         loc = []
         for i in range(k):
