@@ -62,7 +62,10 @@ class memoized(object):
     def __call__(self, *args):
       #works different for different functions
       if self.func.__name__ == 'gauss1':
-        arg = str(args[1])
+        arg = ''
+        for i in args:
+          arg+=str(i)
+        #arg = str(args[1])
         if arg in self.cache:
           return self.cache[arg]
         else:
