@@ -533,7 +533,7 @@ def dust(param, model):
             model[str(i)] *= T_ism
     return model
 
-@memoized
+#@memoized
 def f_dust(tau): 
     '''(ndarray) -> ndarray
     Dust extinction functin'''
@@ -696,7 +696,7 @@ def convolve_python(x, y, losvd_param, option='rebin'):
       #t.append(len(k))
    return  ys
 
-@memoized
+#@memoized
 def gauss1(diff_wave,  wave_current,  sigma,  h3,  h4):
    '''inline gauss(nu.ndarray diff_wave, float wave_current float sigma, float h3, float h4)
 	Returns value of gaussian-hermite function normalized to area = 1'''
