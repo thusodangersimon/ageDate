@@ -39,6 +39,18 @@ import multiprocessing as multi
 from itertools import izip
 from scipy.cluster.hierarchy import fcluster,linkage
 import os, sys
+#meqtrees stuff
+try:
+    import pyrap.tables
+    import scipy.constants as sc
+    from Timba import dmi
+    from Timba.Meq import meq
+    from Timba.Apps import meqserver
+    from Timba.TDL import Compile
+    from Timba.TDL import TDLOptions
+except ImportError:
+    pass
+
 np=nu
 
 class Example_lik_class(object):
@@ -1219,27 +1231,11 @@ class UV_SOURCE(object):
     '''exmaple class for use with RJCMCM or MCMC program, all methods are
     required and inputs are required till the comma, and outputs are also
     not mutable. The body of the class can be filled in to users delight'''
-
-    def __init__(self,):
+    def __init__(self,script):
         '''(Example_lik_class,#user defined) -> NoneType or userdefined
 
         initalize class, can do whatever you want. User to define functions'''
-        #imports from iniyan's program
-        import pyrap.tables
-        import scipy.constants as sc
-        #from math import log
-        from Timba import dmi
-        from Timba.Meq import meq
-        from Timba.Apps import meqserver
-        from Timba.TDL import Compile
-        from Timba.TDL import TDLOptions
-
-        #make globals into saved params
-        """self._request #=?
-        self._ndomain #=?
-        self._data = None
-        self._mqs #=?"""
-
+        
         #initalize
         # first time we're invoked, do startup and get data
         # This starts a meqserver. Note how we pass the "-mt 2" option to run two threads.
@@ -1249,14 +1245,16 @@ class UV_SOURCE(object):
         print "Loading config";
         TDLOptions.config.read("tdlconf.profiles");
         print "Compiling TDL script";
-        script = "mcmcsim.py";
+        #script = "mcmcsim.py";
         mod,ns,msg = Compile.compile_file(self._mqs,script);
 
-        self._mqs.execute('VisDataMux',mod.mssel.create_io_request(),wait=True);
-        self._request = self._mqs.getnodestate("DT").request;
+        self._mqs.execute('VisDataMux',mod.mssel.create_io_request(),wait=True)
+        self._request = self._mqs.getnodestate("DT").request
         self._data = self._mqs.execute("DT",self._request,wait=True);
-
-
+        #models avalible
+        self.models = {'3':None}
+        #multiblock for poor performance
+        self._multi_block = False
         
 
     def call_meqtrees(self, params, hypothesis):
@@ -1265,12 +1263,14 @@ class UV_SOURCE(object):
         B = None;
         lmn = None;
         shape = None;
+        hypothesis = int(hypothesis)
       
         # Specify l,m,n values in radians
         # l = np.cos(dec) * np.sin(ra-ra0);
         # m = np.sin(dec) * np.cos(dec0) - np.cos(dec) * np.sin(dec0) * np.cos(ra-ra0);
 
         # Harcoded values for the phase centre - bad practice!!!
+        deg2rad = sc.pi / 180.0;
         ra0 = 0.0; dec0 = 60.0 * deg2rad;
 
         if hypothesis == 0:
@@ -1306,8 +1306,8 @@ class UV_SOURCE(object):
 
             #l1 = np.cos(dec0+params[2]) * np.sin(params[1]);
             #m1 = np.sin(dec0+params[2]) * np.cos(dec0) - np.cos(dec0+params[2]) * np.sin(dec0) * np.cos(params[1]);
-            l1=m1=n1 = 0.0;
-            lmn = np.array([[l1,m1,n1]]);
+            #l1=m1=n1 = 0.0;
+            #lmn = np.array([[l1,m1,n1]]);
 
             shape = np.array([[0.,0,0]]);
 
@@ -1319,20 +1319,14 @@ class UV_SOURCE(object):
         print "shape:\n",type(lmn),len(shape)"""
           
         self._mqs.setnodestate("BT0",dmi.record(value=B),sync=True);
-        self._mqs.setnodestate("lmnT0",dmi.record(value=lmn),sync=True);
-        self._mqs.setnodestate("shapeT0",dmi.record(value=shape),sync=True);
+        #self._mqs.setnodestate("lmnT0",dmi.record(value=lmn),sync=True);
+        #self._mqs.setnodestate("shapeT0",dmi.record(value=shape),sync=True);
 
-        t0 = time.time();
+        #t0 = time.time();
         self._mqs.clearcache("MT");
-        model = self._mqs.execute("MT",request,wait=True);
-        #print "model executed in",time.time()-t0,"s";
-    
-        #print "data: ",len(data.result.vellsets),len(data.result.vellsets[0]),len(data.result.vellsets[len(data.result.vellsets)-1])
-        #print "model: ",len(model.result.vellsets),len(model.result.vellsets[0]),len(model.result.vellsets[len(model.result.vellsets)-1])
-        #print data.result.vellsets
-        #print params[0], np.abs(data.result.vellsets[0].value[0][0]), np.abs(model.result.vellsets[0].value[0][0]) #, model.result.vellsets[0].value[0].shape #"""
-
-        return data, model
+        model = self._mqs.execute("MT",self._request,wait=True);
+        
+        return model
 
     def proposal(self,mu,sigma):
         '''(Example_lik_class, ndarray,ndarray) -> ndarray
@@ -1340,7 +1334,8 @@ class UV_SOURCE(object):
         distribution'''
         
         #return up_dated_param 
-        pass
+        out = nu.random.multivariate_normal(mu,sigma)
+        return out
 
     def lik(self,cube, hypothesis):
         '''(Example_lik_class, ndarray) -> float
@@ -1355,39 +1350,23 @@ class UV_SOURCE(object):
         ndim is the number of dimensions of cube
         nparams (>= ndim) allows extra derived parameters to be carried along
         """
-        #Prior puts the parameters on the correct range
-        #params=[]
-        #for i in range(nparams):
-        #    params.append(cube[i])
-        #print params
-        #a=time.time()
-        data, model = self.call_meqtrees(cube, hypothesis)
-        #np.savetxt('dataarr.txt',data.result.vellsets[0].value);
-    
-        t0 = time.time();
-        chi2 = 0.
+        
+        model = self.call_meqtrees(cube[hypothesis], hypothesis)
+        
+        sigma = 0.01
+        #chi2 = 0.
         ndata = 0
 
         # loop over arrays in data and model to form up chisq
-        for vd,vm in zip(data.result.vellsets,model.result.vellsets):
-            delta = vd.value-vm.value
-        #delta = np.abs(vd.value)-np.abs(vm.value)
-        #np.savetxt('deltaarr.txt',delta);
-        #ndata+=data.size
-        chi2 += (delta.real**2/sigma/sigma).sum() + (delta.imag**2/sigma/sigma).sum();
-        #chi2 += ((delta/sigma)**2.0).sum()
+        for vd,vm in zip(self._data.result.vellsets,model.result.vellsets):
+            delta = vd.value - vm.value
+        
+        chi2 = (delta.real**2/sigma**2).sum() + (delta.imag**2/sigma**2).sum()
+                
+         
+        return -chi2
 
-        #print 'chi2',chi2,"in",time.time()-t0,"s"
-        #print "cubeval abs(data[0]) abs(model[0]) chi2\n"
-
-        loglike = -chi2/2.0 #- ndata*0.5*log(2.0*sc.pi*sigma**2.0)
-        #print params[0], data.result.vellsets[-1].value[0][0].real, model.result.vellsets[-1].value[0][0].real, vd.value[0][0].real, vm.value[0][0].real,   delta[0][0].real, chi2, loglike
-        #print params[0], np.abs(data.result.vellsets[-1].value[0][0]), np.abs(model.result.vellsets[-1].value[0][0]), np.abs(vd.value[0][0]), np.abs(vm.value[0][0]),  np.abs(delta[0][0]), delta[0][0].real, delta[0][0].imag, chi2, loglike
-        #print params[0], chi2, loglike    
-
-        return loglike
-
-    def prior(self,cube, hypothesis):
+    def prior(self,cube1, hypothesis):
         '''(Example_lik_class, ndarray) -> float
         Calculates log-probablity for prior'''
         #return logprior
@@ -1406,12 +1385,11 @@ class UV_SOURCE(object):
         cube[1]=pri.GaussianPrior(cube[1],mu,sigma)
         cube[2]=pri.DeltaFunctionPrior(cube[2],x1,anything_ignored)
         """
-        #def myprior(cube, ndim, nparams):
-        #maxi=pi/180.0*200.0/3600.
-        #mini=-maxi
-        #for i in range(ndim):
-        #    cube[i] = cube[i] * (maxi-mini)+mini
+        
         logprior = 0.
+        hypothesis = int(hypothesis);
+        deg2rad = sc.pi / 180.0;
+        arcsec2rad = sc.pi / 180.0 / 3600.0;
         
         dxmin=-4.0; dxmax=+4.0; dymin=-4.0; dymax=+4.0 # arcsec
         dxmin *= arcsec2rad;
@@ -1420,13 +1398,13 @@ class UV_SOURCE(object):
         dymax *= arcsec2rad;
 
         Smin=0.0; Smax=2.0 # Jy
-
+        cube = cube1[str(hypothesis)]
         # Need to convert RA, Dec to dra, ddec
         #ra0 = 0.0; dec0 = 60.0; # user-specified (in degrees)
         #ra0 = ra0 * deg2rad;
         #dec0 = dec0 * deg2rad;
         #ra = ra0 - cube[1]; dec = dec0 + cube[2];
-
+        
         # Model 0 (noise only) -- 3 params (all = 0.0)
         if hypothesis == 0:
             #not correct need to test if just noise
@@ -1482,10 +1460,8 @@ class UV_SOURCE(object):
                  
             
         else:
-            print '*** WARNING: Illegal hypothesis'
+            #print '*** WARNING: Illegal hypothesis'
             return -nu.inf
-
-        #print cube[0], cube[1],  cube[2],  cube[3], cube[4], cube[5]
 
         return nu.sum(logprior)
 
@@ -1502,6 +1478,20 @@ class UV_SOURCE(object):
 
         Used to initalize all starting points for run of RJMCMC and MCMC.
         outputs starting point and starting step size'''
+
+        hypothesis = int(hypothesis);
+        sigma=0.01 #error on each visibility
+        deg2rad = sc.pi / 180.0;
+        arcsec2rad = sc.pi / 180.0 / 3600.0;
+
+        dxmin=-4.0; dxmax=+4.0; dymin=-4.0; dymax=+4.0 # arcsec
+        dxmin *= arcsec2rad;
+        dxmax *= arcsec2rad;
+        dymin *= arcsec2rad;
+        dymax *= arcsec2rad;
+
+        Smin=0.0; Smax=2.0 # Jy
+
         #return init_param, init_step
         if hypothesis == 1:
             cube = nu.zeros(6)
@@ -1553,7 +1543,7 @@ class UV_SOURCE(object):
             #dy
             cube[2] = stats_dist.uniform.rvs(dymin,(dymax-dymin))
 
-        return cube
+        return cube,step
         
     def step_func(self,step_crit,param,step_size,model):
         '''(Example_lik_class, float, ndarray or list, ndarray, any type) ->
@@ -1568,11 +1558,11 @@ class UV_SOURCE(object):
         elif step_crit < .2 and nu.any(step_size[model].diagonal() > 10**-6):
             step_size[model] /= 1.05
         #cov matrix
-        if len(param) % 200 == 0 and len(param) > 0.:
+        '''if len(param) % 200 == 0 and len(param) > 0.:
             temp = nu.cov(self.list_dict_to(param[-2000:]).T)
             #make sure not stuck
             if nu.any(temp.diagonal() > 10**-6):
-                step_size[model] = temp
+                step_size[model] = temp'''
         
         return step_size[model]
 
@@ -1591,9 +1581,7 @@ class UV_SOURCE(object):
         #for RJCMC
         #return new_param, try_model, attemp_jump, Jocobian
         #for MCMC
-        return None, None, False, None
-        
-
+        return param, None, False, None
 
 #######other functions
 
