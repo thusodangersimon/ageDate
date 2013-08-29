@@ -38,7 +38,7 @@ import scipy.stats as stats_dist
 import multiprocessing as multi
 from itertools import izip
 from scipy.cluster.hierarchy import fcluster,linkage
-import os, sys
+import os, sys, subprocess
 #meqtrees stuff
 try:
     import pyrap.tables
@@ -67,6 +67,7 @@ class Example_lik_class(object):
         #needs to have the following as the right types
         
         #self.models = {'name of model':[param names or other junk],'name2':nu.asarray([junk])} #initalizes models
+        #self._multi_block = False
         pass
 
 
@@ -132,8 +133,8 @@ class Example_lik_class(object):
         #for RJCMC
         #return new_param, try_model, attemp_jump, Jocobian
         #for MCMC
-        #return None, None, False, None
-        pass
+        return param, None, False, None
+        #pass
 
 #===========================================    
 #catacysmic varible fitting
@@ -142,7 +143,7 @@ class CV_Fit(object):
     '''Fits cv spectrum using fortran codes to generate model spectra.
     Runs with only MCMC'''
 
-    def __init__(self,data,model_name='thuso',spec_path='/home/thuso/Phd/other_codes/Valerio'):
+    def __init__(self,data,model_name='thuso',spec_path='/home/thuso/Phd/other_codes/Valerio',convolution_path='/home/thuso/Phd/other_codes/Valerio/thuso.dat'):
         '''(Example_lik_class,#user defined) -> NoneType or userdefined
 
         initalize class, can do whatever you want. User to define functions'''
@@ -155,6 +156,21 @@ class CV_Fit(object):
         #make temp dir
         if not os.path.exists('temp/'):
             os.mkdir('temp/')
+        #change name of output in first line
+        os.popen('cp '+convolution_path + ' temp/%i.dat'%os.getpid())
+        dat = open('temp/%i.dat'%os.getpid(),'rw+')
+        dat_txt = []
+        for i in dat:
+            dat_txt.append(i)
+        #change first line to pid.spec
+        dat.seek(0)
+        j = " 'fort.7'   'fort.17'    '%i.spec' \n"%os.getpid()
+        dat.write(j)
+        for i in dat_txt[1:]:
+            dat.write(i)
+        dat.close()
+        #copy other config files to path
+        os.popen('cp fort* temp/')
         batch_file = open('temp/'+self.conf_file_name,'wr+')
         self.org_file = []
         for i in temp:
@@ -175,24 +191,26 @@ class CV_Fit(object):
                 #if finished with section
                 break
         batch_file.close()
-        self.models = {'mcmc':[2+self._no_abn]}
+        self.models = {'1':[2+self._no_abn]}
             
     def proposal(self,mu,sigma):
         '''(Example_lik_class, ndarray,ndarray) -> ndarray
         Proposal distribution, draws steps for chain. Should use a symetric
         distribution'''
         
-        #return up_dated_param 
-        pass
+        #return up_dated_param
+        out = nu.random.multivariate_normal(mu,sigma)
+        
+        return out
 
-    def lik(self,param):
+    def lik(self,param,bins):
         '''(Example_lik_class, ndarray) -> float
         Calculates likelihood for input parameters. Outuputs log-likelyhood'''
         #param = [T,g,abn...]
         #overwrite new param to temp file
         batch_file = open(self.temp_model,'wr+')
         #set temp, g
-        batch_file.write(' %2.1f   %2.1f\n' %(param[0],param[1]))
+        batch_file.write(' %2.1f   %2.1f\n' %(param[bins][0],param[bins][1]))
         #write to abn
         i = 1
         while self.org_file[i] != '* mode abn modpf\n':
@@ -214,7 +232,7 @@ class CV_Fit(object):
                         #still not a letter?
                         adn = adn.split()[-1].replace('!','')
                 #write
-                batch_file.write('2 %1.1f 0\t! %s\n'%(param[j],adn))
+                batch_file.write('2 %1.1f 0\t! %s\n'%(param[bins][j],adn))
                 j += 1
             elif k.startswith('*'):
                 #if finished with section
@@ -226,12 +244,30 @@ class CV_Fit(object):
         for k in range(i+ii,len(self.org_file)):
             batch_file.write(self.org_file[k])
         batch_file.close()
-        #call Tl on Tl path
-        #os.popen()
-        #return loglik
+        #call Tl for temp file
+        out = subprocess.call(['./Tl temp/'+ self.conf_file_name[:-2]],shell=True)
+        #check if ran successfully
+        if out != 0:
+            return -nu.inf
+        #call synspec
+        out = subprocess.call(['./Syn temp/'+ self.conf_file_name[:-2]],shell=True)
+        if out != 0:
+            return -nu.inf
+        #make spectrum
+        out = subprocess.call(['./Rot temp/'+self.conf_file_name[:-2]],shell=True)
+        if out != 0:
+            return -nu.inf
+        #load new spect and calculate likelyhood
+        try:
+            model = nu.loadtxt('%i.spec'%os.getpid())
+        except IOError:
+            return -nu.inf
+        #calc likelyhood
+        loglik = stats_dist.norm.logpdf(model[:,1],self.data[:,1]).sum()
+        return loglik
         
 
-    def prior(self,param):
+    def prior(self,param,bins):
         '''(Example_lik_class, ndarray) -> float
         Calculates log-probablity for prior'''
         #return logprior
@@ -239,29 +275,36 @@ class CV_Fit(object):
         #param = [T,g,abn...]
         #uniform priors
         #T prior
-        out += stats_dist.uniform.logpdf(param[0],2*10**4,4*10**4)
+        out += stats_dist.uniform.logpdf(param[bins][0],2*10**4,4*10**4)
         #g
-        out += stats_dist.uniform.logpdf(i[1],4,8)
+        out += stats_dist.uniform.logpdf(param[bins][1],4,8)
         #abns
-        out += stats_dist.uniform.logpdf(i[2],self._metal_unq.min(),self._metal_unq.ptp())
+        out += stats_dist.uniform.logpdf(param[bins][2:],-1,2).sum()
   
-
+        return out.sum()
 
     def model_prior(self,model):
         '''(Example_lik_class, any type) -> float
         Calculates log-probablity prior for models. Not used in MCMC and
         is optional in RJMCMC.'''
         #return log_model
-        pass
+        return 0.
 
     def initalize_param(self,model):
         '''(Example_lik_class, any type) -> ndarray, ndarray
 
         Used to initalize all starting points for run of RJMCMC and MCMC.
-        outputs starting point and starting step size'''
-        #return init_param, init_step
-        pass
+        outputs starting point and starting step size
 
+        model parameter isn't used for now'''
+
+        param = [0,0]
+        param[0] = nu.random.rand()*2*10**4 +2*10**4
+        param[1] = nu.random.rand()*4+4
+        #ABN
+        param = nu.hstack((param,nu.random.rand(self._no_abn)*2 - 1))
+        sigma = nu.identity(len(param))
+        return param,sigma
         
     def step_func(self,step_crit,param,step_size,model):
         '''(Example_lik_class, float, ndarray or list, ndarray, any type) ->
@@ -287,8 +330,8 @@ class CV_Fit(object):
         #for RJCMC
         #return new_param, try_model, attemp_jump, Jocobian
         #for MCMC
-        #return None, None, False, None
-        pass
+        return None, param, False, None
+        #pass
 
     
 #=============================================
@@ -437,7 +480,7 @@ class VESPA_fit(object):
             #losvd
             if j == 'losvd':
                 out[j] = t_out[i:i+4]
-                out[j][1:] = 0
+                out[j][2:] = 0
                 i+=4
         #gal lengths must be positve
         out['gal'][:,0] = nu.abs(out['gal'][:,0])
@@ -525,11 +568,11 @@ class VESPA_fit(object):
         #losvd
         if self._has_losvd:
             #sigma
-            out += stats_dist.uniform.logpdf(param[bins]['losvd'][0],0,5)
+            out += stats_dist.uniform.logpdf(param[bins]['losvd'][0],0,3)
             #z
-            out += stats_dist.uniform.logpdf(param[bins]['losvd'][1],0,2)
+            out += stats_dist.uniform.logpdf(param[bins]['losvd'][1],0,.05)
             #h3 and h4
-            out += stats_dist.uniform.logpdf(param[bins]['losvd'][2:],0,8).sum()
+            out += stats_dist.uniform.logpdf(param[bins]['losvd'][2:],0,2).sum()
         return out
 
 
