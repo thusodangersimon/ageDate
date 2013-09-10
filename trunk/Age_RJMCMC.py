@@ -132,6 +132,8 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
     t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm = [],[],[],[],[],[],[],[],[] 
     while option.iter_stop:
         if T_cuurent[bins] % 501 == 0:
+            print nu.sum(fun.t) / 500.
+            fun.t = []
             show = ('acpt = %.2f,log lik = %e, bins = %s, steps = %i,burnin iter= %i'
                     %(acept_rate[bins][-1],chi[bins][-1],bins, option.current,T_cuurent[bins]))
             print show

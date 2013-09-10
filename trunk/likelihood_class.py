@@ -1295,10 +1295,10 @@ class UV_SOURCE(object):
         self._request = self._mqs.getnodestate("DT").request
         self._data = self._mqs.execute("DT",self._request,wait=True);
         #models avalible
-        self.models = {'3':None}
+        self.models = {'3':['flux']}
         #multiblock for poor performance
         self._multi_block = False
-        
+        self._store = []
 
     def call_meqtrees(self, params, hypothesis):
         #global request,ndomain,data,mqs;
@@ -1375,7 +1375,7 @@ class UV_SOURCE(object):
         '''(Example_lik_class, ndarray,ndarray) -> ndarray
         Proposal distribution, draws steps for chain. Should use a symetric
         distribution'''
-        
+        self._store.append(mu)
         #return up_dated_param 
         out = nu.random.multivariate_normal(mu,sigma)
         return out
