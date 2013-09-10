@@ -29,18 +29,20 @@
 ''' all moduals asociated with reverse jump mcmc'''
 
 import numpy as nu
-import sys
+import sys,os
 from scipy.cluster import vq as sci
 from scipy.stats import levene, f_oneway,kruskal
 from anderson_darling import anderson_darling_k as ad_k
 from multiprocessing import *
 import time as Time
 import signal
+import cPickle as pik
+from glob import glob
 a=nu.seterr(all='ignore')
 
 
-def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False, model_prior=False):
-    '''(likelihood object, running object, int, int, bool, bool) ->
+def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,tot_iter=10**5, seed=None, fail_recover=True):
+    '''(likelihood object, running object, int, int, bool) ->
     dict(ndarray), dict(ndarray)
 
     Runs Reversible jump markov chain monte carlo using to maximize
@@ -52,9 +54,9 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
     burnin is the number of itterations to do burn-in.
     seed is random seed (optional), usefull when runing in multiprocess
     mode.
-    prior tells if to use a prior for parameters and is highly 
-    recomended to use.
-    model_prior are priors on the modles (not tested).
+    tot_iter is number of iterations to stop at.
+    fail recover tell program to search local dir for file called "failed_gid.pik" incase
+    tring to revcover from crash. Can be file path to recovery file or bool wheather to check
 
     outputs:
     dictonary of params, the different keys use different modesl.
@@ -67,77 +69,85 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
     #see if to use specific seed
     if seed is not None:
         nu.random.seed(seed)
+    #see if should recover from file
+    if type(fail_recover) is bool:
+            #look for previous file
+            if fail_recover:
+                initalize = False
+                reover_file = glob('failed*.pik')
+                if len(reover_file) == 0:
+                    print 'No recovery files found. Starting new run'
+                    initalize = True
+                    
+                else:
+                    initalize = False
+    elif type(fail_recover) is str:
+            #load from path
+            initalize = False
+            reover_file = glob(fail_recover)
+    else:
+            #do nothing and initalize normaliy
+            initalize = True
     #initalize parameters from class
-    active_param, sigma = rj_dict(), rj_dict()
-    param,chi = rj_dict(), rj_dict()
-    Nacept, Nreject = rj_dict(), rj_dict()
-    acept_rate, out_sigma = rj_dict(), rj_dict()
-    bayes_fact = rj_dict() #to calculate bayes factor
-    #simulated anneling param
-    T_cuurent = rj_dict()
-    for i in fun.models.keys(): ####todo add random combination of models
-        active_param[i], sigma[i] = fun.initalize_param(i)
-    #start with random model
-    bins = nu.random.choice(fun.models.keys())
+    if initalize:
+        active_param, sigma = rj_dict(), rj_dict()
+        param,chi = rj_dict(), rj_dict()
+        Nacept, Nreject = rj_dict(), rj_dict()
+        acept_rate, out_sigma = rj_dict(), rj_dict()
+        bayes_fact = rj_dict() #to calculate bayes factor
+        #simulated anneling param
+        T_cuurent = rj_dict()
+        for i in fun.models.keys(): ####todo add random combination of models
+                active_param[i], sigma[i] = fun.initalize_param(i)
+        #start with random model
+        bins = nu.random.choice(fun.models.keys())
 
-    #set other RJ params
-    Nacept[bins] , Nreject[bins] = 1.,1.
-    acept_rate[bins], out_sigma[bins] = [1.], [sigma[bins][0][:]]
-    #bayes_fact[bins] = #something
-    T_cuurent[bins] = 0
-    #set storage functions
-    param[bins] = [active_param[bins].copy()]
-    #first lik calc
-    #print active_param[bins]
-    chi[bins] = [fun.lik(active_param,bins) + fun.prior(active_param,bins)]
-    #check if starting off in bad place ie chi=inf or nan
-    if not nu.isfinite(chi[bins][-1]):
-        t = Time.time()
-        print 'Inital possition failed retrying for 1 min'
-        #try different chi for 1 min and then give up
-        while Time.time() - t < 60:
-             active_param[bins], sigma[bins] = fun.initalize_param(bins)
-             temp = fun.lik(active_param,bins) + fun.prior(active_param,bins)
-             if nu.isfinite(temp):
-                 chi[bins][-1] = nu.copy(temp)
-                 param[bins][-1] = active_param[bins].copy()
-                 print 'Good starting point found. Starting RJMCMC'
-                 break
-        else:
-            #didn't find good place exit program
-            raise ValueError('No good starting place found, check initalization')
-	#set best chi and param
-    '''if nu.isfinite(chi[str(bins)][-1]):
-		option.chibest[0] = chi[str(bins)][-1]+.0
-		for kk in range(len(option.parambest)):
-			if len(active_param[str(bins)]) > kk:
-				option.parambest[kk] = active_param[str(bins)][kk]
-			else:
-				option.parambest[kk] = nu.nan'''
-				#set current swarm value
-    '''for kk in range(len(option.swarm[0])):
-        if kk<bins*3+2+4:
-            option.swarm[0][kk] = nu.hstack((active_param[str(bins)],
-                                                active_dust,active_losvd))[kk]
-        else:
-            option.swarm[0][kk] = nu.nan
-    option.swarmChi[0]= chi[str(bins)][-1]'''
-    #start rjMCMC
-    Nexchange_ratio = 1.0
-    size,a = 0,0
-    j,T,j_timeleft = 1,9.,nu.random.exponential(100)
-    T_start,T_stop = chi[bins][-1]+0, 1.
-    trans_moves = 0
+        #set other RJ params
+        Nacept[bins] , Nreject[bins] = 1.,1.
+        acept_rate[bins], out_sigma[bins] = [1.], [sigma[bins][0][:]]
+        #bayes_fact[bins] = #something
+        T_cuurent[bins] = 0
+        #set storage functions
+        param[bins] = [active_param[bins].copy()]
+        #first lik calc
+        #print active_param[bins]
+        chi[bins] = [fun.lik(active_param,bins) + fun.prior(active_param,bins)]
+        #check if starting off in bad place ie chi=inf or nan
+        if not nu.isfinite(chi[bins][-1]):
+                t = Time.time()
+                print 'Inital possition failed retrying for 1 min'
+                #try different chi for 1 min and then give up
+                while Time.time() - t < 60:
+                        active_param[bins], sigma[bins] = fun.initalize_param(bins)
+                        temp = fun.lik(active_param,bins) + fun.prior(active_param,bins)
+                        if nu.isfinite(temp):
+                                chi[bins][-1] = nu.copy(temp)
+                                param[bins][-1] = active_param[bins].copy()
+                                print 'Good starting point found. Starting RJMCMC'
+                                break
+                else:
+                        #didn't find good place exit program
+                        raise ValueError('No good starting place found, check initalization')
+	
+        #start rjMCMC
+        Nexchange_ratio = 1.0
+        size,a = 0,0
+        j, j_timeleft = 1, nu.random.exponential(100)
+        T_start,T_stop = chi[bins][-1]+0, 1.
+        trans_moves = 0
+    else:
+        #load failed params
+        (active_param,sigma,param,chi,bins,Nacept,Nreject,acept_rate,out_sigma,
+                    option.current,T_cuurent,j,j_timeleft,fun._multi_block,T_start,T_stop,
+                    trans_moves) = pik.load(open(reover_file[0]))
     #profiling
     t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm = [],[],[],[],[],[],[],[],[] 
     while option.iter_stop:
+        #show status of running code
         if T_cuurent[bins] % 501 == 0:
-            print nu.sum(fun.t) / 500.
-            fun.t = []
             show = ('acpt = %.2f,log lik = %e, bins = %s, steps = %i,burnin iter= %i'
                     %(acept_rate[bins][-1],chi[bins][-1],bins, option.current,T_cuurent[bins]))
             print show
-            
             sys.stdout.flush()
 			
         #sample from distiburtion
@@ -156,16 +166,10 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
         t_lik.append(Time.time())
         chi[bins].append(0.)
         chi[bins][-1] = fun.lik(active_param,bins) + fun.prior(active_param,bins)
-        #decide to accept or not change from log lik to like
         #just lik part
         a = (chi[bins][-1] - chi[bins][-2])
-        #model prior
-        #a += fun.model_prior(bins)
         #simulated anneling
         a /= SA(T_cuurent[bins],burnin,abs(T_start),T_stop)
-        '''if nu.isinf(a):
-            print active_param[bins]['gal'], param[bins][-1]['gal']'''
-        #print bins ,chi[str(bins)][-2], chi[str(bins)][-1], active_param[str(bins)]
         
         t_lik[-1]-=Time.time()
         t_accept.append(Time.time())
@@ -189,7 +193,7 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
         t_step.append(Time.time())
         if T_cuurent[bins] < burnin + 5000 or acept_rate[bins][-1]<.11:
             #only tune step if in burn-in
-            sigma[bins] =  fun.step_func(acept_rate[bins][-1] ,param[bins], sigma,bins)
+            sigma[bins] =  fun.step_func(acept_rate[bins][-1] ,param[bins], sigma, bins)
         t_step[-1]-=Time.time()
         #############################decide if birth or death
         t_birth.append(Time.time())
@@ -245,8 +249,8 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
                 fun._multi_block = True
                 Nacept[bins] , Nreject[bins] = 1., 1.
                 #T_cuurent[bins] = burnin + 4000 
-        ################turn off burnin after N itterations
-        if option.current == 5 * 10**4:
+        ################turn off burnin after 40% percent of total iterations
+        if option.current == int(tot_iter*.4):
             for i in T_cuurent.keys():
                 if not T_cuurent[i] > burnin:
                     T_cuurent[i] = burnin + 1
@@ -258,28 +262,22 @@ def RJMC_main(fun, option, burnin=5*10**3,birth_rate=0.5, seed=None, prior=False
         option.current += 1
         acept_rate[bins].append(nu.copy(Nacept[bins]/(Nacept[bins]+Nreject[bins])))
         out_sigma[bins].append(sigma[bins][:])
+        #save current state incase of crash
+        if option.current % 500 == 0:
+            pik.dump((active_param,sigma,param,chi,bins,Nacept,Nreject,acept_rate,out_sigma,
+                      option.current,T_cuurent,j,j_timeleft,fun._multi_block,T_start,T_stop,
+                      trans_moves),open('failed_%i.pik'%(os.getpid()),'w'),2)
         t_house[-1]-=Time.time()
-        #swarm update
-        t_comm.append(Time.time())
-        '''if T_cuurent<burnin or T_cuurent % 100 == 0:
-            option.swarm_update(nu.hstack((active_param[str(bins)],active_dust,active_losvd)),
-                                chi[str(bins)][-1],bins)
-        '''
-        #get other wokers param
-        '''if  option.current % 200 == 0:
-            option.get_best()'''
-        t_comm[-1]-=Time.time()
+        #t_comm.append(Time.time())
+        #t_comm[-1]-=Time.time()
         #if mpi isn't on allow exit
         if option.comm_world.size == 1:
-            if option.current > 10**5:
+            if option.current > tot_iter:
                 option.iter_stop = False
         #pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm),open('time_%i.pik'%option.rank_world,'w'),2)
     #####################################return once finished 
-	'''for i in param.keys():
-		chi[i]=nu.array(chi[i])
-		param[i]=nu.array(param[i])
-		###correct metalicity and norm 
-		bayes_fact[i] = nu.array(bayes_fact[i])'''
+    #remove incase of crash file
+    os.popen('rm failed_%i.pik'%(os.getpid()))
 		#pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm,param,chi),open('time_%i.pik'%option.rank_world,'w'),2)
     return param, chi, acept_rate, out_sigma, param.keys()
 
