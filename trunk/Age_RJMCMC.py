@@ -137,7 +137,7 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,tot_iter=10**5, seed=N
         trans_moves = 0
     else:
         #load failed params
-        (active_param,sigma,param,chi,bins,Nacept,Nreject,acept_rate,out_sigma,
+        (fun.data,active_param,sigma,param,chi,bins,Nacept,Nreject,acept_rate,out_sigma,
                     option.current,T_cuurent,j,j_timeleft,fun._multi_block,T_start,T_stop,
                     trans_moves) = pik.load(open(reover_file[0]))
     #profiling
@@ -264,7 +264,7 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,tot_iter=10**5, seed=N
         out_sigma[bins].append(sigma[bins][:])
         #save current state incase of crash
         if option.current % 500 == 0:
-            pik.dump((active_param,sigma,param,chi,bins,Nacept,Nreject,acept_rate,out_sigma,
+            pik.dump((fun.data,active_param,sigma,param,chi,bins,Nacept,Nreject,acept_rate,out_sigma,
                       option.current,T_cuurent,j,j_timeleft,fun._multi_block,T_start,T_stop,
                       trans_moves),open('failed_%i.pik'%(os.getpid()),'w'),2)
         t_house[-1]-=Time.time()
