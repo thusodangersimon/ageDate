@@ -39,6 +39,7 @@ import multiprocessing as multi
 from itertools import izip
 from scipy.cluster.hierarchy import fcluster,linkage
 import os, sys, subprocess
+from time import time
 #meqtrees stuff
 try:
     import pyrap.tables
@@ -143,11 +144,69 @@ class CV_Fit(object):
     '''Fits cv spectrum using fortran codes to generate model spectra.
     Runs with only MCMC'''
 
-    def __init__(self,data,model_name='thuso',spec_path='/home/thuso/Phd/other_codes/Valerio',convolution_path='/home/thuso/Phd/other_codes/Valerio/thuso.dat'):
-        '''(Example_lik_class,#user defined) -> NoneType or userdefined
+    def initalize_pool(self):
+        '''initalizes pool RJMCMC, must be run in mpi'''
+        from mpi4py import MPI as mpi
+        self.mpi = mpi
+        self.comm = mpi.COMM_WORLD
+        self.rank = self.comm.rank
+        self.size = self.comm.size
+        '''if self.size < 2:
+            raise TypeError('Need to have more that 2 threads running')
+        self.t = []'''
+        #find non root workers and give them a flag for an infinite loop
+        if self.rank != 0:
+            #make persitant comunitcators
+            #recive from root
+            self.recv_list = []
+            self.sigma = nu.zeros((size,10,10))
+            self.param = nu.zeros((size,10))
+            self.send_sigma = nu.identity(10)
+            self.loglik = nu.zeros((size,1)) - nu.inf
+            
+            self.recv_list.append(self.comm.Recv_init((self.sigma[rank,:,:],mpi.DOUBLE), 0,0))
+            self.time = nu.zeros((size,1)) + time()
+            self.recv_list.append(self.comm.Recv_init((self.param[rank],mpi.DOUBLE), 0,1))
+            #send to root
+            self.send_list = []
+            self.send_list.append(self.comm.Send_init((self.loglik[rank],mpi.DOUBLE),0,2))
+            self.send_list.append(self.comm.Send_init((self.param[rank],mpi.DOUBLE),0,3))
+            self.send_list.append(self.comm.Send_init((self.time[rank],mpi.DOUBLE),0,4))
+        else:
+            #pool {time,[param,lik]}
+            self.pool = {}
+            self.only_lik = False
+            #make persitant comunitcators
+            self.sigma = nu.zeros((self.size,20,20))
+            self.send_sigma = nu.identity(20)
+            self.param = nu.zeros((self.size,20))
+            self.loglik = nu.zeros((self.size,1))
+            self.time = nu.zeros((self.size,1)) + time()
+            self.recv_param = nu.zeros((self.size,20))
+            self.recv_list = {}
+            self.recv_list['param'] = []
+            self.recv_list['lik'] = []
+            self.recv_list['time'] = []
+            self.send_list = []
+            
+            for i in xrange(1,self.size):
+                #send state to workers
+                self.send_list.append(self.comm.Send_init((self.sigma[i,:,:],mpi.DOUBLE), i,0))
+                self.send_list.append(self.comm.Send_init((self.param[i],mpi.DOUBLE), i,1))
+                #recive param and lik from workers
+                self.recv_list['param'].append(self.comm.Recv_init((self.recv_param[i],mpi.DOUBLE), i , 3))
+                self.recv_list['lik'].append(self.comm.Recv_init((self.loglik[i],mpi.DOUBLE),i,2))
+                self.recv_list['time'].append(self.comm.Recv_init((self.time[i],mpi.DOUBLE),i,4))
 
-        initalize class, can do whatever you want. User to define functions'''
+    def __init__(self,data,model_name='thuso',spec_path='/home/thuso/Phd/other_codes/Valerio',convolution_path='/home/thuso/Phd/other_codes/Valerio/thuso.dat',
+                 pool=False):
+        '''If pool is activated, needs to be run in mpi. Head worker
+        will do RJMCMC and working will make likelihoods.'''
         self.data = data
+        if pool:
+            self.initalize_pool()
+        else:
+            self.pool = None
         #move to working dir
         os.chdir(spec_path)
         #load in conf files and store
@@ -193,17 +252,79 @@ class CV_Fit(object):
         batch_file.close()
         self.models = {'1':[2+self._no_abn]}
             
-    def proposal(self,mu,sigma):
-        '''(Example_lik_class, ndarray,ndarray) -> ndarray
-        Proposal distribution, draws steps for chain. Should use a symetric
-        distribution'''
-        
-        #return up_dated_param
-        out = nu.random.multivariate_normal(mu,sigma)
-        
-        return out
-
+                
     def lik(self,param,bins):
+        '''(Example_lik_class, ndarray) -> float
+        This calculates the likelihood for a pool of workers.
+        If rank == 0, send curent state to workers and wait for liks to be sent
+        If rank != 0, recive current state, do trial move and start lik calc. This guy will never leave this function till the end of program
+        '''
+        #check if to use pool workers
+        if self.pool is None:
+            return self.lik_calc(param,bins)
+        #worker
+        i = 0
+        while self.rank != 0:
+            #recive curent state
+            t = time()
+            mpi.Prequest.Startall(self.recv_list)
+            mpi.Prequest.Waitall(self.recv_list)
+            #calc likelihood
+        
+            self.time[self.rank] = time() - self.time[0]
+            #make test step
+            self.param[self.rank] = self.proposal(self.param[self.rank],self.send_sigma)
+            #caclulate number of bins
+            self.loglik[self.rank] = self.lik_calc(self.param,?)
+            
+            i+=1
+            #send back to root
+            mpi.Prequest.Startall(self.send_list)
+            mpi.Prequest.Waitany(self.send_list)
+            
+            
+            
+        #root
+        #send curent state to workers
+        t= time()
+        for i in range(1,self.size):
+            self.param[i] = param[bins]
+            self.sigma[i,:,:] = self.send_sigma
+        mpi.Prequest.Startall(self.send_list)
+        mpi.Prequest.Waitany(self.send_list)
+        if len(self.pool.keys()) < 25:
+            #recive state from workers, add new to pool
+            mpi.Prequest.Startall(self.recv_list['lik'])
+            mpi.Prequest.Startall(self.recv_list['param'])
+            mpi.Prequest.Startall(self.recv_list['time'])
+            #print time() -t,1
+            mpi.Prequest.Waitany(self.recv_list['lik'])
+            mpi.Prequest.Waitany(self.recv_list['param'])
+            mpi.Prequest.Waitany(self.recv_list['time'])
+        
+        #add new ones to pool
+        i = 0
+        while len(self.pool.keys()) == 0 or i == 0:
+            i+=1
+            
+            for i in range(1,len(self.time)):
+                #if param hasn't changed in a while don't add
+                if not self.pool.has_key(str(self.time[i])):
+                    self.pool[str(self.time[i])] = (nu.copy(self.recv_param[i]),
+                                                    nu.copy(self.loglik[i]))
+                    #print i,str(self.time[i]), len(self.pool.keys())
+            #if no items in queue calculate own
+        key = nu.random.choice(self.pool.keys())
+        #check if has right number of bins
+        
+        param[bins],loglik = self.pool.pop(key)
+        if loglik == 0:
+            loglik = -nu.inf
+        #return to main program
+        #self.t.append(time() -t)
+        return loglik
+       
+    def lik_cal(self,param,bins):
         '''(Example_lik_class, ndarray) -> float
         Calculates likelihood for input parameters. Outuputs log-likelyhood'''
         #param = [T,g,abn...]
@@ -266,7 +387,16 @@ class CV_Fit(object):
         loglik = stats_dist.norm.logpdf(model[:,1],self.data[:,1]).sum()
         return loglik
         
-
+    def proposal(self,mu,sigma):
+        '''(Example_lik_class, ndarray,ndarray) -> ndarray
+        Proposal distribution, draws steps for chain. Should use a symetric
+        distribution'''
+        
+        #return up_dated_param
+        out = nu.random.multivariate_normal(mu,sigma)
+        
+        return out
+    
     def prior(self,param,bins):
         '''(Example_lik_class, ndarray) -> float
         Calculates log-probablity for prior'''
@@ -332,7 +462,6 @@ class CV_Fit(object):
         #for MCMC
         return None, param, False, None
         #pass
-
     
 #=============================================
 #spectral fitting with RJCMC Class
