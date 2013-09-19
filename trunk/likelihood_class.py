@@ -210,34 +210,38 @@ class CV_Fit(object):
         #move to working dir
         os.chdir(spec_path)
         #load in conf files and store
-        self.conf_file_name = '%i.5'%os.getpid()
+        pid = os.getpid()
+        self.conf_file_name = '%i.5'%pid
         temp = open(model_name + '.5')
         #make temp dir
         if not os.path.exists('temp/'):
             os.mkdir('temp/')
+        #make dir so no io errors
+        if not os.path.exists('temp/%i'%pid):
+            os.mkdir('temp/%i'%pid)
         #change name of output in first line
-        os.popen('cp '+convolution_path + ' temp/%i.dat'%os.getpid())
-        dat = open('temp/%i.dat'%os.getpid(),'rw+')
+        os.popen('cp '+convolution_path + ' temp/%i/%i.dat'%(pid,pid))
+        dat = open('temp/%i/%i.dat'%(pid,pid),'rw+')
         dat_txt = []
         for i in dat:
             dat_txt.append(i)
         #change first line to pid.spec
         dat.seek(0)
-        j = " 'fort.7'   'fort.17'    '%i.spec' \n"%os.getpid()
+        j = " 'fort.7'   'fort.17'    '%i.spec' \n"%pid
         dat.write(j)
         for i in dat_txt[1:]:
             dat.write(i)
         dat.close()
         #copy other config files to path
-        os.popen('cp fort* temp/')
-        batch_file = open('temp/'+self.conf_file_name,'wr+')
+        os.popen('cp fort* temp/%i/'%pid)
+        batch_file = open('temp/'+str(pid)+'/'+self.conf_file_name,'wr+')
         self.org_file = []
         for i in temp:
             batch_file.write(i)
             self.org_file.append(i)
         batch_file.flush()
         batch_file.seek(0)
-        self.temp_model = 'temp/'+self.conf_file_name
+        self.temp_model = 'temp/'+str(pid)+'/'+self.conf_file_name
         #find number of abn are used
         while batch_file.next() != '* mode abn modpf\n':
             pass
@@ -253,7 +257,7 @@ class CV_Fit(object):
         self.models = {'1':[2+self._no_abn]}
             
                 
-    def lik(self,param,bins):
+    def lik(self, param, bins,return_spec=False):
         '''(Example_lik_class, ndarray) -> float
         This calculates the likelihood for a pool of workers.
         If rank == 0, send curent state to workers and wait for liks to be sent
@@ -261,7 +265,7 @@ class CV_Fit(object):
         '''
         #check if to use pool workers
         if self.pool is None:
-            return self.lik_calc(param,bins)
+            return self.lik_calc(param,bins,return_spec)
         #worker
         i = 0
         while self.rank != 0:
@@ -275,7 +279,7 @@ class CV_Fit(object):
             #make test step
             self.param[self.rank] = self.proposal(self.param[self.rank],self.send_sigma)
             #caclulate number of bins
-            self.loglik[self.rank] = self.lik_calc(self.param,?)
+            self.loglik[self.rank] = self.lik_calc(self.param,bins)
             
             i+=1
             #send back to root
@@ -322,9 +326,12 @@ class CV_Fit(object):
             loglik = -nu.inf
         #return to main program
         #self.t.append(time() -t)
-        return loglik
+        if not return_spec:
+            return loglik
+        else:
+            return loglik,model
        
-    def lik_cal(self,param,bins):
+    def lik_calc(self,param, bins, return_spec=False):
         '''(Example_lik_class, ndarray) -> float
         Calculates likelihood for input parameters. Outuputs log-likelyhood'''
         #param = [T,g,abn...]
@@ -366,26 +373,51 @@ class CV_Fit(object):
             batch_file.write(self.org_file[k])
         batch_file.close()
         #call Tl for temp file
-        out = subprocess.call(['./Tl temp/'+ self.conf_file_name[:-2]],shell=True)
+        pid = os.getpid()
+        out = subprocess.call(['./Tl temp/%i/'%pid+ self.conf_file_name[:-2]],shell=True)
         #check if ran successfully
         if out != 0:
-            return -nu.inf
+            if return_spec:
+                return -nu.inf,[]
+            else:
+                return -nu.inf
         #call synspec
-        out = subprocess.call(['./Syn temp/'+ self.conf_file_name[:-2]],shell=True)
+        out = subprocess.call(['./Syn temp/%i/'%pid+ self.conf_file_name[:-2]],shell=True)
         if out != 0:
-            return -nu.inf
+            if return_spec:
+                return -nu.inf,[]
+            else:
+                return -nu.inf
         #make spectrum
-        out = subprocess.call(['./Rot temp/'+self.conf_file_name[:-2]],shell=True)
+        out = subprocess.call(['./Rot temp/%i/'%pid+self.conf_file_name[:-2]],shell=True)
         if out != 0:
-            return -nu.inf
+            if return_spec:
+                return -nu.inf,[]
+            else:
+                return -nu.inf
         #load new spect and calculate likelyhood
         try:
             model = nu.loadtxt('%i.spec'%os.getpid())
+            #clean up model
+            subprocess.call(['rm %i.spec'%os.getpid()],shell=True)
         except IOError:
-            return -nu.inf
+            if return_spec:
+                return -nu.inf,[]
+            else:
+                return -nu.inf
         #calc likelyhood
+        if model.shape[0] != self.data.shape[0]:
+            if return_spec:
+                return -nu.inf,[]
+            else:
+                return -nu.inf
+        #fix amplitude
+        model[:,1] *= nu.sum(model[:,1]*self.data[:,1])/nu.sum(model[:,1]**2)
         loglik = stats_dist.norm.logpdf(model[:,1],self.data[:,1]).sum()
-        return loglik
+        if not return_spec:
+            return loglik
+        else:
+            return loglik,model
         
     def proposal(self,mu,sigma):
         '''(Example_lik_class, ndarray,ndarray) -> ndarray
