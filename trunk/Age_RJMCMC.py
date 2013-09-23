@@ -145,8 +145,6 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,tot_iter=10**5, seed=N
     while option.iter_stop:
         #show status of running code
         if T_cuurent[bins] % 501 == 0:
-            print nu.mean(fun.t)
-            fun.t = []
             show = ('acpt = %.2f,log lik = %e, bins = %s, steps = %i,burnin iter= %i'
                     %(acept_rate[bins][-1],chi[bins][-1],bins, option.current,T_cuurent[bins]))
             print show

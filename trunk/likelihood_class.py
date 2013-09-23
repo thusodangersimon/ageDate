@@ -159,19 +159,21 @@ class CV_Fit(object):
             #make persitant comunitcators
             #recive from root
             self.recv_list = []
-            self.sigma = nu.zeros((size,10,10))
-            self.param = nu.zeros((size,10))
+            self.sigma = nu.zeros((self.size,10,10))
+            self.param = nu.zeros((self.size,10))
             self.send_sigma = nu.identity(10)
-            self.loglik = nu.zeros((size,1)) - nu.inf
+            self.loglik = nu.zeros((self.size,1)) - nu.inf
             
-            self.recv_list.append(self.comm.Recv_init((self.sigma[rank,:,:],mpi.DOUBLE), 0,0))
-            self.time = nu.zeros((size,1)) + time()
-            self.recv_list.append(self.comm.Recv_init((self.param[rank],mpi.DOUBLE), 0,1))
+            self.recv_list.append(self.comm.Recv_init((self.sigma[self.rank,:,:],mpi.DOUBLE), 0,0))
+            self.time = nu.zeros((self.size,1)) + time()
+            self.recv_list.append(self.comm.Recv_init((self.param[self.rank],mpi.DOUBLE), 0,1))
             #send to root
             self.send_list = []
-            self.send_list.append(self.comm.Send_init((self.loglik[rank],mpi.DOUBLE),0,2))
-            self.send_list.append(self.comm.Send_init((self.param[rank],mpi.DOUBLE),0,3))
-            self.send_list.append(self.comm.Send_init((self.time[rank],mpi.DOUBLE),0,4))
+            self.send_list.append(self.comm.Send_init((self.loglik[self.rank],mpi.DOUBLE),0,2))
+            self.send_list.append(self.comm.Send_init((self.param[self.rank],mpi.DOUBLE),0,3))
+            self.send_list.append(self.comm.Send_init((self.time[self.rank],mpi.DOUBLE),0,4))
+            #set activated varible
+            self.pool = True 
         else:
             #pool {time,[param,lik]}
             self.pool = {}
@@ -245,11 +247,13 @@ class CV_Fit(object):
         #find number of abn are used
         while batch_file.next() != '* mode abn modpf\n':
             pass
-        self._no_abn = 0
+        self._no_abn,self._abn_lst = 0,[]
         for i in batch_file :
             if i.lstrip().split(' ' )[0] == '2':
                 #count
                 self._no_abn += 1
+                #past element
+                self._abn_lst.append(i.lstrip().split('!')[-1][:-1])
             elif i.startswith('*'):
                 #if finished with section
                 break
@@ -271,8 +275,8 @@ class CV_Fit(object):
         while self.rank != 0:
             #recive curent state
             t = time()
-            mpi.Prequest.Startall(self.recv_list)
-            mpi.Prequest.Waitall(self.recv_list)
+            self.mpi.Prequest.Startall(self.recv_list)
+            self.mpi.Prequest.Waitall(self.recv_list)
             #calc likelihood
         
             self.time[self.rank] = time() - self.time[0]
@@ -283,8 +287,8 @@ class CV_Fit(object):
             
             i+=1
             #send back to root
-            mpi.Prequest.Startall(self.send_list)
-            mpi.Prequest.Waitany(self.send_list)
+            self.mpi.Prequest.Startall(self.send_list)
+            self.mpi.Prequest.Waitany(self.send_list)
             
             
             
@@ -294,17 +298,17 @@ class CV_Fit(object):
         for i in range(1,self.size):
             self.param[i] = param[bins]
             self.sigma[i,:,:] = self.send_sigma
-        mpi.Prequest.Startall(self.send_list)
-        mpi.Prequest.Waitany(self.send_list)
+        self.mpi.Prequest.Startall(self.send_list)
+        self.mpi.Prequest.Waitany(self.send_list)
         if len(self.pool.keys()) < 25:
             #recive state from workers, add new to pool
-            mpi.Prequest.Startall(self.recv_list['lik'])
-            mpi.Prequest.Startall(self.recv_list['param'])
-            mpi.Prequest.Startall(self.recv_list['time'])
+            self.mpi.Prequest.Startall(self.recv_list['lik'])
+            self.mpi.Prequest.Startall(self.recv_list['param'])
+            self.mpi.Prequest.Startall(self.recv_list['time'])
             #print time() -t,1
-            mpi.Prequest.Waitany(self.recv_list['lik'])
-            mpi.Prequest.Waitany(self.recv_list['param'])
-            mpi.Prequest.Waitany(self.recv_list['time'])
+            self.mpi.Prequest.Waitany(self.recv_list['lik'])
+            self.mpi.Prequest.Waitany(self.recv_list['param'])
+            self.mpi.Prequest.Waitany(self.recv_list['time'])
         
         #add new ones to pool
         i = 0
@@ -475,8 +479,18 @@ class CV_Fit(object):
         Evaluates step_criteria, with help of param and model and 
         changes step size during burn-in perior. Outputs new step size
         '''
-        #return new_step
-        pass
+        if step_crit > .60:
+            step_size[model] *= 1.05
+        elif step_crit < .2 and nu.any(step_size[model].diagonal() > 10**-6):
+            step_size[model] /= 1.05
+        #cov matrix
+        if len(param) % 200 == 0 and len(param) > 0.:
+            temp = nu.cov(self.list_dict_to(param[-2000:]).T)
+            #make sure not stuck
+            if nu.any(temp.diagonal() > 10**-6):
+                step_size[model] = temp
+        
+        return step_size[model]
 
     def birth_death(self,birth_rate, model, param):
         '''(Example_lik_class, float, any type, dict(ndarray)) -> 
@@ -729,7 +743,7 @@ class VESPA_fit(object):
         #losvd
         if self._has_losvd:
             #sigma
-            out += stats_dist.uniform.logpdf(param[bins]['losvd'][0],0,3)
+            out += stats_dist.uniform.logpdf(param[bins]['losvd'][0],0,1)
             #z
             out += stats_dist.uniform.logpdf(param[bins]['losvd'][1],0,.05)
             #h3 and h4
