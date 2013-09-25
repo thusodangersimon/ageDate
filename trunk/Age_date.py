@@ -610,8 +610,18 @@ def LOSVD(model, param, wave_range, convlve='python'):
        #model and data range are off
        return tmodel
     wave = nu.arange(model['wave'][index[0]], model['wave'][index[1]], wave_diff)
-    
-    #convolve individual spectra
+    #sum spectra and convole all
+    sum_spec = {}
+    sum_spec['wave'] = model['wave']
+    sum_spec['0'] = nu.zeros_like(model['wave'])
+    for i in model.keys():
+        if i == 'wave':
+            continue
+        sum_spec['0'] += model[i]
+    sum_spec['0'] = spectra_lin_interp(sum_spec['wave'], sum_spec['0'], wave)
+    sum_spec['0'] = convolve_python_fast(wave, nu.ascontiguousarray(sum_spec['0']), tparam)
+    sum_spec['wave'] = redshift(wave,tparam[1])
+    ''' #convolve individual spectra
     for i in model.keys():
         if i == 'wave':
             continue
@@ -628,7 +638,8 @@ def LOSVD(model, param, wave_range, convlve='python'):
     #if data.shape[1] == 3:
     #    out[:,2] = nu.sqrt(nu.convolve(kernel**2, data[:,2]**2,'same'))
 
-    return tmodel
+    return tmodel'''
+    return sum_spec
 
 def convolve_python_fast(x, y, losvd_param, option='rebin'):
    '''convolve(array, kernel)

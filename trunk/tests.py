@@ -33,9 +33,12 @@ scap develoment programs
 
 from Age_date import *
 from Age_MCMC import SA,Covarence_mat
+import Age_date as ag
+import ezgal as gal
 #from mpi4py import MPI
-#import numpy as nu
-
+import numpy as nu
+from glob import glob
+import scipy.stats as stats_dist
 
 def rjmcmc(data,itter=10**5,k_max=16):
     #test reverse jump mcmc program
@@ -424,61 +427,203 @@ def scatter():
 
     print v, myid
     
-    
 
+#pymulti nest
+class multinest_fit(object):
+    '''Finds the age, metalicity, star formation history, 
+    dust obsorption and line of sight velocity distribution
+    to fit a Spectrum.
 
-if __name__=='__main__':	
- #import thuso_quick_fits as T
- #import asciidata
-    import numpy as np
-    import pylab as pl
-    import time
- #Enter the time and mag (note it should be in one combined file with 2 columns)
- #targets=asciidata.open('combinednoave.dat')
-    temp=nu.loadtxt('combinednoave.dat')
-    x=temp[:,0]
-    y=temp[:,1]
+    Uses vespa methodology splitting const sfh into multiple componets
+    '''
+    def __init__(self,data, min_sfh=1,max_sfh=16,lin_space=False,use_dust=True, 
+		use_losvd=True, spec_lib='p2',imf='salp',
+			spec_lib_path='/home/thuso/Phd/stellar_models/ezgal/'):
+        '''(VESPA_fitclass, ndarray,int,int) -> NoneType
+        data - spectrum to fit
+        *_sfh - range number of burst to allow
+        lin_space - make age bins linearly space or log spaced
+        use_* allow useage of dust and line of sigt velocity dispersion
+        spec_lib - spectral lib to use
+        imf - inital mass function to use
+        spec_lib_path - path to ssps
+        sets up vespa like fits
+        '''
+        self.data = nu.copy(data)
+		#make mean value of data= 100
+        self._norm = 1./(self.data[:,1].mean()/100.)
+        self.data[:,1] *= self._norm
+        #load models
+        cur_lib = ['basti', 'bc03', 'cb07','m05','c09','p2']
+        assert spec_lib.lower() in cur_lib, ('%s is not in ' %spec_lib.lower() + str(cur_lib))
+        if not spec_lib_path.endswith('/') :
+            spec_lib_path += '/'
+        models = glob(spec_lib_path+spec_lib+'*'+imf+'*')
+        if len(models) == 0:
+			models = glob(spec_lib_path+spec_lib.lower()+'*'+imf+'*')
+        assert len(models) > 0, "Did not find any models"
+        #crate ezgal class of models
+        SSP = gal.wrapper(models)
+        self.SSP = SSP
+        #extract seds from ezgal wrapper
+        spect, info = [SSP.sed_ls], []
+        for i in SSP:
+			metal = float(i.meta_data['met'])
+			ages = nu.float64(i.ages)
+			for j in ages:
+				if j == 0:
+					continue
+				spect.append(i.get_sed(j,age_units='yrs'))
+				info.append([metal+0,j])
+        info,self._spect = [nu.log10(info),None],nu.asarray(spect).T
+        #test if sorted
+        self._spect = self._spect[::-1,:]
+        #make spect match wavelengths of data
+        #self._spect = ag.data_match_all(data,self._spect)[0]
+        #extra models to use
+        self._has_dust = use_dust
+        self._has_losvd = use_losvd
+        #key order
+        self._key_order = ['gal']
+        if use_dust:
+            self._key_order.append('dust')
+        if use_losvd:
+            self._key_order.append('losvd')
+		#set hidden varibles
+        self._lib_vals = info
+        self._age_unq = nu.unique(info[0][:,1])
+        self._metal_unq = nu.unique(info[0][:,0])
+        self._lib_vals[0][:,0] = 10**self._lib_vals[0][:,0]
+        self._min_sfh, self._max_sfh = min_sfh,max_sfh +1
+        #max total length of bins constraints
+        self._max_age = self._age_unq.ptp()    
+        #save
+        self.param = []
+        self.param_prior = []
 
- #x,y=nu.array(x),nu.array(y) 
-    func=lambda x,p:p[0]*nu.sin(2*nu.pi*x/0.065714+p[1])+p[2]*nu.sin(2*nu.pi*x/p[3]+p[4])	#The vector p gives the fit parameters - change this to any form that you need.
-    param=[1.,0.,1.,0.035,0.]	#Original guess - can be way off - must equal the number of unknowns in the above line
-
- #Now set the limits (this example is for three parameters, lower and upper limits [0,inf]
-    const=nu.zeros([5,2])
-    const[2,0]=-10
-    const[:,1]=const[:,1]+4*nu.pi	#Set the upper limit as infinity and the lower as 0
- #Run the program
-    t=time.time()
-    Chi,Param,outparam,outchi=quick_cov_MCMC(x,y,param,func,const,itter=3*10**7,sigma=0.02)#,quiet=True)	#When 'quiet' is false, it displays all the guesses
-    print time.time()-t
-    Chi,Param=np.array(Chi),np.array(Param)
- #####Plot to check fit:
-    print 'your best fit parameters are: ',outparam
-    print 'your best fit chi squared value is: ', outchi
- #Plot the seperate nights data below one another:
-    xplot=[x[0]-np.floor(x[0])];ysineplot=[func(x[0],outparam)];yplot=[y[0]]#;prewhitened=[y[0]-func(x[0],outparam)]	#Plotting vectors
-    move = 0	#How much the plot must be moved down (0 for first night, 'move' for next ... )
-    for i in range(1,len(x)):	#Split up the plots
-        if int(x[i])-int(x[i-1])<1:
-            xplot.append(x[i]-np.floor(x[i]))	#Modded so that the x-axis starts at 0
-            yplot.append(y[i]+move)
-            ysineplot.append(func(x[i],outparam)+move)
-    #prewhitened.append(y[i]-func(x[i],outparam))
+    def lik(self,p, bins,nbins):
+        '''(Example_lik_class, ndarray) -> float
+        Calculates likelihood for input parameters. Outuputs log-likelyhood'''
+        #change to correct format
+        self.param.append(p)
+        param = {'gal':nu.asarray(p[:4]),
+             'dust':nu.asarray(p[4:6]),
+             'losvd':nu.asarray(p[6:10])}
+        if not self._check_len(param['gal'],'1'):
+            return -nu.inf
+        burst_model = {}
+        for i in [param['gal']]:
+            burst_model[str(i[1])] =  10**i[3]*ag.make_burst(i[0],i[1],i[2],
+            self._metal_unq, self._age_unq, self._spect, self._lib_vals)
+        burst_model['wave'] = nu.copy(self._spect[:,0])
+		#do dust
+        if self._has_dust:
+            #dust requires wavelengths
+            
+            #not correct
+            burst_model = ag.dust(param['dust'],burst_model)
+		#do losvd
+        if self._has_losvd:
+            #check if wavelength exsist
+            if 'wave' not in burst_model.keys():
+                burst_model['wave'] = nu.copy(self._spect[:,0])
+            #make buffer for edge effects
+            wave_range = [self.data[:,0].min(),self.data[:,0].max()]
+            burst_model = ag.LOSVD(burst_model, param['losvd'], wave_range)
+        #need to match data wavelength ranges and wavelengths
+		#get loglik
+        
+        burst_model = ag.data_match(self.data,burst_model,bins)
+        model = nu.sum(burst_model.values(),0)
+        
+		#return loglik
+        if self.data.shape[1] == 3:
+            #uncertanty calc
+            pass
         else:
-            pl.scatter(xplot,yplot,s=3)
-            pl.plot(xplot,ysineplot)
-            move = move + 5	#Move future plots down by an amount 'move'
-            xplot=[x[i]-np.floor(x[i])];ysineplot=[func(x[i],outparam)+move];yplot=[y[i]+move]	
-    #Restart the lists
-    #prewhitened.append(y[i]-func(x[i],outparam))
- #Comment out if you don't want the prewhitened light curve printed:   
- #for q in range(0,len(x)):
- #  print str(x[q])+' '+str(prewhitened[q])
- #Plot
-    pl.scatter(xplot,yplot,s=5)
-    pl.plot(xplot,ysineplot)
-    yl,yu = pl.ylim()
-    pl.ylim(yu,yl)
-    pl.show()
+            prob = stats_dist.norm.logpdf(model,self.data[:,1]).sum()
+            #prob = -nu.sum((model -	self.data[:,1])**2)
+        #return
+        if nu.isnan(prob):
+            return -nu.inf
+        print prob
+        return prob        
+
+    def prior(self,param, bins, nbins):
+        '''(Example_lik_class, ndarray) -> float
+        Calculates log-probablity for prior'''
+        #[len,age,metals,weight,tbc,tism,sigma,z,h3,h4]
+        param[0] = param[0] * self._age_unq.ptp()
+        param[1] = param[1] * self._age_unq.ptp() + self._age_unq.min()
+        param[2] = param[2]*self._metal_unq.ptp()+self._metal_unq.min()
+        param[3] = param[3]*700-300
+        #dust
+        param[4] = param[4]*4.
+        param[5] = param[5]*4.
+        #losvd
+        param[6] *= 3.
+        param[7] *= .05
+        param[8] *= 1.
+        param[9] *= 1.
+        #temp save
+        self.param_prior.append(param)
+        return param
+    
+    def _check_len(self, tparam, key):
+        '''(VESPA_class, dict(ndarray) or ndarray,str)-> ndarray
+        Make sure parameters ahere to criterion listed below:
+        1. bins cannot overlap
+        2. total length of bins must be less than length of age_unq
+        3. ages must be in increseing order
+        4. make sure bins are with in age range
+        5. No bin is larger than the age range
+        '''
+        
+        #check input type
+        if type(tparam) == dict:
+            param = tparam.copy()
+        elif  type(tparam) == nu.ndarray:
+            param = {key:tparam}
+        else:
+            raise TypeError('input must be dict or ndarray')
+        #make sure age is sorted
+        '''if not self.issorted(param[key][:,1]):
+            return False'''
+        #make sure bins do not overlap fix if they are
+        '''for i in xrange(param[key].shape[0]-1):
+            #assume orderd by age
+            max_age = param[key][i,0]/2. + param[key][i,1]
+            min_age_i = param[key][i+1,1] - param[key][i+1,0]/2.
+            if max_age > min_age_i:
+                #overlap
+                #make sure overlap is significant
+                if not nu.allclose(max_age, min_age_i):
+                    return False
+            #check if in age bounds
+            if i == 0:
+                if self._age_unq.min() > param[key][i,1] - param[key][i,0]/2.:
+                    return False
+        else:
+            if self._age_unq.max() < param[key][-1,1] + param[key][-1,0]/2.:
+                if not nu.allclose(param[key][-1,1] + param[key][-1,0]/2,self._age_unq.max()):
+                    return False
+        #check if length is less than age_unq.ptp()
+        if param[key][:,0].sum() > self._age_unq.ptp():
+            if not nu.allclose( param[key][:,0].sum(),self._age_unq.ptp()):
+                return False
+        #make sure age is in bounds
+        
+        #passed all tests'''
+        return True
 
 
+        
+if __name__=='__main__':
+    #must be in GC dir
+    import pymultinest as nest
+    if not os.path.exists("chains"): os.mkdir("chains")
+    import runit
+    data = runit.make_usable('List/NGC104_a_1.fits')
+    
+    fun = multinest_fit(data,spec_lib='bc03')
+    nest.run(fun.lik,fun.prior,10,init_MPI = True)
