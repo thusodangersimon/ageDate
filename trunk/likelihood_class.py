@@ -1801,6 +1801,236 @@ class UV_SOURCE(object):
         #for MCMC
         return param, None, False, None
 
+class Multinest_fit(object):
+    '''Finds the age, metalicity, star formation history, 
+    dust obsorption and line of sight velocity distribution
+    to fit a Spectrum.
+
+    Uses vespa methodology splitting const sfh into multiple componets
+    '''
+    def __init__(self,data,nbins, use_dust=True, use_losvd=True,
+                 spec_lib='p2',imf='salp',
+			spec_lib_path='/home/thuso/Phd/stellar_models/ezgal/'):
+        '''(VESPA_fitclass, ndarray,int,int) -> NoneType
+        data - spectrum to fit
+        *_sfh - range number of burst to allow
+        lin_space - make age bins linearly space or log spaced
+        use_* allow useage of dust and line of sigt velocity dispersion
+        spec_lib - spectral lib to use
+        imf - inital mass function to use
+        spec_lib_path - path to ssps
+        sets up vespa like fits
+        '''
+        self.data = nu.copy(data)
+		#make mean value of data= 100
+        #self._norm = 1./(self.data[:,1].mean()/100.)
+        #self.data[:,1] *= self._norm
+        #load models
+        cur_lib = ['basti', 'bc03', 'cb07','m05','c09','p2']
+        assert spec_lib.lower() in cur_lib, ('%s is not in ' %spec_lib.lower() + str(cur_lib))
+        if not spec_lib_path.endswith('/') :
+            spec_lib_path += '/'
+        models = glob(spec_lib_path+spec_lib+'*'+imf+'*')
+        if len(models) == 0:
+			models = glob(spec_lib_path+spec_lib.lower()+'*'+imf+'*')
+        assert len(models) > 0, "Did not find any models"
+        #crate ezgal class of models
+        SSP = gal.wrapper(models)
+        self.SSP = SSP
+        #extract seds from ezgal wrapper
+        spect, info = [SSP.sed_ls], []
+        for i in SSP:
+			metal = float(i.meta_data['met'])
+			ages = nu.float64(i.ages)
+			for j in ages:
+				if j == 0:
+					continue
+				spect.append(i.get_sed(j,age_units='yrs'))
+				info.append([metal+0,j])
+        info,self._spect = [nu.log10(info),None],nu.asarray(spect).T
+        #test if sorted
+        self._spect = self._spect[::-1,:]
+        #make spect match wavelengths of data
+        #self._spect = ag.data_match_all(data,self._spect)[0]
+        #extra models to use
+        self._has_dust = use_dust
+        self._has_losvd = use_losvd
+        #key order
+        self._key_order = ['gal']
+        if use_dust:
+            self._key_order.append('dust')
+        if use_losvd:
+            self._key_order.append('losvd')
+		#set hidden varibles
+        self._lib_vals = info
+        self._age_unq = nu.unique(info[0][:,1])
+        self._metal_unq = nu.unique(info[0][:,0])
+        self._lib_vals[0][:,0] = 10**self._lib_vals[0][:,0]
+        #calculate number of parameters and number of bins
+        self.nbins = nbins
+        nparams = 0
+        nparams += nbins*4
+        if use_dust:
+            nparams += 2
+        if use_losvd:
+            nparams += 4
+        self.nparams = nparams
+
+    def lik(self,p, bins,nbins):
+        '''(Example_lik_class, ndarray) -> float
+        Calculates likelihood for input parameters. Outuputs log-likelyhood'''
+        #change to correct format
+        param = self.set_param(p)
+        #check if should run or end quickly
+        if not self._check_len(param['gal'],'1'):
+            return -nu.inf
+        burst_model = {}
+        for i in param['gal']:
+            burst_model[str(i[1])] =  10**i[3]*ag.make_burst(i[0],i[1],i[2],
+            self._metal_unq, self._age_unq, self._spect, self._lib_vals)
+        burst_model['wave'] = nu.copy(self._spect[:,0])
+		#do dust
+        if self._has_dust:
+            #dust requires wavelengths
+            burst_model = ag.dust(param['dust'],burst_model)
+		#do losvd
+        if self._has_losvd:
+            #check if wavelength exsist
+            if 'wave' not in burst_model.keys():
+                burst_model['wave'] = nu.copy(self._spect[:,0])
+            #make buffer for edge effects
+            wave_range = [self.data[:,0].min(),self.data[:,0].max()]
+            burst_model = ag.LOSVD(burst_model, param['losvd'], wave_range)
+        #need to match data wavelength ranges and wavelengths
+		#get loglik
+        
+        burst_model = ag.data_match(self.data,burst_model,bins)
+        model = nu.sum(burst_model.values(),0)
+        
+		#return loglik
+        if self.data.shape[1] == 3:
+            #uncertanty calc
+            pass
+        else:
+            prob = stats_dist.norm.logpdf(model,self.data[:,1]).sum()
+            #prob = -nu.sum((model -	self.data[:,1])**2)
+        #return
+        if nu.isnan(prob):
+            return -nu.inf
+        #print prob
+        return prob        
+
+    def prior(self,p, bins, nbins):
+        '''(Example_lik_class, ndarray) -> float
+        Calculates log-probablity for prior'''
+        #[len,age,metals,weight,tbc,tism,sigma,z,h3,h4]
+        param = self.set_param(p)
+        count = 0
+        for i in param['gal']:
+            p[count+1] = i[1] * self._age_unq.ptp() + self._age_unq.min()
+            #length bin is conditional on age
+            min_range = min(abs(i[1] - self._age_unq.min()),
+                            abs(self._age_unq.max()-i[1]))
+            
+            p[count] = i[0] * min_range
+            count += 2
+            p[count] = i[2] * self._metal_unq.ptp() + self._metal_unq.min()
+            count += 1
+            p[count] = i[3] * 400-200
+            count += 1
+        #make sure no overlap in age
+
+        if self._has_dust:
+            #dust
+            p[count] *= 4.
+            count += 1
+            p[count] *= 4.
+            count += 1
+        if self._has_losvd:
+            #losvd
+            p[count] *= 2.7
+            count += 1
+            p[count] *= 0.
+            count += 1
+            p[count] *= 0
+            count += 1
+            p[count] *= 0
+        
+        #self.param_prior.append(param)
+
+    def set_param(self,p):
+        '''takes param from nested sampling and puts it into correct dictorany
+        for use in lik and prior'''
+        param = {'gal':nu.asarray(p[:self.nbins*4]).reshape(self.nbins,4)}
+        if self._has_dust:
+            srt_dst = self.nbins*4
+            param['dust'] = nu.asarray(p[srt_dst:srt_dst+2])
+        else:
+            srt_dst = None
+        if self._has_losvd:
+            if srt_dst is None:
+                srt_los = self.nbins*4
+            else:
+                srt_los = srt_dst + 2
+            param['losvd'] = nu.asarray(p[srt_los:srt_los+4])
+        return param
+
+    def _check_len(self, tparam, key):
+        '''(VESPA_class, dict(ndarray) or ndarray,str)-> ndarray
+        Make sure parameters ahere to criterion listed below:
+        1. bins cannot overlap
+        2. total length of bins must be less than length of age_unq
+        3. ages must be in increseing order
+        4. make sure bins are with in age range
+        5. No bin is larger than the age range
+        '''
+        
+        #check input type
+        if type(tparam) == dict:
+            param = tparam.copy()
+        elif  type(tparam) == nu.ndarray:
+            param = {key:tparam}
+        else:
+            raise TypeError('input must be dict or ndarray')
+        #make sure age is sorted
+        if not self.issorted(param[key][:,1]):
+            return False
+        #make sure bins do not overlap fix if they are
+        for i in xrange(param[key].shape[0]-1):
+            #assume orderd by age
+            max_age = param[key][i,0]/2. + param[key][i,1]
+            min_age_i = param[key][i+1,1] - param[key][i+1,0]/2.
+            if max_age > min_age_i:
+                #overlap
+                #make sure overlap is significant
+                if not nu.allclose(max_age, min_age_i):
+                    return False
+            #check if in age bounds
+            if i == 0:
+                if self._age_unq.min() > param[key][i,1] - param[key][i,0]/2.:
+                    return False
+        else:
+            if self._age_unq.max() < param[key][-1,1] + param[key][-1,0]/2.:
+                if not nu.allclose(param[key][-1,1] + param[key][-1,0]/2,self._age_unq.max()):
+                    return False
+        #check if length is less than age_unq.ptp()
+        if param[key][:,0].sum() > self._age_unq.ptp():
+            if not nu.allclose( param[key][:,0].sum(),self._age_unq.ptp()):
+                return False
+        #make sure age is in bounds
+        
+        #passed all tests
+        return True
+
+    def issorted(self,l):
+        '''(list or ndarray) -> bool
+        Returns True is array is sorted
+        '''
+        for i in xrange(len(l)-1):
+            if not l[i] <= l[i+1]:
+                return False
+        return True
+
 #######other functions
 
 #used for class_map
