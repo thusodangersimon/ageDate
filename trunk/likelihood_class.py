@@ -201,7 +201,7 @@ class CV_Fit(object):
                 self.recv_list['time'].append(self.comm.Recv_init((self.time[i],mpi.DOUBLE),i,4))
 
     def __init__(self,data,model_name='thuso',spec_path='/home/thuso/Phd/other_codes/Valerio',convolution_path='/home/thuso/Phd/other_codes/Valerio/thuso.dat',
-                 pool=False):
+                 pool=False,gen_spec_lib=False):
         '''If pool is activated, needs to be run in mpi. Head worker
         will do RJMCMC and working will make likelihoods.'''
         self.data = data
@@ -259,7 +259,8 @@ class CV_Fit(object):
                 break
         batch_file.close()
         self.models = {'1':[2+self._no_abn]}
-            
+        #generates only spectra, no likelihood only works when no pool
+        self.gen_spec_lib = gen_spec_lib
                 
     def lik(self, param, bins,return_spec=False):
         '''(Example_lik_class, ndarray) -> float
@@ -269,7 +270,7 @@ class CV_Fit(object):
         '''
         #check if to use pool workers
         if self.pool is None:
-            return self.lik_calc(param,bins,return_spec)
+            return self.lik_calc(param,bins,return_spec,self.gen_spec_lib)
         #worker
         i = 0
         while self.rank != 0:
@@ -335,7 +336,7 @@ class CV_Fit(object):
         else:
             return loglik,model
        
-    def lik_calc(self,param, bins, return_spec=False):
+    def lik_calc(self,param, bins, return_spec=False,gen_spec_only=False):
         '''(Example_lik_class, ndarray) -> float
         Calculates likelihood for input parameters. Outuputs log-likelyhood'''
         #param = [T,g,abn...]
@@ -404,6 +405,8 @@ class CV_Fit(object):
             model = nu.loadtxt('%i.spec'%os.getpid())
             #clean up model
             subprocess.call(['rm %i.spec'%os.getpid()],shell=True)
+            if gen_spec_only:
+                return model
         except IOError:
             if return_spec:
                 return -nu.inf,[]
@@ -1823,8 +1826,8 @@ class Multinest_fit(object):
         '''
         self.data = nu.copy(data)
 		#make mean value of data= 100
-        #self._norm = 1./(self.data[:,1].mean()/100.)
-        #self.data[:,1] *= self._norm
+        self._norm = 1./(self.data[:,1].mean()/100.)
+        self.data[:,1] *= self._norm
         #load models
         cur_lib = ['basti', 'bc03', 'cb07','m05','c09','p2']
         assert spec_lib.lower() in cur_lib, ('%s is not in ' %spec_lib.lower() + str(cur_lib))
@@ -1876,7 +1879,7 @@ class Multinest_fit(object):
             nparams += 4
         self.nparams = nparams
 
-    def lik(self,p, bins,nbins):
+    def lik(self,p, bins,nbins,return_spec=False):
         '''(Example_lik_class, ndarray) -> float
         Calculates likelihood for input parameters. Outuputs log-likelyhood'''
         #change to correct format
@@ -1918,7 +1921,10 @@ class Multinest_fit(object):
         if nu.isnan(prob):
             return -nu.inf
         #print prob
-        return prob        
+        if return_spec:
+            return prob, model
+        else:
+            return prob        
 
     def prior(self,p, bins, nbins):
         '''(Example_lik_class, ndarray) -> float
