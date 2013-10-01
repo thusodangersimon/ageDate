@@ -658,7 +658,7 @@ class VESPA_fit(object):
             #losvd
             if j == 'losvd':
                 out[j] = t_out[i:i+4]
-                out[j][2:] = 0
+                out[j][1:] = 0
                 i+=4
         #gal lengths must be positve
         out['gal'][:,0] = nu.abs(out['gal'][:,0])
