@@ -728,17 +728,22 @@ class VESPA_fit(object):
             return -nu.inf
         #uniform priors
         #gal priors
-        for i in param[bins]['gal']:
-            #length
-            out += stats_dist.uniform.logpdf(i[0],0.,self._age_unq.ptp())
-            #age
-            out += stats_dist.uniform.logpdf(i[1],self._age_unq.min(),self._age_unq.ptp())
-            #metals
-            if len(self._metal_unq) > 1:
+        gal = param[bins]['gal']
+        #length
+        out += stats_dist.uniform.logpdf(gal[:,0],0.,self._age_unq.ptp()).sum()
+        #age
+        if gal.shape[0] > 1:
+            out += stats_dist.uniform.logpdf(gal[:-1,1],self._age_unq.min(),self._age_unq.ptp()).sum()
+        #weight for older
+        out += stats_dist.norm.logpdf(gal[-1,1],9.5,0.2).sum()
+        if gal[-1,1] > self._age_unq.max():
+            return -nu.inf
+        #metals
+        if len(self._metal_unq) > 1:
                 #if has metal range
-                out += stats_dist.uniform.logpdf(i[2],self._metal_unq.min(),self._metal_unq.ptp())
+                out += stats_dist.uniform.logpdf(gal[:,2],self._metal_unq.min(),self._metal_unq.ptp()).sum()
             #weight
-            out += stats_dist.uniform.logpdf(i[3], -300, 500)
+        out += stats_dist.uniform.logpdf(gal[:,3], -300, 500).sum()
         #dust
         if self._has_dust:
             #uniform priors

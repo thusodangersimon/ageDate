@@ -28,7 +28,7 @@
 #
 ''' Does RJMCMC with partical swarm. Trys different topologies of comunication from Mendes et al 2004 and different weighting types for ps'''
 
-from Age_date import MC_func
+
 from Age_RJMCMC import *
 try:
     from mpi4py import MPI as mpi
