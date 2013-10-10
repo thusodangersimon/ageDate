@@ -291,7 +291,9 @@ All terms are logrythmic.
     #check if any arrays are bad
     if len(inters) == 0 or len(inters) != len(ages):
         return spect[:,0] + nu.inf
-    return simps(inters, ages, axis=0)/float(len(ages))
+    #normalize to 1 solar mass
+    
+    return simps(inters, ages, axis=0)/(ages.ptp())
 	#return new ssp
 	
 		
