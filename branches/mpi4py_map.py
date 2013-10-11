@@ -86,7 +86,13 @@ def _mpi_controller(sequence, *args, **kwargs):
     while(True):
         status = MPI.Status()
         # Receive input from workers.
-        recv = MPI.COMM_WORLD.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
+        try:
+            recv = MPI.COMM_WORLD.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
+        except EOFError:
+            import time
+            print('Having trouble with reciving commands.')
+            time.sleep(5)
+            
         if debug: print "Controller: received tag %i from %s" % (status.tag, status.source)
 
         if status.tag == 1 or status.tag == 10:
@@ -177,7 +183,7 @@ def _mpi_worker(function, sequence, *args, **kwargs):
         try:
             recv = MPI.COMM_WORLD.recv(source=0, tag=MPI.ANY_TAG, status=status)
         except EOFError:
-            print('Having problems reciveing commands')
+            print('Having problems reciveing commands') 
             continue
         if debug: print "Worker %i on %s: received data, tag: %i" % (rank, proc_name, status.tag)
 
