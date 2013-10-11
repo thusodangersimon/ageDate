@@ -174,7 +174,11 @@ def _mpi_worker(function, sequence, *args, **kwargs):
     while True:
         # Wait for element
         if debug: print "Worker %i on %s: waiting for data" % (rank, proc_name)
-        recv = MPI.COMM_WORLD.recv(source=0, tag=10, status=status)
+        try:
+            recv = MPI.COMM_WORLD.recv(source=0, tag=MPI.ANY_TAG, status=status)
+        except EOFError:
+            print('Having problems reciveing commands')
+            continue
         if debug: print "Worker %i on %s: received data, tag: %i" % (rank, proc_name, status.tag)
 
         if status.tag == 2:
