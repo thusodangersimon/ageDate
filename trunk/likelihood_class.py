@@ -732,11 +732,9 @@ class VESPA_fit(object):
         #length
         out += stats_dist.uniform.logpdf(gal[:,0],0.,self._age_unq.ptp()).sum()
         #age
-        if gal.shape[0] > 1:
-            out += stats_dist.uniform.logpdf(gal[:-1,1],self._age_unq.min(),self._age_unq.ptp()).sum()
         #weight for older
-        out += stats_dist.norm.logpdf(gal[-1,1],9.5,0.2).sum()
-        if gal[-1,1] > self._age_unq.max():
+        out += stats_dist.norm.logpdf(gal[:,1],9.5,0.2).sum()
+        if nu.any(gal[:,1] > self._age_unq.max()):
             return -nu.inf
         #metals
         if len(self._metal_unq) > 1:
@@ -765,11 +763,12 @@ class VESPA_fit(object):
         is optional in RJMCMC.'''
         #peak around 5 bins with heavy tail
         #can't allow for -inf
-        out = stats_dist.maxwell.logpdf(int(model),2,3)+1
+        '''out = stats_dist.maxwell.logpdf(int(model),2,3)+1
         if nu.isfinite(out):
             return out
         else:
-            return -7.78061839
+            return -7.78061839'''
+        return 0.
         #return stats_dist.maxwell.logpdf(int(model),2,3)+1
 
     def initalize_param(self,model):

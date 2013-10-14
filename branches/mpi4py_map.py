@@ -184,7 +184,8 @@ def _mpi_worker(function, sequence, *args, **kwargs):
             recv = MPI.COMM_WORLD.recv(source=0, tag=MPI.ANY_TAG, status=status)
         except EOFError:
             print('Having problems reciveing commands') 
-            continue
+            import time
+            time.sleep(1)
         if debug: print "Worker %i on %s: received data, tag: %i" % (rank, proc_name, status.tag)
 
         if status.tag == 2:
