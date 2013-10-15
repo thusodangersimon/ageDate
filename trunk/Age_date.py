@@ -111,6 +111,8 @@ except OSError :
     spect,info = load_spec_lib(lib_path)
     '''              
 def find_az_box(param, age_unq, metal_unq):
+    'depricated'
+
     #find closest metal
     line = None
     #check metal
@@ -146,6 +148,7 @@ def find_az_box(param, age_unq, metal_unq):
 
 def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins, 
 						spect):
+    'depricated'
     #does dirty work to make spectra models
     #search age_unq and metal_unq to find closet box spectra and interps
     #does multi componets spectra and fits optimal normalization
@@ -237,32 +240,35 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins,
     return out
 
 #@memoized
-def make_burst(length, t, metal, metal_unq, age_unq, spect, lib_vals):
-    '''def make_burst(length, t, metal, metal_unq, age_unq, spect, lib_vals)
-    (float, float,float, ndarray(float),ndarray(float)
-ndarray(float) tuple(ndarray(floats),ndarray(str))) -> ndarray(float)
+def make_burst(length, T, Metal, SSP):
+    '''def make_burst(length, t, metal, SSP)
+    (float, float,float, ezgal wrapper object) -> ndarray(float)
 Turns SSP into busrt of constant stellar formation and of length dt at
 age t for a const metalicity 10**(t-9) - length/2 to 10**(t-9) + length/2.
 All terms are logrythmic.
-    '''
-	#lib_vals[0][:,0] = 10**nu.log10(lib_vals[0][:,0])
+'''
+    #set up boundaries
+    age_unq = nu.copy(SSP[0].ages)
+    t = 10**T
+    metal = 10**Metal
+    metal_unq = nu.float64(SSP.meta_data['met'])
     if t < age_unq.min() or t > age_unq.max():
 		#Age not in range
-		return spect[:,0] + nu.inf
+		return SSP.sed_ls +  nu.inf
     if metal < metal_unq.min() or metal > metal_unq.max():
 		#Metalicity not in range
-		return spect[:,0] + nu.inf
+		return SSP.sed_ls + nu.inf
 	#get all ssp's with correct age range and metalicity
 	#min age range
-    if t - length/2. < age_unq.min():
+    if 10**(T - length/2.) < age_unq.min():
 		t_min = age_unq.min() + 0.
     else:
-		t_min = t- length/2.
+		t_min = 10**(T - length/2.)
 	#max age range
-    if 	t + length/2. > age_unq.max():
+    if 	10**(T + length/2.) > age_unq.max():
 		t_max = age_unq.max() + 0.
     else:
-		t_max = t + length/2.
+		t_max = 10**(T + length/2.)
     index = nu.searchsorted(age_unq, [t_min,t_max])
     ages = age_unq[index[0]:index[1]]
 	#get SSP's
@@ -272,28 +278,14 @@ All terms are logrythmic.
         ages = nu.linspace(t_min,t_max,10)
     temp_param = []
     #get ssp's
-    for i in ages:
-		temp_param.append([metal, i ,1.])
     try:
-        ssp = get_model_fit_opt(nu.ravel(temp_param), lib_vals, age_unq, metal_unq, 
-        len(ages), spect)
-    except ValueError:
+        ssps = map(SSP.get_sed,ages/10**9.,[metal]*len(ages))
+    except ValueError as e:
         #interp failed
-        return spect[:,0] + nu.inf
-	#sort for intergration
-    inters = []
-	#integrate ssp's
-    ssp.pop('wave')
-    for i in nu.sort(nu.int64(ssp.keys())):
-        if not nu.any(nu.isfinite(ssp[str(i)])):
-            continue
-        inters.append(ssp[str(i)])
-    #check if any arrays are bad
-    if len(inters) == 0 or len(inters) != len(ages):
-        return spect[:,0] + nu.inf
-    #normalize to 1 solar mass
-    
-    return simps(inters, ages, axis=0)/(ages.ptp())
+        print e
+        return SSP.sed_ls + nu.inf
+    #integrate and normalize
+    return simps(ssps, ages, axis=0)/(ages.ptp())
 	#return new ssp
 	
 		
@@ -359,8 +351,8 @@ def data_match_all(data, spect):
     spect = nu.copy(out)
     return spect, out_data
 
-def data_match(data, model, bins, keep_wave=False):
-   '''(ndarray,dict(ndarray),int,bool) -> dict(ndarray)
+def data_match(data, model, keep_wave=False):
+   '''(ndarray,dict(ndarray),bool) -> dict(ndarray)
    Makes sure data and model have same wavelength range 
     and points but with a dictionary
     assumes model wavelength range is longer than data.

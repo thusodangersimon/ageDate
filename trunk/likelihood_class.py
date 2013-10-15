@@ -545,13 +545,13 @@ class VESPA_fit(object):
             spec_lib_path += '/'
         models = glob(spec_lib_path+spec_lib+'*'+imf+'*')
         if len(models) == 0:
-			models = glob(spec_lib_path+spec_lib.lower()+'*'+imf+'*')
+            models = glob(spec_lib_path+spec_lib.lower()+'*'+imf+'*')
         assert len(models) > 0, "Did not find any models"
         #crate ezgal class of models
         SSP = gal.wrapper(models)
         self.SSP = SSP
         #extract seds from ezgal wrapper
-        spect, info = [SSP.sed_ls], []
+        '''spect, info = [SSP.sed_ls], []
         for i in SSP:
 			metal = float(i.meta_data['met'])
 			ages = nu.float64(i.ages)
@@ -562,7 +562,7 @@ class VESPA_fit(object):
 				info.append([metal+0,j])
         info,self._spect = [nu.log10(info),None],nu.asarray(spect).T
         #test if sorted
-        self._spect = self._spect[::-1,:]
+        self._spect = self._spect[::-1,:]'''
         #make spect match wavelengths of data
         #self._spect = ag.data_match_all(data,self._spect)[0]
         #extra models to use
@@ -575,10 +575,10 @@ class VESPA_fit(object):
         if use_losvd:
             self._key_order.append('losvd')
 		#set hidden varibles
-        self._lib_vals = info
-        self._age_unq = nu.unique(info[0][:,1])
-        self._metal_unq = nu.unique(info[0][:,0])
-        self._lib_vals[0][:,0] = 10**self._lib_vals[0][:,0]
+        #self._lib_vals = info
+        self._age_unq = nu.unique(nu.log10(SSP[0].ages))[1:]
+        self._metal_unq = nu.log10(nu.float64(SSP.meta_data['met']))
+        #self._lib_vals[0][:,0] = 10**self._lib_vals[0][:,0]
         self._min_sfh, self._max_sfh = min_sfh,max_sfh +1
 		#params
         self.curent_param = nu.empty(2)
@@ -683,8 +683,11 @@ class VESPA_fit(object):
         burst_model = {}
         for i in param[bins]['gal']:
             burst_model[str(i[1])] =  10**i[3]*ag.make_burst(i[0],i[1],i[2],
-            self._metal_unq, self._age_unq, self._spect, self._lib_vals)
-        burst_model['wave'] = nu.copy(self._spect[:,0])
+            self.SSP)
+        burst_model['wave'] = nu.copy(self.SSP.sed_ls)
+        if not issorted(burst_model['wave']):
+            for i in burst_model.keys():
+                burst_model[i] = burst_model[i][-1:0:-1]
 		#do dust
         if self._has_dust:
             #dust requires wavelengths
@@ -2032,14 +2035,14 @@ class Multinest_fit(object):
         #passed all tests
         return True
 
-    def issorted(self,l):
-        '''(list or ndarray) -> bool
-        Returns True is array is sorted
-        '''
-        for i in xrange(len(l)-1):
-            if not l[i] <= l[i+1]:
+def issorted(l):
+    '''(list or ndarray) -> bool
+    Returns True is array is sorted
+    '''
+    for i in xrange(len(l)-1):
+        if not l[i] <= l[i+1]:
                 return False
-        return True
+    return True
 
 #######other functions
 
