@@ -698,14 +698,14 @@ class VESPA_fit(object):
         if self._has_losvd:
             #check if wavelength exsist
             if 'wave' not in burst_model.keys():
-                burst_model['wave'] = nu.copy(self._spect[:,0])
+                burst_model['wave'] = nu.copy(self.SSP.sed_ls)
             #make buffer for edge effects
             wave_range = [self.data[:,0].min(),self.data[:,0].max()]
             burst_model = ag.LOSVD(burst_model, param[bins]['losvd'], wave_range)
         #need to match data wavelength ranges and wavelengths
 		#get loglik
         
-        burst_model = ag.data_match(self.data,burst_model,bins)
+        burst_model = ag.data_match(self.data,burst_model)
         model = nu.sum(burst_model.values(),0)
         
 		#return loglik
