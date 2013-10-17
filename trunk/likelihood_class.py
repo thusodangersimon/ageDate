@@ -35,6 +35,7 @@ from glob import glob
 import Age_date as ag
 import ezgal as gal
 import scipy.stats as stats_dist
+from scipy.special import erfinv
 import multiprocessing as multi
 from itertools import izip
 from scipy.cluster.hierarchy import fcluster,linkage
@@ -1246,13 +1247,12 @@ class VESPA_fit(object):
         else:
             return out
         
-class Spectral_fit(object):
-    '''Finds the age, metalicity, star formation history, 
-    dust obsorption and line of sight velocity distribution
-    to fit a Spectrum. 
+class SSP_fit(object):
+    '''Uses all ssp grid and finds mass fractions that best represent all
+    of the galaxy. Also includes LOSVD and dust
     '''
 
-    def __init__(self,data, use_dust=True, use_losvd=True, spec_lib='p2',imf='salp',spec_lib_path='/home/thuso/Phd/stellar_models/ezgal/'):
+    def __init__(self,data, use_dust=True, use_losvd=True, spec_lib='bc03',imf='salp',spec_lib_path='/home/thuso/Phd/stellar_models/ezgal/'):
         '''(Example_lik_class,#user defined) -> NoneType or userdefined
 
         initalize class, initalize spectal func, put nx2 or nx3 specta
@@ -1273,7 +1273,9 @@ class Spectral_fit(object):
         #initalize data and make ezgal class for uses
         self.data = nu.copy(data)
         #check data, reduice wavelenght range, match wavelengths to lib
-        #get all ssp libs with spec_lib name
+        self._norm = 1./(self.data[:,1].mean()/100.)
+        self.data[:,1] *= self._norm
+        #load models
         cur_lib = ['basti', 'bc03', 'cb07','m05','c09','p2']
         assert spec_lib.lower() in cur_lib, ('%s is not in ' %spec_lib.lower() + str(cur_lib))
         if not spec_lib_path.endswith('/') :
@@ -1283,23 +1285,36 @@ class Spectral_fit(object):
             models = glob(spec_lib_path+spec_lib.lower()+'*'+imf+'*')
         assert len(models) > 0, "Did not find any models"
         #crate ezgal class of models
-        self.SSP = gal.wrapper(models)
-        #check to see if properties are the same
-        self._metal_unq = nu.float64(self.SSP['met'])
-        self._age_unq = nu.copy(self.SSP.sed_ages)/10.**9
-        #make keys for models (all caps=required, lower not required
-        #+ means additive modesl, * is multiplicative or convolution
-        self.get_sed = lambda x: x[2] * self.SSP.get_sed(x[0],x[1])
-        self.models = {'SSP+':[['age','metal','norm'],self.get_sed],
-			'dust*':[['tbc','tsm'],ag.dust]}
-        #set values for priors
+        SSP = gal.wrapper(models)
+        self.SSP = SSP
         
-    def _model_handeler(self,models):
-        '''(Example_lik_class, str) -> str
-        
-        Not called by RJMMCMC or MCMC, but handels how models interact
-        '''
-        pass
+        #extra models to use
+        self._has_dust = use_dust
+        self._has_losvd = use_losvd
+        #key order
+        self._key_order = ['gal']
+        if use_dust:
+            self._key_order.append('dust')
+        if use_losvd:
+            self._key_order.append('losvd')
+		#set hidden varibles
+        #self._lib_vals = info
+        self._age_unq = nu.unique(nu.log10(SSP[0].ages))[1:]
+        self._metal_unq = nu.log10(nu.float64(SSP.meta_data['met']))
+        #self._lib_vals[0][:,0] = 10**self._lib_vals[0][:,0]
+        self._min_sfh, self._max_sfh = min_sfh,max_sfh +1
+		#params
+        self.curent_param = nu.empty(2)
+        self.models = {}
+        for i in xrange(min_sfh,max_sfh+1):
+            self.models[str(i)]= ['burst_length','mean_age', 'metal','norm'] * i
+        #multiple_block for bad performance
+        self._multi_block = False
+        self._multi_block_param = {}
+        self._multi_block_index = {}
+        self._multi_block_i = 0
+        #max total length of bins constraints
+        self._max_age = self._age_unq.ptp()
 		
     def proposal(self,mu,sigma):
         '''(Example_lik_class, ndarray,ndarray) -> ndarray
@@ -1940,7 +1955,12 @@ class Multinest_fit(object):
         param = self.set_param(p)
         count = 0
         for i in param['gal']:
-            p[count+1] = i[1] * self._age_unq.ptp() + self._age_unq.min()
+            #gaussian with mean mu and std sigma
+            mu = 9.5
+            sigma = 0.5
+            p[count+1] = erfinv(i[1] * 2. - 1.)*sigma + mu
+            #uniform
+            #p[count+1] = i[1] * self._age_unq.ptp() + self._age_unq.min()
             #length bin is conditional on age
             min_range = min(abs(i[1] - self._age_unq.min()),
                             abs(self._age_unq.max()-i[1]))
@@ -2006,7 +2026,7 @@ class Multinest_fit(object):
         else:
             raise TypeError('input must be dict or ndarray')
         #make sure age is sorted
-        if not self.issorted(param[key][:,1]):
+        if not issorted(param[key][:,1]):
             return False
         #make sure bins do not overlap fix if they are
         for i in xrange(param[key].shape[0]-1):
@@ -2035,6 +2055,7 @@ class Multinest_fit(object):
         #passed all tests
         return True
 
+#######other functions
 def issorted(l):
     '''(list or ndarray) -> bool
     Returns True is array is sorted
@@ -2043,8 +2064,6 @@ def issorted(l):
         if not l[i] <= l[i+1]:
                 return False
     return True
-
-#######other functions
 
 #used for class_map
 def spawn(f):
