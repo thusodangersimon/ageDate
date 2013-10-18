@@ -1912,7 +1912,7 @@ class Multinest_fit(object):
         burst_model = {}
         for i in param['gal']:
             burst_model[str(i[1])] =  10**i[3]*ag.make_burst(i[0],i[1],i[2],
-            self._metal_unq, self._age_unq, self._spect, self._lib_vals)
+            self.SSP)
         burst_model['wave'] = nu.copy(self._spect[:,0])
 		#do dust
         if self._has_dust:

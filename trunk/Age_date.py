@@ -44,7 +44,10 @@ from scipy.integrate import simps
 #from scipy.signal import fftconvolve
 import time as Time
 import boundary as bound
-#from losvd_convolve import convolve
+try:
+    from losvd_convolve import convolve
+except:
+    pass
 
 
 #123456789012345678901234567890123456789012345678901234567890123456789
@@ -58,20 +61,25 @@ class memoized(object):
       self.func = func
       self.__doc__ = func.__doc__
       self.cache = {}
-
+      self.cache['gauss1'] = {}
     def __call__(self, *args):
       #works different for different functions
       if self.func.__name__ == 'gauss1':
+        #remove cache if get's too big
+        if nu.random.rand() < .01:
+          l = len(self.cache['gauss1'])
+          if l > 10**5:
+            self.cache['gauss1'].clear()
         arg = ''
         for i in args:
-          arg+=str(i)
-        #arg = str(args[1])
-        if arg in self.cache:
-          return self.cache[arg]
+          arg+=str(i)+ ' '
+        if arg in self.cache['gauss1']:
+          return self.cache['gauss1'][arg]
         else:
           value = self.func(*args)
-          self.cache[arg] = value
+          self.cache['gauss1'][arg] = value
           return value
+      
       elif self.func.__name__ == 'make_burst':
           arg = str((args[0],args[1],args[2]))
           if not arg in self.cache:
@@ -575,7 +583,7 @@ def gauss_kernel(velscale,sigma=1,h3=0,h4=0):
        slitout /= nu.sum(slitout)
     return slitout
 
-def LOSVD(model, param, wave_range, convlve='python'):
+def LOSVD(model, param, wave_range, convlve='p'):
     '''(dict(ndarray), ndarray, ndarray) -> dict(ndarray)
 
     Convolves data with a gausian with dispersion of sigma, and hermite poly
@@ -613,26 +621,12 @@ def LOSVD(model, param, wave_range, convlve='python'):
             continue
         sum_spec['0'] += model[i]
     sum_spec['0'] = spectra_lin_interp(sum_spec['wave'], sum_spec['0'], wave)
-    sum_spec['0'] = convolve_python_fast(wave, nu.ascontiguousarray(sum_spec['0']), tparam)
+    if 'python' == convlve:
+        sum_spec['0'] = convolve_python_fast(wave, nu.ascontiguousarray(sum_spec['0']), tparam)
+    else:
+        convolve(wave, sum_spec['0'], tparam ,sum_spec['0'])
     sum_spec['wave'] = redshift(wave,tparam[1])
-    ''' #convolve individual spectra
-    for i in model.keys():
-        if i == 'wave':
-            continue
-        if 'python' == convlve:
-            model[i] = spectra_lin_interp(model['wave'], model[i], wave)
-            tmodel[i] = convolve_python_fast(wave, nu.ascontiguousarray(model[i]), tparam)
-        else:
-            #c++ convolve
-            tmodel[i] = spectra_lin_interp(tmodel['wave'], tmodel[i], wave)
-            convolve(wave, tmodel[i], tparam ,tmodel[i])
-    #apply redshift
-    tmodel['wave'] = redshift(wave,tparam[1])
-    #uncertanty convolve
-    #if data.shape[1] == 3:
-    #    out[:,2] = nu.sqrt(nu.convolve(kernel**2, data[:,2]**2,'same'))
 
-    return tmodel'''
     return sum_spec
 
 def convolve_python_fast(x, y, losvd_param, option='rebin'):
@@ -646,7 +640,8 @@ def convolve_python_fast(x, y, losvd_param, option='rebin'):
    #make an array with same size as y 
    Kernals = map(make_kernel_array, Kernals,[Len_data]*Len_data,range(Len_data))
    #convovle
-   ys = nu.array(map(lambda x,y: nu.sum(x*y), Kernals, [y]*Len_data))
+   f = lambda x,y: nu.sum(x*y)
+   ys = nu.array(map(f, Kernals, [y]*Len_data))
    return ys
    
 def make_kernel_array(Kernel, Length, i):
@@ -703,18 +698,19 @@ def convolve_python(x, y, losvd_param, option='rebin'):
 
 #@memoized
 def gauss1(diff_wave,  wave_current,  sigma,  h3,  h4):
-   '''inline gauss(nu.ndarray diff_wave, float wave_current float sigma, float h3, float h4)
-	Returns value of gaussian-hermite function normalized to area = 1'''
-   c = 299792.458
-   vel_scale = diff_wave / wave_current * c
-   logl_sigma = nu.log(1. + sigma/c) / vel_scale * c
-   N = nu.ceil( 5.*logl_sigma)
-   x = nu.arange(2*N+1) - N
-   y = x / logl_sigma
-   slitout = nu.exp(-y**2/2.) / logl_sigma #/ nu.sqrt(2.*nu.pi)
-   slitout *= ( 1.+ h3 * 2**.5 / (6.**.5) * (2 * y**3 - 3 * y) + 
-                h4 / (24**.5) * (4 * y**4 - 12 * y**2 + 3))
-   if not slitout.sum() == 0:
-      slitout /= nu.sum(slitout)
-   return slitout      
+    '''inline gauss(nu.ndarray diff_wave, float wave_current float sigma, float h3, float h4)
+    Returns value of gaussian-hermite function normalized to area = 1'''
+    c = 299792.458
+    #vel_scale = diff_wave / wave_current * c
+    logl_sigma = wave_current * nu.log(1. + sigma/c) / diff_wave
+    N = nu.ceil( 5.*logl_sigma)
+    x = nu.arange(2*N+1) - N
+    y = x / logl_sigma
+    slitout = nu.exp(-y**2/2.) / logl_sigma #/ nu.sqrt(2.*nu.pi)
+    slitout *= ( 1.+ h3 * 2**.5 / (6.**.5) * (2 * y**3 - 3 * y) + 
+                    h4 / (24**.5) * (4 * y**4 - 12 * y**2 + 3))
+    Sum = slitout.sum()
+    if not Sum == 0:
+        slitout /= Sum
+    return slitout      
 
