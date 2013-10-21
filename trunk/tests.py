@@ -29,71 +29,66 @@
 """
 scap develoment programs
 """
-import tables as tab
+import likelihood_class as lik
 import numpy as nu
-
-#create an hdf5 database
-#['Temp','g','H','Li','Be','B','C','N','O','F','Ne','Na','Mg','Al','Si','P','S','Cl','Ar','K','Ca','Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Ni','Zn','point']
-#class defining col
-class CV_lib(tab.IsDescription):
-    Temp = tab.Float32Col(pos=1)
-    g= tab.Float32Col(pos=2)
-    H= tab.Float32Col(pos=3)
-    Li= tab.Float32Col(pos=4)
-    Be= tab.Float32Col(pos=5)
-    B= tab.Float32Col(pos=6)
-    C= tab.Float32Col(pos=7)
-    N= tab.Float32Col(pos=8)
-    O= tab.Float32Col(pos=9)
-    F= tab.Float32Col(pos=10)
-    Ne= tab.Float32Col(pos=11)
-    Na= tab.Float32Col(pos=12)
-    Mg= tab.Float32Col(pos=13)
-    Al= tab.Float32Col(pos=14)
-    Si= tab.Float32Col(pos=15)
-    P= tab.Float32Col(pos=16)
-    S= tab.Float32Col(pos=17)
-    Cl= tab.Float32Col(pos=18)
-    Ar= tab.Float32Col(pos=19)
-    K= tab.Float32Col(pos=20)
-    Ca= tab.Float32Col(pos=21)
-    Sc= tab.Float32Col(pos=22)
-    Ti= tab.Float32Col(pos=23)
-    V= tab.Float32Col(pos=24)
-    Cr= tab.Float32Col(pos=25)
-    Mn= tab.Float32Col(pos=26)
-    Fe= tab.Float32Col(pos=27)
-    Co= tab.Float32Col(pos=28)
-    Ni= tab.Float32Col(pos=29)
-    Cu= tab.Float32Col(pos=30)
-    Ni= tab.Float32Col(pos=31)
-    Zn= tab.Float32Col(pos=32)
-    spec = tab.FloatCol(pos=33,shape=(5001,2))
-    
+import pylab as lab
 
 
-if __name__ == __'main__':
-    #create data base
-    lib = tab.open_file('CV_lib.h5', 'w')
-    table = lib.create_table(lib.root, 'Param',CV_lib,"Param and spec")
-    #create enough points to take a computer month to calculate
-    #time per iteration
-    t = 220.
-    t_month = 31*24*3600.
-    itter = round(t_month/t)
-    #params to use
-    abn = ['H','He','C','N','O','Si','P','S']
-    nbins = round(nu.exp((len(abn)+2)/nu.log(itter)))
-    out = []
-    lin = nu.linspace
-    for T in lin(20000,40000,nbins):
-        for g in lin(4,8,nbins):
-            for H in lin(-1,1,nbins):
-                for He in lin(-1,1,nbins):
-                    for C in lin(-1,1,nbins):
-                        for N in lin(-1,1,nbins):
-                            for O in lin(-1,1,nbins):
-                                for Si in lin(-1,1,nbins):
-                                    for P in lin(-1,1,nbins):
-                                        for S in lin(-1,1,nbins):
-                                            out.append([T,g,H,He,C,N,O,Si,P,S])
+def make_chi(flux,spec,t,z,del_index):
+    chi = nu.zeros_like(t)
+    d = nu.vstack((t.ravel(),z.ravel())).T
+    for i in range(d.shape[0]):
+        index = nu.unravel_index(i,t.shape)
+        chi[index] = nu.sum((spec[i,del_index]-flux[del_index])**2)
+    return chi
+#entropy calculation with plots
+fun = lik.VESPA_fit(nu.ones((2,2)),spec_lib='bc03')
+
+SSP = fun.SSP
+ages = fun._age_unq
+metal = fun._metal_unq
+
+t,z = nu.meshgrid(ages,metal)
+spec = []
+d = nu.vstack((t.ravel(),z.ravel())).T
+for i in d:
+    try:
+        spec.append(SSP.get_sed(10**(i[0]-9),10**i[1]))
+    except:
+        spec.append(SSP.get_sed(round(10**(i[0]-9)),10**i[1]))
+
+#make array
+spec = nu.asarray(spec)
+norm = nu.ones_like(spec[:,0])
+#find normalization
+for i in range(1,len(spec)):
+    norm[i] = nu.sum(spec[0,:]*spec[i,:])/nu.sum(spec[i,:]**2)
+
+#make probabity mass function matrix
+pmf = nu.zeros_like(spec)
+for i in range(spec.shape[1]):
+    p = nu.copy(spec[:,i]*norm)
+    #histogram
+    h=nu.histogram(p,bins=nu.sort(p))
+    H = []
+    for j in h[0]:
+        H.append(j)
+    H[-1] /= 2.
+    H.append(H[-1])
+    unsorted = H/nu.float64(sum(H))
+    pmf[:,i] = unsorted[nu.argsort(nu.argsort(p))]
+
+#set minimun prob
+pm[pmf == 0] = 10**-99
+lab.plot(d[:,0],  -nu.sum(nu.log10(pmf)*pmf,axis=1),'.') 
+for i in range(pmf.shape[0]):
+    print -nu.sum(nu.log10(pmf)*pmf,axis=1)
+#make animation of how information changes likelihood
+#get spectra
+flux = list(spec[nu.argmax(-nu.sum(nu.log10(pmf)*pmf,axis=1))])
+H = pmf[nu.argmax(-nu.sum(nu.log10(pmf)*pmf,axis=1))]
+wave = list(SSP.sed_ls)
+del_index = flux == flux
+for i in xrange(wave.shape[0]):
+    chi.append( make_chi(flux,spec,t,z,del_index))
+    del_index[nu.argmin(H[del_index])]=False 
