@@ -32,13 +32,8 @@ _module_name='gauss_param_space'
 
 import numpy as nu
 import pylab as lab
-#import mpl_toolkits.mplot3d.axes3d as lab3
-#from mpl_toolkits.mplot3d import Axes3D
-#import sympy as sy
 import scipy.stats as stat_dist
 from scipy.special import expn
-import rpy2.robjects as ro
-#import Age_hybrid as hy
 from scipy.optimize import fmin_powell
 from scipy import seterr
 
@@ -104,7 +99,84 @@ class Gauss_lik(object):
         #should not return NaNs if miss calculations should return inf
         return stat_dist.norm.pdf(x,loc = self._true_mu, scale=self._true_sigma)
 
-class Gaussian_Mixture_model(object):
+class Gaussian_Mixture_NS(object):
+    '''Uses a mixture model of gausians to test RJMCMC infrenece'''
+    def __init__(self,n_points=100,real_k=None,noise=None):
+        '''Creates data and stores real infomation for model
+        y = sum_i^k w_i*N(mu_i,sigma_i) + N(0,noise)
+        where sum_i^k w_i =1'''
+        #initalize how many mixture compents
+        if not real_k:
+            self._k = nu.random.randint(1,10)
+        else:
+            self._k = real_k
+        self._max_order = 10
+        self._min_order = 1
+        self._order = self._k
+        #generate real parametes from normal [mu,sigma] sigma>0
+        self._param = nu.random.randn(self._k,2)*9 
+        self._param[:,1] = nu.abs(self._param[:,1])
+        self._param = self._param[self._param[:,0].argsort()]
+        #generate points
+        param = self._param.ravel()
+        x,y = nu.random.randn(n_points)*10, nu.zeros(n_points)
+        x.sort()
+        for i in range(0,self._k*2,2):
+            y += stat_dist.norm.pdf(x,param[i],nu.abs(param[i+1]))
+        y *= 1000
+        #if noise
+        if noise is None:
+            self.noise = False
+            self.data = nu.vstack((x,y)).T
+        else:
+            y += nu.random.randn(x.shape[0])*noise
+            self.noise = True
+        self.data = nu.vstack((x,y,nu.ones_like(x)*noise)).T
+        #set prior values
+        self.mu,self.var = 0.,9.
+
+    def lik(self,param,k,*args):
+        '''log liklyhood calculation'''
+        #create random points for histograming
+        #k = len(param)
+        x,y = self.disp_model(param,k)
+        #normalize
+        N = nu.sum(y * self.data[:,1])/nu.sum(y**2)
+        if self.noise:
+            out = stat_dist.norm.logpdf(self.data[:,1],N * y,self.data[:,2])
+        else:
+            out = stat_dist.norm.logpdf(self.data[:,1],N * y)
+        #out = -nu.sum((self.data[:,1] - y)**2)
+        return out.sum()
+
+    def disp_model(self,param,k):
+        '''makes x,y axis for plotting of params'''
+        #k = len(param)
+        #n_points = self.data.shape[0]
+        #temp_points = []
+        y = nu.zeros_like(self.data[:,1])
+        x = self.data[:,0]
+        for i in range(0,k,2):
+            y += stat_dist.norm.pdf(x,param[i],nu.abs(param[i+1]))
+        y *= 1000
+        N = nu.sum(y * self.data[:,1])/nu.sum(y**2)
+        return x, N * y
+
+    def prior(self,param,k,*args):
+        '''log prior and boundary calculation'''
+        ###################fix
+        #mean prior
+        for i in param[slice(0,-1,2)]:
+            out += stat_dist.norm.logpdf(i,loc=self.mu,scale=self.var)
+        #var prior
+        for i in param[slice(1,param.size,2)]: 
+            if i < 0:
+                out += -nu.inf
+            else:
+                out += stat_dist.norm.logpdf(i,loc=self.mu,scale=self.var)
+        #return out.sum()
+    
+class Gaussian_Mixture_RJCMC(object):
     '''Uses a mixture model of gausians to test RJMCMC infrenece'''
     def __init__(self,n_points=100,real_k=None):
         '''Creates data and stores real infomation for model
