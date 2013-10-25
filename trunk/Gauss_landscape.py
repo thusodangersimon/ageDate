@@ -33,7 +33,7 @@ _module_name='gauss_param_space'
 import numpy as nu
 import pylab as lab
 import scipy.stats as stat_dist
-from scipy.special import expn
+from scipy.special import expn,erfinv
 from scipy.optimize import fmin_powell
 from scipy import seterr
 
@@ -131,7 +131,7 @@ class Gaussian_Mixture_NS(object):
         else:
             y += nu.random.randn(x.shape[0])*noise
             self.noise = True
-        self.data = nu.vstack((x,y,nu.ones_like(x)*noise)).T
+            self.data = nu.vstack((x,y,nu.ones_like(x)*noise)).T
         #set prior values
         self.mu,self.var = 0.,9.
 
@@ -165,16 +165,15 @@ class Gaussian_Mixture_NS(object):
     def prior(self,param,k,*args):
         '''log prior and boundary calculation'''
         ###################fix
-        #mean prior
-        for i in param[slice(0,-1,2)]:
-            out += stat_dist.norm.logpdf(i,loc=self.mu,scale=self.var)
-        #var prior
-        for i in param[slice(1,param.size,2)]: 
-            if i < 0:
-                out += -nu.inf
-            else:
-                out += stat_dist.norm.logpdf(i,loc=self.mu,scale=self.var)
-        #return out.sum()
+        #mean prior is even index and 0
+        for i in xrange(k):
+            #mean prior is even index and 0
+            #var prior is odd index
+            param[i] = erfinv(param[i] * 2. - 1.) * self.var**2 + self.mu
+            if i % 2 == 1: #make sure sigma is positive
+                if param[i] < 0:
+                    param[i] = abs(param[i])
+            
     
 class Gaussian_Mixture_RJCMC(object):
     '''Uses a mixture model of gausians to test RJMCMC infrenece'''
