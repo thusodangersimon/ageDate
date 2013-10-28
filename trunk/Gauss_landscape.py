@@ -226,17 +226,17 @@ class Gaussian_Mixture_RJMCMC(object):
     def lik(self,param,bins):
         '''log liklyhood calculation'''
         #create random points for histograming
-        k = len(param[bins][0])
-        x,y = self.disp_model(param[bins][0])
+        k = int(bins)*2
+        x,y = self.disp_model(param[bins],k)
         #normalize
         N = nu.sum(y * self.data[:,1])/nu.sum(y**2)
         out = stat_dist.norm.logpdf(self.data[:,1],N * y)
         #out = -nu.sum((self.data[:,1] - y)**2)
         return out.sum()
 
-    def disp_model(self,param):
+    def disp_model(self,param,k):
         '''makes x,y axis for plotting of params'''
-        k = len(param)
+        #k = len(param)
         #n_points = self.data.shape[0]
         #temp_points = []
         y = nu.zeros_like(self.data[:,1])
@@ -251,10 +251,10 @@ class Gaussian_Mixture_RJMCMC(object):
         '''log prior and boundary calculation'''
         out = 0.
         #mean prior
-        for i in param[bins][0][slice(0,-1,2)]:
+        for i in param[bins][slice(0,-1,2)]:
             out += stat_dist.norm.logpdf(i,loc=self.mu,scale=self.var)
         #var prior
-        for i in param[bins][0][slice(1,param[bins][0].size,2)]: 
+        for i in param[bins][slice(1,param[bins].size,2)]: 
             if i < 0:
                 out += -nu.inf
             else:
@@ -265,7 +265,7 @@ class Gaussian_Mixture_RJMCMC(object):
         '''initalizes parameters for uses in MCMC'''
         order = int(order)
         order *= 2
-        params = nu.random.multivariate_normal([0]*order,nu.identity(order)*9,size)
+        params = nu.random.multivariate_normal([0]*order,nu.identity(order)*9,size)[0]
         sigma = nu.identity(order)*nu.random.rand()*9
         if size > 1:
             sigma = [sigma]*size
@@ -284,13 +284,17 @@ class Gaussian_Mixture_RJMCMC(object):
             step_size[model] /= 1.05
         #cov matrix
         if len(param) % 200 == 0 and len(param) > 0.:
-            temp = nu.cov(self.list_dict_to(param[-2000:]).T)
+            temp = nu.cov(nu.asarray(param[-2000:]).T)
             #make sure not stuck
             if nu.any(temp.diagonal() > 10**-6):
                 step_size[model] = temp
         
         return step_size[model]
 
+    def model_prior(self,model):
+        '''prior on model'''
+        return 0.
+    
     def birth_death(self,birth_rate, bins, active_param):
         if birth_rate > nu.random.rand() and int(bins) + 1 != self._max_order :
             #birth
@@ -370,12 +374,18 @@ class Gaussian_Mixture_RJMCMC(object):
             temp_bins, critera = None,None
         else:
             #do quick llsq to help get to better place
-            f_temp = lambda x :(-self.lik(x,temp_bins) - self.prior(x,temp_bins))
-            active_param[str(temp_bins)] = fmin_powell(f_temp, 
-                                                  active_param[str(temp_bins)],maxfun=10,disp=False)
-            j, j_timeleft = 0, nu.random.exponential(200)
+            active_param[str(temp_bins)] = fmin_powell(self._map, 
+active_param[str(temp_bins)],args=(str(temp_bins),),maxfun=10,disp=False)
+            
+            
         return active_param, str(temp_bins), attempt, critera
 
+    def _map(self,x,temp_bins):
+        ''' for running a map with fmin_powell'''
+       
+        return -(self.lik({temp_bins:x},temp_bins) +
+                 self.prior({temp_bins:x},temp_bins))
+    
     def bic(self):
         '''() -> ndarray
         Calculates the Bayesian Information Criteria for all models in 

@@ -81,6 +81,8 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,tot_iter=10**5, seed=N
                     
                 else:
                     initalize = False
+            else:
+                initalize = True
     elif type(fail_recover) is str:
             #load from path
             initalize = False
