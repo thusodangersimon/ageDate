@@ -31,7 +31,7 @@
 _module_name='gauss_param_space'
 
 import numpy as nu
-import pylab as lab
+#import pylab as lab
 import scipy.stats as stat_dist
 from scipy.special import expn,erfinv
 from scipy.optimize import fmin_powell
@@ -175,9 +175,9 @@ class Gaussian_Mixture_NS(object):
                     param[i] = abs(param[i])
             
     
-class Gaussian_Mixture_RJCMC(object):
+class Gaussian_Mixture_RJMCMC(object):
     '''Uses a mixture model of gausians to test RJMCMC infrenece'''
-    def __init__(self,n_points=100,real_k=None):
+    def __init__(self,n_points=100,real_k=None,noise=None):
         '''Creates data and stores real infomation for model
         y = sum_i^k w_i*N(mu_i,sigma_i)
         where sum_i^k w_i =1'''
@@ -200,23 +200,34 @@ class Gaussian_Mixture_RJCMC(object):
         for i in range(0,self._k*2,2):
             y += stat_dist.norm.pdf(x,param[i],nu.abs(param[i+1]))
         y *= 1000
-
-        self.data = nu.vstack((x,y)).T
+        #if noise
+        if noise is None:
+            self.noise = False
+            self.data = nu.vstack((x,y)).T
+        else:
+            y += nu.random.randn(x.shape[0])*noise
+            self.noise = True
+            self.data = nu.vstack((x,y,nu.ones_like(x)*noise)).T
         #set prior values
         self.mu,self.var = 0.,9.
+        #set up models that can be used
+        self.models = {}
+        for i in range(self._min_order,self._max_order+1):
+            self.models[str(i)] = []
+            
 
     def proposal(self,mu,sigma):
         '''drawing function for RJMC'''
-        param = nu.random.multivariate_normal(mu,sigma)
+        param = nu.random.multivariate_normal(mu, sigma)
         param = param.reshape((param.shape[0]/2,2))
         param[:,1] = nu.abs(param[:,1])
         return nu.ravel(param)
 
-    def lik(self,param,**args):
+    def lik(self,param,bins):
         '''log liklyhood calculation'''
         #create random points for histograming
-        k = len(param)
-        x,y = self.disp_model(param)
+        k = len(param[bins][0])
+        x,y = self.disp_model(param[bins][0])
         #normalize
         N = nu.sum(y * self.data[:,1])/nu.sum(y**2)
         out = stat_dist.norm.logpdf(self.data[:,1],N * y)
@@ -236,14 +247,14 @@ class Gaussian_Mixture_RJCMC(object):
         N = nu.sum(y * self.data[:,1])/nu.sum(y**2)
         return x, N * y
 
-    def prior(self,param):
+    def prior(self,param,bins):
         '''log prior and boundary calculation'''
         out = 0.
         #mean prior
-        for i in param[slice(0,-1,2)]:
+        for i in param[bins][0][slice(0,-1,2)]:
             out += stat_dist.norm.logpdf(i,loc=self.mu,scale=self.var)
         #var prior
-        for i in param[slice(1,param.size,2)]: 
+        for i in param[bins][0][slice(1,param[bins][0].size,2)]: 
             if i < 0:
                 out += -nu.inf
             else:
@@ -252,6 +263,7 @@ class Gaussian_Mixture_RJCMC(object):
     
     def initalize_param(self,order,size=1):
         '''initalizes parameters for uses in MCMC'''
+        order = int(order)
         order *= 2
         params = nu.random.multivariate_normal([0]*order,nu.identity(order)*9,size)
         sigma = nu.identity(order)*nu.random.rand()*9
@@ -259,31 +271,35 @@ class Gaussian_Mixture_RJCMC(object):
             sigma = [sigma]*size
         return params,sigma
     
-    def step_func(self,accept_rate,param,sigma,order):
-        '''changes step size'''
-        if accept_rate > .55  and nu.all(sigma < 10):
-            sigma *= 1.05
-        elif accept_rate <.50 and nu.any(sigma.diagonal() > 10**-32):
-            sigma /= 1.05
-        if len(param[-1000:]) % 100 and len(param)>500:
-            try:
-                tsigma = nu.cov(param[-1000:].T)
-            except AttributeError:
-                tsigma = nu.cov(nu.array(param[-1000:]).T)
-            #check to see if new step is in range
-            if not nu.any(tsigma.diagonal() < 10**-32):
-                sigma = tsigma
-        return sigma
+    def step_func(self,step_crit,param,step_size,model):
+        '''(Example_lik_class, float, ndarray or list, ndarray, any type) ->
+        ndarray
 
-    def birth_death(self,birth_rate, bins, j, j_timeleft, active_param):
-        if birth_rate > nu.random.rand() and bins+1 != self._max_order :
+        Evaluates step_criteria, with help of param and model and 
+        changes step size during burn-in perior. Outputs new step size
+        '''
+        if step_crit > .60:
+            step_size[model] *= 1.05
+        elif step_crit < .2 and nu.any(step_size[model].diagonal() > 10**-6):
+            step_size[model] /= 1.05
+        #cov matrix
+        if len(param) % 200 == 0 and len(param) > 0.:
+            temp = nu.cov(self.list_dict_to(param[-2000:]).T)
+            #make sure not stuck
+            if nu.any(temp.diagonal() > 10**-6):
+                step_size[model] = temp
+        
+        return step_size[model]
+
+    def birth_death(self,birth_rate, bins, active_param):
+        if birth_rate > nu.random.rand() and int(bins) + 1 != self._max_order :
             #birth
             attempt = True #so program knows to attempt a new model
             #create step
-            temp_bins = bins + 1 #nu.random.randint(bins+1,self._max_order)
+            temp_bins = int(bins) + 1 #nu.random.randint(bins+1,self._max_order)
             #split move params 
-            index = [nu.random.randint(0,bins)]
-            mu,sigma = active_param[str(bins)][index[0]*2:index[0]*2+2]
+            index = [nu.random.randint(0,int(bins))]
+            mu,sigma = active_param[bins][index[0]*2:index[0]*2+2]
             w = nu.random.rand()*100
             u3 =  nu.random.beta(1,1)      
             u1,u2 = nu.random.beta(2,2,2)
@@ -301,62 +317,52 @@ class Gaussian_Mixture_RJCMC(object):
             #copy other vars
             j = 2
             while j< temp_bins:
-                i = nu.random.randint(0,bins)
+                i = nu.random.randint(0,int(bins))
                 while i  in index:
-                    i = nu.random.randint(0,bins)
+                    i = nu.random.randint(0,int(bins))
                 index.append(i)
-                active_param[str(temp_bins)][j*2] = nu.copy(active_param[str(bins)][i*2] )
-                active_param[str(temp_bins)][j*2+1] = abs(active_param[str(bins)][i*2+1] )
+                active_param[str(temp_bins)][j*2] = nu.copy(active_param[bins][i*2] )
+                active_param[str(temp_bins)][j*2+1] = abs(active_param[bins][i*2+1] )
                 j+=1
             
             #check to see if in bounds
             #other methods of creating params
-        elif bins - 1 >= self._min_order:
+        elif int(bins) - 1 >= self._min_order:
             #death
             attempt = True #so program knows to attempt a new model
             #choose param randomly delete
-            temp_bins = bins - 1 #nu.random.randint(self._min_order,bins)
+            temp_bins = int(bins) - 1 #nu.random.randint(self._min_order,bins)
             critera = 2**(temp_bins) * (1 - birth_rate )
-            if .5>nu.random.rand():
+            if .5 > nu.random.rand():
                 #merge 2 params together
                 #W1*u+W2*(1-u) = w 
-                u,index = nu.random.rand(),nu.random.randint(0,bins,2)
+                u,index = nu.random.rand(),nu.random.randint(0,int(bins),2)
                 #combine the param
                 active_param[str(temp_bins)][0] = (
-                    active_param[str(bins)][index[0]*2] *(1-u) +
-                    active_param[str(bins)][index[1]*2]*u)
+                    active_param[bins][index[0]*2] *(1-u) +
+                    active_param[bins][index[1]*2]*u)
                 active_param[str(temp_bins)][1] = (
-                    active_param[str(bins)][index[0]*2+1] *(1-u) +
-                    active_param[str(bins)][index[1]*2+1]*u)
+                    active_param[bins][index[0]*2+1] *(1-u) +
+                    active_param[bins][index[1]*2+1]*u)
                 j = 1
                 #copy the rest
-                for i in range(bins):
+                for i in xrange(int(bins)):
                     if i in index:
                         continue
                     elif j >= temp_bins:
                         break
-                    active_param[str(temp_bins)][j*2] = active_param[str(bins)][i*2] 
-                    active_param[str(temp_bins)][j*2+1] = abs(active_param[str(bins)][i*2+1] )
+                    active_param[str(temp_bins)][j*2] = active_param[bins][i*2] 
+                    active_param[str(temp_bins)][j*2+1] = abs(active_param[bins][i*2+1] )
                     j+=1
             else:
                 #drop random param
-                index = nu.random.randint(bins)
+                index = nu.random.randint(int(bins))
                 j = 0
-                for i in range(bins):
+                for i in xrange(int(bins)):
                     if i == index:
                         continue
-                    active_param[str(temp_bins)][2*j:2*j+2] = nu.copy(active_param[str(bins)][2*i:2*i+2])
+                    active_param[str(temp_bins)][2*j:2*j+2] = nu.copy(active_param[bins][2*i:2*i+2])
                     j += 1
-            '''#drop param with smallest prior
-            prob =[]
-            for i in range(bins):
-                prob.append(self.prior(active_param[str(bins)][2*i:2*i+2]))
-            index = nu.where(min(prob) != prob)[0]
-            j = 0
-            for i in index:
-                active_param[str(temp_bins)][j:j+2] = (
-                    active_param[str(bins)][i:i+2].copy())
-                j += 1'''
         else:
             #do nothing
             attempt = False
@@ -364,11 +370,11 @@ class Gaussian_Mixture_RJCMC(object):
             temp_bins, critera = None,None
         else:
             #do quick llsq to help get to better place
-            f_temp = lambda x :(-self.lik(x) - self.prior(x))
+            f_temp = lambda x :(-self.lik(x,temp_bins) - self.prior(x,temp_bins))
             active_param[str(temp_bins)] = fmin_powell(f_temp, 
                                                   active_param[str(temp_bins)],maxfun=10,disp=False)
             j, j_timeleft = 0, nu.random.exponential(200)
-        return active_param, temp_bins, attempt, critera, j, j_timeleft
+        return active_param, str(temp_bins), attempt, critera
 
     def bic(self):
         '''() -> ndarray
