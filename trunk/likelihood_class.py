@@ -424,7 +424,7 @@ class VESPA_fit(object):
 
     Uses vespa methodology splitting const sfh into multiple componets
     '''
-    def __init__(self,data, min_sfh=1,max_sfh=16,lin_space=False,use_dust=True, 
+    def __init__(self,data, resol=180.,min_sfh=1,max_sfh=16,lin_space=False,use_dust=True, 
 		use_losvd=True, spec_lib='p2',imf='salp',
 			spec_lib_path='/home/thuso/Phd/stellar_models/ezgal/'):
         '''(VESPA_fitclass, ndarray,int,int) -> NoneType
@@ -441,6 +441,8 @@ class VESPA_fit(object):
 		#make mean value of data= 100
         self._norm = 1./(self.data[:,1].mean()/100.)
         self.data[:,1] *= self._norm
+        #resoluion of data
+        self.resol = resol
         #load models
         cur_lib = ['basti', 'bc03', 'cb07','m05','c09','p2']
         assert spec_lib.lower() in cur_lib, ('%s is not in ' %spec_lib.lower() + str(cur_lib))
@@ -594,33 +596,34 @@ class VESPA_fit(object):
 		#do dust
         if self._has_dust:
             #dust requires wavelengths
-            
-            #not correct
             burst_model = ag.dust(param[bins]['dust'],burst_model)
+        #add all spectra for speed
+        model = {}
+        model['wave'] = burst_model['wave'].copy()
+        burst_model.pop('wave')
+        model['0'] = nu.add.reduce(burst_model.values())
 		#do losvd
         if self._has_losvd:
-            #check if wavelength exsist
-            if 'wave' not in burst_model.keys():
-                burst_model['wave'] = nu.copy(self.SSP.sed_ls)
             #make buffer for edge effects
             wave_range = [self.data[:,0].min(),self.data[:,0].max()]
-            burst_model = ag.LOSVD(burst_model, param[bins]['losvd'], wave_range)
+            model = ag.LOSVD(model, param[bins]['losvd'],
+                                   wave_range,self.resol)
         #need to match data wavelength ranges and wavelengths
 		#get loglik
         
-        burst_model = ag.data_match(self.data,burst_model)
-        model = nu.sum(burst_model.values(),0)
+        model = ag.data_match(self.data,model)
+        #model = nu.sum(burst_model.values(),0)
         
 		#return loglik
         if self.data.shape[1] == 3:
             #uncertanty calc
-            pass
+            prob = stats_dist.norm.logpdf(model['0'],self.data[:,1],self.data[:,2]).sum()
         else:
-            prob = stats_dist.norm.logpdf(model,self.data[:,1]).sum()
+            prob = stats_dist.norm.logpdf(model['0'],self.data[:,1]).sum()
             #prob = -nu.sum((model -	self.data[:,1])**2)
         #return
         if 	return_all:
-            return prob, model
+            return prob, model['0']
         else:
             return prob
 
@@ -655,11 +658,11 @@ class VESPA_fit(object):
         #losvd
         if self._has_losvd:
             #sigma
-            out += stats_dist.uniform.logpdf(param[bins]['losvd'][0],0,1)
+            out += stats_dist.uniform.logpdf(param[bins]['losvd'][0],0,3.)
             #z
             out += stats_dist.uniform.logpdf(param[bins]['losvd'][1],0,.05)
             #h3 and h4
-            out += stats_dist.uniform.logpdf(param[bins]['losvd'][2:],0,2).sum()
+            out += stats_dist.uniform.logpdf(param[bins]['losvd'][2:],-.5,.5).sum()
         return out
 
 

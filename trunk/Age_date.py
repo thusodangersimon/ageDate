@@ -32,7 +32,7 @@
 import numpy as nu
 import os
 import sys
-from multiprocessing import *
+#from multiprocessing import *
 from interp_func import *
 from spectra_func import *
 from scipy.optimize import nnls
@@ -40,15 +40,11 @@ from scipy.optimize.minpack import leastsq
 from scipy.optimize import fmin_l_bfgs_b as fmin_bound
 from scipy.special import exp1 
 from scipy.integrate import simps
-#from scipy import weave
-#from scipy.signal import fftconvolve
+from pysynphot import observation,spectrum
 import time as Time
 import boundary as bound
-try:
-    from losvd_convolve import convolve
-except:
-    pass
 
+#sfr2energy = 1.0/7.9D-42    ; (erg/s) / (M_sun/yr) [Kennicutt 1998]
 
 #123456789012345678901234567890123456789012345678901234567890123456789
 ###decorators
@@ -62,9 +58,10 @@ class memoized(object):
       self.__doc__ = func.__doc__
       self.cache = {}
       self.cache['gauss1'] = {}
+      self.cache['dust'] = {}
     def __call__(self, *args):
       #works different for different functions
-      if self.func.__name__ == 'gauss1':
+      if self.func.__name__ == 'gauss_kernel':
         #remove cache if get's too big
         if nu.random.rand() < .01:
           l = len(self.cache['gauss1'])
@@ -80,16 +77,16 @@ class memoized(object):
           self.cache['gauss1'][arg] = value
           return value
       
-      elif self.func.__name__ == 'make_burst':
-          arg = str((args[0],args[1],args[2]))
-          if not arg in self.cache:
-            self.cache[arg] = self.func(*args)
-          return self.cache[arg]
       elif self.func.__name__ == 'f_dust':
+        if nu.random.rand() < .01:
+          l = len(self.cache['dust'])
+          if l > 10**5:
+            self.cache['dust'].clear()
+
         arg = str(args)
-        if not arg in self.cache:
-          self.cache[arg] = self.func(*args)
-        return self.cache[arg]
+        if not arg in self.cache['dust']:
+          self.cache['dust'][arg] = self.func(*args)
+        return self.cache['dust'][arg]
       else:
           if args in self.cache:
             return self.cache[args]
@@ -247,7 +244,6 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins,
    #exit program
     return out
 
-#@memoized
 def make_burst(length, T, Metal, SSP):
     '''def make_burst(length, t, metal, SSP)
     (float, float,float, ezgal wrapper object) -> ndarray(float)
@@ -364,8 +360,8 @@ def data_match(data, model, keep_wave=False):
    Makes sure data and model have same wavelength range 
     and points but with a dictionary
     assumes model wavelength range is longer than data.
-    Uses linear interpolation to match wavelengths'''
-   ####add resolution downgrading!!!
+    Keeps intergrated flux the same'''
+   
    out = {}
     #if they have the same x-axis
    if nu.all(model['wave'] == data[:, 0]):
@@ -377,8 +373,8 @@ def data_match(data, model, keep_wave=False):
       for i in model.keys():
         if i == 'wave':
           continue
-        out[i] = spectra_lin_interp(model['wave'],
-                                    model[i], data[:,0])
+        out[i] = rebin_spec(model['wave'], model[i], data[:,0])
+        
    if keep_wave:
       out['wave'] = nu.copy(data[:,0])
    return out
@@ -535,7 +531,7 @@ def dust(param, model):
             model[str(i)] *= T_ism
     return model
 
-#@memoized
+@memoized
 def f_dust(tau): 
     '''(ndarray) -> ndarray
     Dust extinction functin'''
@@ -551,11 +547,12 @@ def f_dust(tau):
     out[tau > 1] = nu.exp(-tau[tau > 1])
     return out
 
-
-def gauss_kernel(velscale,sigma=1,h3=0,h4=0):
-    '''sigma:        Dispersion velocity in km/s. Defaulted to 1.
+@memoized
+def gauss_kernel(resol,sigma,vel=0,h3=0,h4=0):
+    '''sigma:     Dispersion velocity in km/s. Defaulted to 1.
     h3, h4:       Gauss-Hermite coefficients. Defaulted to 0.
     resol:        Size (in km/s) of each pixel of the output array
+    vel:          velocity (in km/s) related to redshift (not used yet)
     '''
     if sigma < 1:
         sigma = 1.
@@ -563,154 +560,503 @@ def gauss_kernel(velscale,sigma=1,h3=0,h4=0):
         sigma = 10**4
    #make sure redshift is positve    
     c = 299792.458
-    #v_red = (c *Z * (Z + 2.)) / (Z**2. + 2 * Z + 2)
-    #logl_shift = nu.log(1. + Z) / velscale * c     #; shift in pixels
-    logl_sigma = nu.log(1. + sigma/c) / velscale * c  #; sigma in pixels
-    #shift = v_red / float(velscale)
-    #sigma = sigma / float(velscale)
-    N = nu.ceil( 5.*logl_sigma)
+    
+    logl_shift = nu.log(1. + vel/c) / resol * c     #; shift in pixels
+    logl_sigma = nu.log(1. + sigma/c) / resol * c  #; sigma in pixels
+    N = nu.ceil( 5.*logl_sigma + abs(logl_shift))
     #N = nu.ceil(shift + 6. * sigma)
     x = nu.arange(2*N+1) - N
-    y = (x)/logl_sigma
-    #y = (x - shift) / sigma
+    y = (x-logl_shift)/logl_sigma
+    
     #normal terms
     slitout = nu.exp(-y**2/2.) / logl_sigma / nu.sqrt(2.*nu.pi) 
     #hemite terms
     slitout = slitout*( 1.+ h3 * 2**.5 / (6.**.5) * (2 * y**3 - 3 * y) +
                         h4 / (24**.5) * (4 * y**4 - 12 * y**2 + 3))
     #normalize
-    if not slitout.sum() == 0:
-       slitout /= nu.sum(slitout)
+    Sum = slitout.sum()
+    if not Sum == 0:
+       slitout /= Sum
     return slitout
 
-def LOSVD(model, param, wave_range, convlve='p'):
+def LOSVD(model, param, wave_range,resolution):
     '''(dict(ndarray), ndarray, ndarray) -> dict(ndarray)
 
-    Convolves data with a gausian with dispersion of sigma, and hermite poly
+    Convolves data with a gausian with dispersion of sigma, velocity, and hermite poly
     of h3 and h4
 
     model is dict of ssp with ages being the keys
     param is a 4x1 flat array with params of losvd [log10(sigma), v (redshift), h3, h4]
     wave_range is gives edge support for convolution
-
-    Has option for c++ wrapped convolution (50x faster than python) doesn't work with parallel processing
-    or python convolutin'''
-    #unlog sigma
+    resolution is the resolution of spectra in km/s
+    '''
+    #find wavelength range to do convolution for
+    wave_range = nu.array(wave_range) - nu.asarray([100, -100])
+    index = nu.searchsorted(model['wave'], [wave_range[0], wave_range[1]])
+    wave = nu.copy(model['wave'][index[0]:index[1]])
+    #convolve each spectra
+    sum_spec = {'wave':wave}
     tparam = param.copy()
     tparam[0] = 10**tparam[0]
-    tmodel = model.copy()
-    #resample specturm so resolution is same at all places
-    wave_range = nu.array(wave_range)/(1. + tparam[1]) - [100, -100]
-    index = nu.searchsorted(model['wave'], [wave_range[0], wave_range[1]])
-    #if not in range
-    if index[1] == len(model['wave']):
-        index[1] -= 1
-    try:
-        #calculate resolution
-       wave_diff = nu.diff(model['wave'][index[0]:index[1]]).min()
-    except ValueError:
-       #model and data range are off
-       return tmodel
-    wave = nu.arange(model['wave'][index[0]], model['wave'][index[1]], wave_diff)
-    #sum spectra and convole all
-    sum_spec = {}
-    sum_spec['wave'] = model['wave']
-    sum_spec['0'] = nu.zeros_like(model['wave'])
     for i in model.keys():
         if i == 'wave':
             continue
-        sum_spec['0'] += model[i]
-    sum_spec['0'] = spectra_lin_interp(sum_spec['wave'], sum_spec['0'], wave)
-    if 'python' == convlve:
-        sum_spec['0'] = convolve_python_fast(wave, nu.ascontiguousarray(sum_spec['0']), tparam)
-    else:
-        convolve(wave, sum_spec['0'], tparam ,sum_spec['0'])
-    sum_spec['wave'] = redshift(wave,tparam[1])
-
+        sum_spec[i] = fft_conv(wave,model[i][index[0]:index[1]],resolution,tparam)
     return sum_spec
 
-def convolve_python_fast(x, y, losvd_param, option='rebin'):
-   '''convolve(array, kernel)
-   does convoluton useing input kernel. in a faster way '''
-   diff_wave = nu.mean(nu.diff(x))
-   Len_data = len(x)
-   #ys = nu.repeat(y,Len_data).reshape(Len_data,Len_data).T
-   #make kernels
-   Kernals = map(gauss1,[diff_wave]*Len_data, x,[losvd_param[0]]*Len_data,[losvd_param[2]]*Len_data, [losvd_param[3]]*Len_data)
-   #make an array with same size as y 
-   Kernals = map(make_kernel_array, Kernals,[Len_data]*Len_data,range(Len_data))
-   #convovle
-   f = lambda x,y: nu.sum(x*y)
-   ys = nu.array(map(f, Kernals, [y]*Len_data))
-   return ys
-   
-def make_kernel_array(Kernel, Length, i):
-   '''Puts arrays from Kernels into matrix array. If kernel is
-   longer than array with return error'''
-   kern_len = len(Kernel)
-   middle = (kern_len - 1)/2
-   out_array = nu.zeros(Length)
-   index = nu.arange(kern_len) - middle + i
-   nu.put(out_array,index,Kernel,mode='clip')
-   return out_array
+def fft_conv(x, y, vs, losvd_param):
+    '''
+    (wavelength,flux,velocity scale,losvd parameters) -> convolved flux
+    Does LOSVD convolution by rebinning the wavelength into log scale and
+    taking the fft to convolve it.
+    '''
+    #make logspaced
+    lx,ly = logify(x,y)
+    #lx,ly = x,y
+    #make kernelresol,sigma,vel=0,h3=0,h4=0
+    kernel = gauss_kernel(vs,losvd_param[0],losvd_param[2],losvd_param[3])
+    #convolve fast
+    ys = nu.convolve(ly,kernel,'same')
+    #rebin to match input
+    #return rebin_spec(lx,ys,x)
+    return linearize(lx,ys)[1]
+    
+##not mine
+def rebin_spec(wave, specin, wavnew):
+    '''(inwave (ndarray),influx (ndarray),outwave(ndarray)-> outflux
+    Correctly rebins spectra
+    '''
+    spec = spectrum.ArraySourceSpectrum(wave=wave, flux=specin)
+    f = nu.ones(len(wave))
+    filt = spectrum.ArraySpectralElement(wave, f, waveunits='angstrom')
+    obs = observation.Observation(spec, filt, binset=wavnew, force='taper')
+ 
+    return obs.binflux
 
-def convolve_python(x, y, losvd_param, option='rebin'):
-   '''convolve(array, kernel)
-	 does convoluton useing input kernel '''
-   #alocate parameters
-   #start covloution
-   #x, y =  data[:,0], data[:,1]
-   xs, ys = nu.zeros_like(x), nu.zeros_like(y)
-   diff_wave = nu.mean(nu.diff(x))
-   Len_data = len(x)
-   #t=[]
-   for  i in xrange(Len_data):   
-      kernel = gauss1(diff_wave, x[i], losvd_param[0], losvd_param[2], losvd_param[3])
-      kernel[kernel < 0] = 0
-      Len = len(kernel)  
-      #check if kernel is longer than input array
-      if Len > Len_data:
-         ys.fill(nu.nan)
-         return ys
-      m2 = i + (Len - 1)/2 + 1
-      m1 = i - (Len - 1)/2 
-      if m1 < 0:
-         m1 = 0
-         i1 = (Len - 1)/2 - i
-         i2 = Len 
-         k = kernel[i1:i2] / kernel[i1:i2].sum()
-      elif m2 > Len_data - 1:
-         m2 = Len_data - 1
-         i1 = 0
-         i2 = Len - ((Len - 1)/2 - m2 + i) - 1
-         k = kernel[i1:i2] / kernel[i1:i2].sum()
-      else:
-         #i1, i2 = 0, Len - 1
-         k = kernel
-      u = x[m1:m2]
-      g = y[m1:m2] * k
-      ys[i] = nu.trapz(g, u, dx=diff_wave)
-      xs[i] = x[i]
-      #t.append((min(k),x[i]))
-   #t=nu.array(t)
-      #t.append(len(k))
-   return  ys
+#https://github.com/eteq/astropysics/blob/master/astropysics/spec.py
 
-#@memoized
-def gauss1(diff_wave,  wave_current,  sigma,  h3,  h4):
-    '''inline gauss(nu.ndarray diff_wave, float wave_current float sigma, float h3, float h4)
-    Returns value of gaussian-hermite function normalized to area = 1'''
-    c = 299792.458
-    #vel_scale = diff_wave / wave_current * c
-    logl_sigma = wave_current * nu.log(1. + sigma/c) / diff_wave
-    N = nu.ceil( 5.*logl_sigma)
-    x = nu.arange(2*N+1) - N
-    y = x / logl_sigma
-    slitout = nu.exp(-y**2/2.) / logl_sigma #/ nu.sqrt(2.*nu.pi)
-    slitout *= ( 1.+ h3 * 2**.5 / (6.**.5) * (2 * y**3 - 3 * y) + 
-                    h4 / (24**.5) * (4 * y**4 - 12 * y**2 + 3))
-    Sum = slitout.sum()
-    if not Sum == 0:
-        slitout /= Sum
-    return slitout      
+def getDx(x,mean=True):
+    """
+    get the spacing of the x-axis, which is always 1 element shorter than x
+        
+    if mean, returns the mean of the spacing
+    """
+    dx = nu.convolve(x,(1,-1),mode='valid')
+    if mean:
+        return dx.mean()
+    else:
+        return dx
+        
+def getDlogx(X,mean=True,logbase=10):
+    """
+    get the logarithmic spacing of the x-axis, which is always 1 element
+    shorter than x
+        
+    if mean, returns the mean of the spacing
+    """
+    x = nu.log(X)/nu.log(logbase)
+    dlogx = nu.convolve(x,(1,-1),mode='valid')
+    if mean:
+        return dlogx.mean()
+    else:
+        return dlogx
+        
+def isXMatched(x,other,tol=1e-10):
+    """
+    tests if the x-axis of this Spectrum matches that of another Spectrum
+    or equal length array, with an average deviation less than tol
+    """
+    from operator import isSequenceType
+    if isSequenceType(other):
+        ox = other
+    else:
+        ox = other.x
+            
+    try:
+        return nu.std(x - ox) < tol
+    except (TypeError,ValueError):
+        return False
+    
+def isLinear(x,eps=1e-10):
+    """
+    Determines if the x-spacing is linear (e.g. evenly spaced so that 
+    dx ~ constant with a standard deviation of eps)
+    """
+    return nu.std(getDx(x,False)) < eps
+        
+def isLogarithmic(x,eps=1e-10):
+    """
+    Determines if the x-spacing is logarithmic (e.g. evenly spaced in 
+    logarithmic bins so that dx ~ x to tolerance of eps)
+    """
+    return nu.std(getDlogx(x,False)) < eps
+    
+    #<----------------------Operations---------------------------->
+    
+def smooth(width=1,filtertype='gaussian',replace=True):
+        """
+        smooths the flux in this object by a filter of the given `filtertype`
+        (can be either 'gaussian' or 'boxcar'/'uniform'). Note that `filtertype`
+        can also be None, in which case a gaussian filter will be used if 
+        width>0, or boxcar if width<0.
+        
+        if replace is True, the flux in this object is replaced by the smoothed
+        flux and the error is smoothed in the same fashion
+        
+        width is in pixels, either as sigma for gaussian or half-width 
+        for boxcar
+        
+        returns smoothedflux,smoothederr
+        """
+        import scipy.ndimage as ndi 
+        
+        if filtertype is None:
+            if width > 0:
+                filtertype = 'gaussian'
+            else:
+                filtertype = 'boxcar'
+                width = -1*width
+        
+        if filtertype == 'gaussian':
+            filter = ndi.gaussian_filter1d
+            err = self._err
+        elif filtertype == 'boxcar' or type == 'uniform':
+            filter = ndi.uniform_filter1d
+            width = 2*width
+            err = self._err.copy()
+            err[~np.isfinite(err)] = 0
 
+        else:
+            raise ValueError('unrecognized filter type %s'%filtertype)
+        
+        smoothedflux = filter(self._flux,width)
+        smoothederr = filter(err,width)
+        
+        if replace:
+            self.flux = smoothedflux
+            self.err = smoothederr
+        
+        return smoothedflux,smoothederr
+
+def linearize(wave,flux):
+        """
+        (wavelength array, flux array) -> resampled (wave,flux)
+        Convinience function for resampling to an equally-spaced linear x-axis
+            
+        """
+        newx = nu.linspace(wave.min(),wave.max(),len(wave))
+        newflux = rebin_spec(wave, flux, newx)
+        return newx,newflux
+    
+def logify(wave,flux):
+        """
+        (wavelength array, flux array) -> resampled (wave,flux)
+        convinience function for resampling to an x-axis that is evenly spaced
+        in logarithmic bins.  Note that lower and upper are the x-axis values 
+        themselves, NOT log(xvalue)
+        """
+        newx = nu.logspace(nu.log10(wave.min()),nu.log10(wave.max()),len(wave))
+        newflux = rebin_spec(wave, flux, newx)
+        return newx,newflux
+
+def fitContinuum(self,model=None,weighted=False,evaluate=False,
+                          interactive=False,**kwargs):
+        """
+        this method computes a continuum fit to the spectrum using a model
+        from astropysics.models (list_models will give all options) or
+        an callable with a fitData(x,y) function
+        
+        if model is None, the existing model will be used if present, 
+        or if there is None, the default is 'uniformknotspline'.  Otherwise,
+        it may be any acceptable model (see :func:`models.get_model_class`)
+        
+        kwargs are passed into the constructor for the model
+        
+        if weighted, the inverse variance will be used as weights to the 
+        continuum fit
+        
+        if interactive is True, the fitgui interface will be displayed to 
+        tune the continuum fit
+        
+        the fitted model is assigned to self.continuum or evaluated at the
+        spectrum points if evaluate is True and the results are set to 
+        self.continuum
+        """
+        
+        if model is None and self.continuum is None:
+            model = 'uniformknotspline'
+        
+        #for the default, choose a reasonable number of knots
+        if model == 'uniformknotspline' and 'nknots' not in kwargs:
+            kwargs['nknots'] = 4
+        
+        if model is None and self.continuum is not None:
+            model = self.continuum
+            if not interactive:
+                model.fitData(self.x,self.flux,weights=(self.ivar if weighted else None))
+        else:
+            if isinstance(model,basestring):
+                from .models import get_model_class
+                model = get_model_class(model)(**kwargs)
+        
+            if not (callable(model) and hasattr(model,'fitData')):
+                raise ValueError('provided model object cannot fit data')
+            
+            model.fitData(self.x,self.flux,weights=(self.ivar if weighted else None))
+        
+        if interactive:
+            from pymodelfit.fitgui import FitGui
+            
+            if interactive == 'reuse' and hasattr(self,'_contfg'):
+                fg = self._contfg
+            else:
+                fg = FitGui(self.x,self.flux,model=model,weights=(self.ivar if weighted else None))
+                fg.plot.plots['data'][0].marker = 'dot'
+                fg.plot.plots['data'][0].marker_size = 2
+                fg.plot.plots['model'][0].line_style = 'solid'
+                
+            if fg.configure_traits(kind='livemodal'):
+                model = fg.tmodel.model
+            else:
+                model = None
+                
+            if interactive == 'reuse':
+                self._contfg = fg
+            elif hasattr(self,'_contfg'):
+                del self._contfg
+                
+        if model is not None:    
+            self.continuum = model(self.x) if evaluate else model
+        
+def subtractContinuum(self):
+        """
+        Subtract the continuum from the flux
+        """
+        if hasattr(self,'_contop'):
+            raise ValueError('%s already performed on continuum'%self._contop)
+        
+        if self.continuum is None:
+            raise ValueError('no continuum defined')
+        elif callable(self.continuum):
+            cont = self.continuum(self.x)
+        else:
+            cont = self.continuum
+            
+        self.flux = self.flux - cont
+        self._contop = 'subtraction'
+            
+def normalizeByContinuum(self):
+        """
+        Divide by the flux by the continuum
+        """
+        if hasattr(self,'_contop'):
+            raise ValueError('%s already performed on continuum'%self._contop)
+        
+        if self.continuum is None:
+            raise ValueError('no continuum defined')
+        elif callable(self.continuum):
+            cont = self.continuum(self.x)
+        else:
+            cont = self.continuum
+            
+        self.flux = self.flux/cont
+        self._contop = 'normalize'
+        
+def rejectOutliersFromContinuum(self,sig=3,iters=1,center='median',savecont=False):
+        """
+        rejects outliers and returns the resulting continuum. see 
+        `utils.sigma_clip` for arguments
+        
+        returns a pair of maksed arrays xmasked,contmasked
+        
+        if savecont is True, the outlier-rejected value will be saved as
+        the new continuum
+        """
+        from .utils import sigma_clip
+        
+        if self.continuum is None:
+            raise ValueError('no continuum defined')
+        elif callable(self.continuum):
+            cont = self.continuum(self.x)
+        else:
+            cont = self.continuum
+            
+        contma = sigma_clip(cont,sig=sig,iters=iters,center=center,maout='copy')
+        xma = np.ma.MaskedArray(self.x,contma.mask,copy=True)
+        
+        if savecont:
+            self.continuum = contma
+        
+        return xma,contma
+            
+def revertContinuum(self):
+        """
+        Revert to flux before continuum subtraction
+        """
+        if self.continuum is None:
+            raise ValueError('no continuum defined')
+        elif callable(self.continuum):
+            cont = self.continuum(self.x)
+        else:
+            cont = self.continuum
+            
+        if hasattr(self,'_contop'):
+            if self._contop == 'subtraction':
+                self.flux = self.flux+cont
+            elif self._contop == 'normalize':
+                self.flux = self.flux*cont
+            else:
+                raise RuntimeError('invalid continuum operation')
+            del self._contop
+        else:
+            raise ValueError('no continuum action performed')
+
+def plot(self,fmt=None,ploterrs=.1,plotcontinuum=True,smoothing=None,
+                  step=True,clf=True,colors=('b','g','r','k'),restframe=True,
+                  xrng=None,**kwargs):
+        """
+        Use :mod:`matplotlib` to plot the :class:`Spectrum` object. The
+        resulting plot shows the flux, error (if present), and continuum (if
+        present).
+        
+        If `step` is True, the plot will be a step plot instead of a line plot.
+        
+        `smoothing` is passed into the :meth:`Spectrum.smooth` method - see that
+        method for details.
+        
+        `colors` should be a 3-tuple that applies to
+        (spectrum,error,invaliderror,continuum) and kwargs go into spectrum and
+        error plots.
+        
+        If `restframe` is True, the x-axis is offset to the rest frame.
+        
+        If `ploterrs` or `plotcontinuum` is a number, the plot will be scaled so
+        that the mean value matches the mean of the spectrum times the numeric
+        value. If either are True, the scaling will match the actual value. If
+        False, the plots will not be shown.
+        
+        `xrng` can specify the range of x-values to plot (lowerx,upperx), or can
+        be None to plot the whole spectrum.
+        
+        kwargs are passed into either the :func:`matplotlib.pyplot.plot` or
+        :func:`matplotlib.pyplot.step` function.
+        """
+        
+        import matplotlib.pyplot as plt
+        
+        if step:
+            kwargs.setdefault('where','mid')
+        
+        if smoothing:
+            x,(y,e) = self.x0 if restframe else self.x,self.smooth(smoothing,filtertype=None,replace=False)
+        else:
+            x,y,e = self.x0 if restframe else self.x,self.flux,self.err
+            
+        if len(x)==3:
+            dx1 = x[1]-x[0]
+            dx2 = x[2]-x[1]
+            x = np.array((x[0]-dx1/2,x[0]+dx1/2,x[1]+dx2/2,x[2]+dx2/2))
+            y = np.array((y[0],y[0],y[1],y[2]))
+            e = np.array((e[0],e[0],e[1],e[2]))
+        elif len(x)==2:
+            dx = x[1]-x[0]
+            x = np.array((x[0]-dx/2,x[0]+dx/2,x[1]+dx/2))
+            y = np.array((y[0],y[0],y[1]))
+            e = np.array((e[0],e[0],e[1]))
+        elif len(x)==1:
+            x = np.array((0,2*x[0]))
+            y = np.array((y[0],y[0]))
+            e = np.array((e[0],e[0]))
+            
+        if xrng is not None:
+            xl,xu = xrng
+            if xl>xu:
+                xl,xu = xu,xl
+                
+            msk = (xl<x)&(x<xu)
+            x = x[msk]
+            y = y[msk]
+            e = e[msk]
+            
+        if clf:
+            plt.clf()
+            
+        kwargs['c'] = colors[0]
+        if fmt is None:
+            if step:
+                res = [plt.step(x,y,**kwargs)]
+            else:
+                res = [plt.plot(x,y,**kwargs)]
+        else:
+            if step:
+                res = [plt.step(x,y,fmt,**kwargs)]
+            else:
+                res = [plt.plot(x,y,fmt,**kwargs)]
+            
+        if ploterrs and np.any(e):
+            from operator import isMappingType
+            if isMappingType(ploterrs):
+                ploterrs = ploterrs.copy()
+            
+            m = (e < np.max(y)*2) & np.isfinite(e)
+            
+            if isMappingType(ploterrs) and 'scale' in ploterrs:
+                scale = ploterrs.pop('scale')
+            elif np.isscalar(ploterrs):
+                scale = float(ploterrs)*np.mean(y)/np.mean(e[m])
+            elif ploterrs is True:
+                scale = 1
+            else:
+                scale = .1*np.mean(y)/np.mean(e[m])
+            
+            if not isMappingType(ploterrs):
+                ploterrs = {}
+            kwargs.update(ploterrs)
+            kwargs.setdefault('ls','-')
+            
+            
+            if np.sum(m) > 0:
+                kwargs['c'] = colors[1]
+                if step:
+                    res.append(plt.step(x[m],scale*e[m],**kwargs))
+                else:
+                    res.append(plt.plot(x[m],scale*e[m],**kwargs))
+            if np.sum(~m) > 0:
+                if step:
+                    res.append(plt.step(x[~m],scale*np.mean(e[m] if np.sum(m)>0 else y)*np.ones(sum(~m)),'*',lw=0,mew=0,color=colors[2]))
+                else:
+                    res.append(plt.plot(x[~m],scale*np.mean(e[m] if np.sum(m)>0 else y)*np.ones(sum(~m)),'*',lw=0,mew=0,color=colors[2]))
+                
+        if plotcontinuum and self.continuum is not None:
+            if callable(self.continuum):
+                cont = self.continuum(self.x)
+            else:
+                cont = self.continuum
+            
+            if plotcontinuum is True:
+                scale = 1
+            elif np.isscalar(plotcontinuum):
+                scale = float(plotcontinuum)*np.mean(y)/np.mean(cont)
+                
+            kwargs['c'] = colors[3]
+            kwargs['ls'] =  '--'
+            if step:
+                res.append(plt.step(self.x,scale*cont,**kwargs))
+            else:
+                res.append(plt.plot(self.x,scale*cont,**kwargs))
+                
+                
+        plt.xlim(np.min(x),np.max(x))
+        
+        xl=self.unit
+        xl=xl.replace('wavelength','\\lambda')
+        xl=xl.replace('frequency','\\nu')
+        xl=xl.replace('energy','E')
+        xl=xl.replace('angstrom','\\AA')
+        xl=xl.replace('micron','\\mu m')
+        xl=tuple(xl.split('-'))
+        plt.xlabel('$%s/{\\rm %s}$'%xl)
+        
+        plt.ylabel('$ {\\rm Flux}/({\\rm erg}\\, {\\rm s}^{-1}\\, {\\rm cm}^{-2} {\\rm %s}^{-1})$'%xl[1])
+            
+        return res
