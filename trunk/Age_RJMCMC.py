@@ -38,10 +38,11 @@ import time as Time
 import signal
 import cPickle as pik
 from glob import glob
+import acor
 a=nu.seterr(all='ignore')
 
 
-def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,tot_iter=10**5, seed=None, fail_recover=True):
+def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=None, fail_recover=True):
     '''(likelihood object, running object, int, int, bool) ->
     dict(ndarray), dict(ndarray)
 
@@ -252,7 +253,7 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,tot_iter=10**5, seed=N
                 Nacept[bins] , Nreject[bins] = 1., 1.
                 #T_cuurent[bins] = burnin + 4000 
         ################turn off burnin after 40% percent of total iterations
-        if option.current == int(tot_iter*.4):
+        if option.current == int(max_iter*.4):
             for i in T_cuurent.keys():
                 if not T_cuurent[i] > burnin:
                     T_cuurent[i] = burnin + 1
@@ -274,14 +275,21 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,tot_iter=10**5, seed=N
         #t_comm[-1]-=Time.time()
         #if mpi isn't on allow exit
         if option.comm_world.size == 1:
-            if option.current > tot_iter:
+            #exit if reached max iterations
+            if option.current > max_iter:
                 option.iter_stop = False
+            #exit if reached target effective sample size
+            if option.current % 501 == 0:
+                eff = ess(param[bins])
+                print 'ESS for %s bins is %f'%(bins,eff)
+                if eff > 10**5:
+                    option.iter_stop = False
         #pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm),open('time_%i.pik'%option.rank_world,'w'),2)
     #####################################return once finished 
     #remove incase of crash file
     os.popen('rm failed_%i.pik'%(os.getpid()))
 		#pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm,param,chi),open('time_%i.pik'%option.rank_world,'w'),2)
-    return param, chi, acept_rate, out_sigma, param.keys()
+    return param, chi, acept_rate #, out_sigma, param.keys()
 
 def SA(i,i_fin,T_start,T_stop):
     #temperature parameter for Simulated anneling (SA). 
@@ -333,6 +341,30 @@ def swarm_func(param,dust_param,chi,parambest,chibest,bins):
         weight *=  nu.sum(vect**2)**0.5/4.
     return (param + weight * vect, dust_param + weight_dust * vect_dust,
             0.5)
+
+def ess(t):
+    '''returns the average sample size of a N,M ndarray (doesn't actually take a N,M ndarray'''
+    #extract data from dictoranry
+    data = []
+    for i in t:
+        dics = []
+        for j in i.keys():
+            dics.append(nu.ravel(i[j]))
+        data.append(nu.hstack(dics))
+    data = nu.asarray(data)
+    temp_ess,Len = [],float(len(data[:,0]))
+    #calculate ess for each parameter
+    for i in range(data.shape[1]):
+        try:
+            temp_ess.append(Len/acor.acor(data[:,i])[0])
+        except ZeroDivisionError:
+            pass
+        except RuntimeError:
+            pass
+    if len(temp_ess) == 0:
+        return 0.
+    #return max
+    return nu.nanmax(temp_ess)
 
 def Convergence_tests(param,keys,n=1000):
     #uses Levene's test to see if var between chains are the same if that is True
