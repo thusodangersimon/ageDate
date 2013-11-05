@@ -531,7 +531,7 @@ def dust(param, model):
             model[str(i)] *= T_ism
     return model
 
-@memoized
+#@memoized
 def f_dust(tau): 
     '''(ndarray) -> ndarray
     Dust extinction functin'''
@@ -547,7 +547,7 @@ def f_dust(tau):
     out[tau > 1] = nu.exp(-tau[tau > 1])
     return out
 
-@memoized
+#@memoized
 def gauss_kernel(resol,sigma,vel=0,h3=0,h4=0):
     '''sigma:     Dispersion velocity in km/s. Defaulted to 1.
     h3, h4:       Gauss-Hermite coefficients. Defaulted to 0.

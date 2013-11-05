@@ -71,6 +71,7 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
     if seed is not None:
         nu.random.seed(seed)
     #see if should recover from file
+    eff = -999999
     if type(fail_recover) is bool:
             #look for previous file
             if fail_recover:
@@ -148,8 +149,8 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
     while option.iter_stop:
         #show status of running code
         if T_cuurent[bins] % 501 == 0:
-            show = ('acpt = %.2f,log lik = %e, bins = %s, steps = %i,burnin iter= %i'
-                    %(acept_rate[bins][-1],chi[bins][-1],bins, option.current,T_cuurent[bins]))
+            show = ('acpt = %.2f,log lik = %e, bins = %s, steps = %i,ESS = %2.0f'
+                    %(acept_rate[bins][-1],chi[bins][-1],bins, option.current,eff))
             print show
             sys.stdout.flush()
 			
@@ -281,7 +282,6 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
             #exit if reached target effective sample size
             if option.current % 501 == 0:
                 eff = ess(param[bins])
-                print 'ESS for %s bins is %f'%(bins,eff)
                 if eff > 10**5:
                     option.iter_stop = False
         #pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm),open('time_%i.pik'%option.rank_world,'w'),2)
