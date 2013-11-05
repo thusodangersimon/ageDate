@@ -265,12 +265,16 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
         j+=1
         option.current += 1
         acept_rate[bins].append(nu.copy(Nacept[bins]/(Nacept[bins]+Nreject[bins])))
-        out_sigma[bins].append(sigma[bins][:])
+        #out_sigma[bins].append(sigma[bins][:])
         #save current state incase of crash
         if option.current % 500 == 0:
-            os.popen('mv failed_%i.pik failed_%i.pik.bak'%(os.getpid(),os.getpid()))
-            pik.dump((fun.data,active_param,sigma,param,chi,bins,Nacept,Nreject,acept_rate,out_sigma,option.current,T_cuurent,j,j_timeleft,fun._multi_block,T_start,T_stop,trans_moves),open('failed_%i.pik'%(os.getpid()),'w'),2)
-            os.popen('rm failed_%i.pik.bak'%os.getpid())
+            try:
+                os.popen('mv failed_%i.pik failed_%i.pik.bak'%(os.getpid(),os.getpid()))
+                pik.dump((fun.data,active_param,sigma,param,chi,bins,Nacept,Nreject,acept_rate,out_sigma,option.current,T_cuurent,j,j_timeleft,fun._multi_block,T_start,T_stop,trans_moves),open('failed_%i.pik'%(os.getpid()),'w'),2)
+                os.popen('rm failed_%i.pik.bak'%os.getpid())
+            except OSError:
+                print 'Warning: Running out of memory. May crash soon'
+                pik.dump((fun.data,active_param,sigma,param,chi,bins,Nacept,Nreject,acept_rate,out_sigma,option.current,T_cuurent,j,j_timeleft,fun._multi_block,T_start,T_stop,trans_moves),open('failed_%i.pik'%(os.getpid()),'w'),2)
         t_house[-1]-=Time.time()
         #t_comm.append(Time.time())
         #t_comm[-1]-=Time.time()
