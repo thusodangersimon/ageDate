@@ -517,6 +517,9 @@ class VESPA_fit(object):
         #save params for multi-block
         if str(bins) not in self._multi_block_param.keys():
             self._multi_block_param[str(bins)] = []
+        #limit to length to 1000
+        while len( self._multi_block_param[str(bins)]) > 1000:
+             self._multi_block_param[str(bins)].pop(0)
         self._multi_block_param[str(bins)].append(nu.copy(mu))
         #if rjmcmc see that performance is bad will turn multi block on
         #finds correlated parameters and changes them together
@@ -642,7 +645,8 @@ class VESPA_fit(object):
         out += stats_dist.uniform.logpdf(gal[:,0],0.,self._age_unq.ptp()).sum()
         #age
         #weight for older
-        out += stats_dist.norm.logpdf(gal[:,1],9.5,0.2).sum()
+        out += stats_dist.uniform.logpdf(gal[:,1],self._age_unq.min(),self._age_unq.max()).sum()
+        #out += stats_dist.norm.logpdf(gal[:,1],9.5,0.2).sum()
         if nu.any(gal[:,1] > self._age_unq.max()):
             return -nu.inf
         #metals
