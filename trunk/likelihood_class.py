@@ -41,6 +41,7 @@ from itertools import izip
 from scipy.cluster.hierarchy import fcluster,linkage
 import os, sys, subprocess
 from time import time
+
 #hdf5 handling stuff
 try:
     import tables as tab
@@ -417,6 +418,7 @@ class CV_Fit(object):
     
 #=============================================
 #spectral fitting with RJCMC Class
+
 class VESPA_fit(object):
     '''Finds the age, metalicity, star formation history, 
     dust obsorption and line of sight velocity distribution
@@ -491,13 +493,14 @@ class VESPA_fit(object):
         for i in xrange(min_sfh,max_sfh+1):
             self.models[str(i)]= ['burst_length','mean_age', 'metal','norm'] * i
         #multiple_block for bad performance
-        self._multi_block = False
+        self._multi_block = True
         self._multi_block_param = {}
         self._multi_block_index = {}
         self._multi_block_i = 0
         #max total length of bins constraints
         self._max_age = self._age_unq.ptp()
-		
+
+        
     def proposal(self,Mu,sigma):
         '''(Example_lik_class, ndarray,ndarray) -> ndarray
 		Proposal distribution, draws steps for chain. Should use a symetric
@@ -582,7 +585,7 @@ class VESPA_fit(object):
         Does all things for multi try (proposal,lik, and selects best param'''
         temp_param = map(self.proposal,[param]*N, [self._sigma]*N)
     
-        
+    
     def lik(self,param, bins,return_all=False):
         '''(Example_lik_class, ndarray) -> float
         Calculates likelihood for input parameters. Outuputs log-likelyhood'''
@@ -629,7 +632,7 @@ class VESPA_fit(object):
             return prob, model['0']
         else:
             return prob
-
+   
     def prior(self,param,bins):
         '''(Example_lik_class, ndarray) -> float
         Calculates log-probablity for prior'''
@@ -1742,6 +1745,7 @@ class Multinest_fit(object):
 
     Uses vespa methodology splitting const sfh into multiple componets
     '''
+    
     def __init__(self,data,nbins, use_dust=True, use_losvd=True,
                  spec_lib='p2',imf='salp',
 			spec_lib_path='/home/thuso/Phd/stellar_models/ezgal/'):
@@ -1810,6 +1814,7 @@ class Multinest_fit(object):
             nparams += 4
         self.nparams = nparams
 
+    
     def lik(self,p, bins,nbins,return_spec=False):
         '''(Example_lik_class, ndarray) -> float
         Calculates likelihood for input parameters. Outuputs log-likelyhood'''
@@ -1839,6 +1844,10 @@ class Multinest_fit(object):
 		#get loglik
         
         burst_model = ag.data_match(self.data,burst_model,bins)
+        #check if wavelength is still here
+        if  burst_model.has_key('wave'):
+            #remove
+            burst_model.pop('wave')
         model = nu.sum(burst_model.values(),0)
         
 		#return loglik

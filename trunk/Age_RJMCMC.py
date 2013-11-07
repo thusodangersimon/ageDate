@@ -39,6 +39,7 @@ import signal
 import cPickle as pik
 from glob import glob
 import acor
+
 a=nu.seterr(all='ignore')
 
 
@@ -145,7 +146,7 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
                     option.current,T_cuurent,j,j_timeleft,fun._multi_block,T_start,T_stop,
                     trans_moves) = pik.load(open(reover_file[0]))
     #profiling
-    t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm = [],[],[],[],[],[],[],[],[] 
+    #t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm = [],[],[],[],[],[],[],[],[] 
     while option.iter_stop:
         #show status of running code
         if T_cuurent[bins] % 501 == 0:
@@ -155,19 +156,19 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
             sys.stdout.flush()
 			
         #sample from distiburtion
-        t_pro.append(Time.time())
+        #t_pro.append(Time.time())
         
         active_param[bins] = fun.proposal(active_param[bins], sigma[bins])
-        t_pro[-1] -= Time.time()
+        #t_pro[-1] -= Time.time()
         #swarm stuff
-        t_swarm.append(Time.time())
+        #t_swarm.append(Time.time())
         '''active_param[str(bins)], active_dust, active_losvd, birth_rate = swarm_function(active_param[str(bins)]'''
         #if option.rank == 1:
             #print 'after',active_param[str(bins)] 
 
-        t_swarm[-1] -= Time.time()
+        #t_swarm[-1] -= Time.time()
         #calculate new model and chi
-        t_lik.append(Time.time())
+        #t_lik.append(Time.time())
         chi[bins].append(0.)
         chi[bins][-1] = fun.lik(active_param,bins) + fun.prior(active_param,bins)
         #just lik part
@@ -175,8 +176,8 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
         #simulated anneling
         a /= SA(T_cuurent[bins],burnin,abs(T_start),T_stop)
         
-        t_lik[-1]-=Time.time()
-        t_accept.append(Time.time())
+        #t_lik[-1]-=Time.time()
+        #t_accept.append(Time.time())
         #put temperature on order of chi calue
         if T_start < chi[str(bins)][-1]:
             T_start = chi[str(bins)][-1]+0
@@ -192,15 +193,15 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
             active_param[bins] = param[bins][-1].copy()
             chi[bins][-1] = nu.copy(chi[bins][-2])
             Nreject[bins]+=1
-        t_accept[-1]-=Time.time()
+        #t_accept[-1]-=Time.time()
         ###########################step stuff
-        t_step.append(Time.time())
+        #t_step.append(Time.time())
         if T_cuurent[bins] < burnin + 5000 or acept_rate[bins][-1]<.11:
             #only tune step if in burn-in
             sigma[bins] =  fun.step_func(acept_rate[bins][-1] ,param[bins], sigma, bins)
-        t_step[-1]-=Time.time()
+        #t_step[-1]-=Time.time()
         #############################decide if birth or death
-        t_birth.append(Time.time())
+        #t_birth.append(Time.time())
         
         if j >= j_timeleft:
             #print len(active_param[bins].keys())
@@ -241,7 +242,7 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
                 j, j_timeleft = 0 , 1#nu.random.exponential(100)
                 #print T_cuurent[str(bins)],burnin,T_start,T_stop
                 attempt = False
-        t_birth[-1]-=Time.time()
+        #t_birth[-1]-=Time.time()
         
         #########################################change temperature
         T_cuurent[bins] += 1
@@ -261,7 +262,7 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
         ##############################convergece assment
        
         ##############################house keeping
-        t_house.append(Time.time())
+        #t_house.append(Time.time())
         j+=1
         option.current += 1
         acept_rate[bins].append(nu.copy(Nacept[bins]/(Nacept[bins]+Nreject[bins])))
@@ -275,7 +276,7 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
             except OSError:
                 print 'Warning: Running out of memory. May crash soon'
                 pik.dump((fun.data,active_param,sigma,param,chi,bins,Nacept,Nreject,acept_rate,out_sigma,option.current,T_cuurent,j,j_timeleft,fun._multi_block,T_start,T_stop,trans_moves),open('failed_%i.pik'%(os.getpid()),'w'),2)
-        t_house[-1]-=Time.time()
+        #t_house[-1]-=Time.time()
         #t_comm.append(Time.time())
         #t_comm[-1]-=Time.time()
         #if mpi isn't on allow exit
