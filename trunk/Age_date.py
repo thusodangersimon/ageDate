@@ -27,7 +27,7 @@
 #
 #
 #
-""" Utilites used for spectral fitting"""
+""" Utilites used for spectral fitting with ssps"""
 
 import numpy as nu
 import os
