@@ -152,12 +152,29 @@ class CV_Fit(object):
     Runs with only MCMC'''
 
     def __init__(self,data,model_name='thuso',spec_path='/home/thuso/Phd/other_codes/Valerio',convolution_path='/home/thuso/Phd/other_codes/Valerio/thuso.dat',lib_path='CV_lib.h5',
-                gen_spec_lib=False):
+                gen_spec_lib=False,user_abn=False):
         '''If pool is activated, needs to be run in mpi. Head worker
         will do RJMCMC and working will make likelihoods.'''
         self.data = data
-        #self.lib = tab.open_file(lib_path,'r+')
-        #self.tab = self.lib.root.param.library
+        try:
+            self.lib = tab.open_file(lib_path,'r+')
+            self.tab = self.lib.root.param
+            #make index if not aready done
+            if len(self.tab.indexedcolpathnames) != len(self.tab.colnames):
+                for i in self.tab.colnames:
+                    try:
+                        if i not in self.tab.indexedcolpathnames and i !='spec':
+                            print('indexing col %s'%i)
+                            exec('self.tab.cols.%s.create_index()'%i)
+                            self.lib.flush()
+                    except ValueError:
+                        #already been indexed
+                        pass
+                    
+        except IOError:
+            #no cv lib
+            if not gen_spec_lib:
+                raise("No hdf5 library and Not making new spectra. Program can't run!")
         if gen_spec_lib:
             #use created library, but creat new spectra when none avalible
             #move to working dir
@@ -212,7 +229,30 @@ class CV_Fit(object):
             self.models = {'1':[2+self._no_abn]}
         else:
             #interpolate for missing values
-            self._no_abn,self._abn_lst
+            #find list of elements
+            all_col = self.tab.colnames
+            use_col = []
+            for i in all_col:
+                #don't try non params
+                if i == 'spec':
+                    continue
+                if i == 'tried':
+                    continue
+                if i == 'Temp':
+                    continue
+                if i == 'logg':
+                    continue
+                #check if used
+                query = self.tab.where('%s != %s'%(i,str(self.tab.coldflts[i])))
+                if len([x[i] for x in query]) > 0:
+                    use_col.append(i)
+            #put in order acording to atomic weight ((1,H),(2,He)....)
+            atoms = ['H','He','Li','Be','B','C','N','O','F','Ne','Na','Mg','Al','Si','P','S','Cl','Ar','K','Ca','Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn']
+            atoms = nu.asarray(atoms)
+            index = []
+            for i in use_col:
+                index.append(nu.where(atoms == i)[0][0])
+            self._no_abn,self._abn_lst = len(use_col),nu.asarray(use_col)[nu.argsort(index)]
         #generates spectra
         self.gen_spec_lib = gen_spec_lib
                 
@@ -224,17 +264,24 @@ class CV_Fit(object):
         '''
         
         #search for spectra
-        
+        spec = utils.get_param_from_hdf5(self.tab,param[bins],
+                nu.hstack(('Temp','logg',self._abn_lst)))
         #if spectra not there,
+        if spec is None:
+            if self.gen_spec_lib:
+                #calculate it from.
+                loglik,spec = self.lik_calc(param,bins,True)
+                #save spec
+                utils.put_in_lib(self.tab,param,spec,self.lock)
+                                 
+            else:
+                #interpolate it
+                #get close param
+                utils.get_close_param_hdf5
+                #interpolate it
 
-        #calculate it from.
-
-        #interpolate it
-
-
-        #calculate likelihood
-        self.lik_calc(param,bins,return_spec)
-           
+                #calculate loglik
+                
         if not return_spec:
             return loglik
         else:
@@ -337,7 +384,11 @@ class CV_Fit(object):
         
         #return up_dated_param
         out = nu.random.multivariate_normal(mu,sigma)
-        
+        #round to nearest 1000 or tenth assume order
+        #Temp to the 1000th
+        out[0] = nu.round(out[0],-3)
+        #all other to the thenth
+        out[1:] = nu.round(out[1:],1)
         return out
     
     def prior(self,param,bins):
@@ -353,7 +404,7 @@ class CV_Fit(object):
         out += stats_dist.uniform.logpdf(param[bins][1],4,8)
         #abns
         out += stats_dist.uniform.logpdf(param[bins][2:],-1,2).sum()
-  
+        
         return out.sum()
 
     def model_prior(self,model):
@@ -376,6 +427,9 @@ class CV_Fit(object):
         param[1] = nu.random.rand()*4+4
         #ABN
         param = nu.hstack((param,nu.random.rand(self._no_abn)*2 - 1))
+        #round ABN
+        param[0] = nu.round(param[0],-3)
+        param[1:] = nu.round(param[1:],1)
         sigma = nu.identity(len(param))
         return param,sigma
         

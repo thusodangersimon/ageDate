@@ -30,3 +30,143 @@
 """ Utilites used for spectral fitting and other stuff"""
 
 import numpy as nu
+import tables as tab
+import os
+
+
+'''Pytable utils for searching and adding spectra with params to a .h5 file'''
+
+class CV_lib(tab.IsDescription):
+    '''Storage param and spectra for white dwarf atomspheres'''
+    Temp = tab.Float64Col()
+    logg = tab.Float64Col()
+    H = tab.Float64Col()
+    Li = tab.Float64Col()
+    Be = tab.Float64Col()
+    B = tab.Float64Col()
+    C = tab.Float64Col()
+    N= tab.Float64Col()
+    O= tab.Float64Col()
+    F= tab.Float64Col()
+    Ne= tab.Float64Col()
+    Na= tab.Float64Col()
+    Mg= tab.Float64Col()
+    Al= tab.Float64Col()
+    Si= tab.Float64Col()
+    P= tab.Float64Col()
+    S= tab.Float64Col()
+    Cl= tab.Float64Col()
+    Ar= tab.Float64Col()
+    K= tab.Float64Col()
+    Ca= tab.Float64Col()
+    Sc= tab.Float64Col()
+    Ti= tab.Float64Col()
+    V= tab.Float64Col()
+    Cr= tab.Float64Col()
+    Mn= tab.Float64Col()
+    Fe= tab.Float64Col()
+    Co= tab.Float64Col()
+    Ni= tab.Float64Col()
+    Cu= tab.Float64Col()
+    Ni= tab.Float64Col()
+    Zn= tab.Float64Col()
+    He= tab.Float64Col()
+    spec = tab.FloatCol(shape=(5001,2))
+    tried = tab.BoolCol()
+
+
+
+def creat_lib(param,spec,abn_list,lib_path):
+    '''(ndarray, list or ndarray,spectra,col_label,match labes, lib_path or tables object)-> None
+    Creates or appends abn_list param to a new or open tables file
+    abn_list is names of parameters but MUST be in order of param where temp and logg are first then elements
+    '''
+    #check if files exsists and is open
+    if type(lib_path) is str:
+        if not os.path.exists(lib_path):
+            #create new database, and all beggining information
+            lib = tab.open_file(lib_path, mode = "w")
+            filters = tab.Filters(1,'lzo')
+            #group = lib.create_group('/','param','CV params with spectra')
+            lib.create_table(lib.root, 'param',CV_lib,
+                             expectedrows=9000,byteorder='little',filters=filters)
+            #set dflt values
+            attr = lib.root.param.set_attr
+            g_attr = lib.root.param.attrs
+            for i in range(len(lib.root.param.coltypes)):
+                if g_attr['FIELD_%i_NAME'%i] == 'spec':
+                    continue
+                if g_attr['FIELD_%i_NAME'%i]  == 'tried':
+                    attr('FIELD_%i_FILL'%i,True)
+                    continue
+                attr('FIELD_%i_FILL'%i ,-9999999.0)
+            
+            #make temp node
+            lib.flush()
+            lib.close()
+            lib = tab.open_file(lib_path, mode = 'a')
+        else:
+            #open in append mode
+            lib = tab.open_file(lib_path,mode='a')
+    else:
+        #send a open table and will add to it
+        assert type(lib_path) is tab.file.File
+        lib = lib_path
+
+    #add params and spectra to hdf5 lib
+    row = lib.root.param.row
+    assert len(param) == len(abn_list)+2
+    for i in xrange(len(param)):
+        if i == 0:
+            row['Temp'] = param[i]
+        elif i == 1:
+            row['logg'] = param[i]
+        else:
+            #elements
+            row[abn_list[i-2]] = param[i]
+    row['spec'] = spec
+    row.append()
+    lib.flush()
+    if type(lib_path) is str:
+        return lib
+
+def put_in_lib(tab,param,spec,lock):
+    '''Puts parametrs into hdf5 lib. Checks if spectrum is there if not puts
+    holder in place.
+    wait's till lock is true before writes table'''
+    pass
+
+def get_close_param_hdf5():
+    '''Retreves n*2 closest spectra from param'''
+    pass
+
+def get_param_from_hdf5(hdf5,param,cols):
+    '''searches hdf5 lib for rows of intrest. uses a binary like search'''
+    query = hdf5.where('(%s == %f) & (%s == %f)'%(cols[0],param[0],cols[1],param[1]))
+    sub_query = [i for i in query]
+    #2 param search
+    if len(sub_query) == 0:
+        #nothing returned
+        return None
+    #found something, check for more params
+    for col in range(2,len(cols)):
+        i = 0
+        while len(sub_query) > 0:
+            if not sub_query[i].table[0][cols[col]] == param[col]:
+                sub_query.pop(i)
+            else:
+                i+=1
+            if i == len(sub_query):
+                break
+
+
+    #see if any values left
+    if len(sub_query) == 0:
+        #no results found
+        return None
+    elif len(sub_query) == 1:
+        #check if spec is emptly but found values
+        return sub_query[0].table[0]['spec']
+    else:
+        print 'Warrning 2, same specra found',param
+        return sub_query[0].table[0]['spec']
