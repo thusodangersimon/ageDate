@@ -511,6 +511,8 @@ class VESPA_fit(object):
         #crate ezgal class of models
         SSP = gal.wrapper(models)
         self.SSP = SSP
+        #make sure is matched for interpolatioin
+        self.SSP.is_matched = True
         #extract seds from ezgal wrapper
         '''spect, info = [SSP.sed_ls], []
         for i in SSP:
@@ -561,8 +563,8 @@ class VESPA_fit(object):
 		distribution
         '''
 		#save length and mean age they don't change  self._multi_block
-        self._sigma = nu.copy(sigma)
-        self._mu = Mu.copy()
+        #self._sigma = nu.copy(sigma)
+        #self._mu = Mu.copy()
         #extract out of dict
         
         mu = nu.hstack([i for j in self._key_order for i in Mu[j] ])
@@ -570,6 +572,7 @@ class VESPA_fit(object):
             t_out = nu.random.multivariate_normal(mu,sigma)
         except nu.linalg.LinAlgError:
             print sigma
+            return Mu
         bins = Mu['gal'].shape[0]
         #save params for multi-block
         if str(bins) not in self._multi_block_param.keys():
@@ -652,7 +655,7 @@ class VESPA_fit(object):
         burst_model['wave'] = nu.copy(self.SSP.sed_ls)
         if not issorted(burst_model['wave']):
             for i in burst_model.keys():
-                burst_model[i] = burst_model[i][-1:0:-1]
+                burst_model[i] = burst_model[i][::-1]
 		#do dust
         if self._has_dust:
             #dust requires wavelengths
@@ -1930,9 +1933,9 @@ class Multinest_fit(object):
             #gaussian with mean mu and std sigma
             mu = 9.5
             sigma = 0.5
-            p[count+1] = erfinv(i[1] * 2. - 1.)*sigma + mu
+            #p[count+1] = erfinv(i[1] * 2. - 1.)*sigma + mu
             #uniform
-            #p[count+1] = i[1] * self._age_unq.ptp() + self._age_unq.min()
+            p[count+1] = i[1] * self._age_unq.ptp() + self._age_unq.min()
             #length bin is conditional on age
             min_range = min(abs(i[1] - self._age_unq.min()),
                             abs(self._age_unq.max()-i[1]))
@@ -1941,7 +1944,7 @@ class Multinest_fit(object):
             count += 2
             p[count] = i[2] * self._metal_unq.ptp() + self._metal_unq.min()
             count += 1
-            p[count] = i[3] * 400-200
+            p[count] = i[3] * 150 - 50
             count += 1
         #make sure no overlap in age
 

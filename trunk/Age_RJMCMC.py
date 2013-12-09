@@ -39,10 +39,25 @@ import signal
 import cPickle as pik
 from glob import glob
 import acor
-
+from memory_profiler import profile
 a=nu.seterr(all='ignore')
 
+def timeit(method):
+    """
+    Decorator to time methods
+    """
+    def timed(*args, **kw):
+        ts = time.time()
+        result = method(*args, **kw)
+        te = time.time()
 
+        print '%r  %2.2f sec' % \
+              (method.__name__ , te-ts)
+        return result
+
+    return timed
+
+@profile
 def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=None, fail_recover=True):
     '''(likelihood object, running object, int, int, bool) ->
     dict(ndarray), dict(ndarray)
@@ -287,7 +302,7 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
             #exit if reached target effective sample size
             if option.current % 501 == 0:
                 eff = ess(param[bins])
-                if eff > 10**5:
+                if eff > 10**5 and option.current > 10**5 :
                     option.iter_stop = False
         #pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm),open('time_%i.pik'%option.rank_world,'w'),2)
     #####################################return once finished 
@@ -427,6 +442,65 @@ def Convergence_tests(param,keys,n=1000):
                 print '%i out of %i parameters have same varance' %(sum( L_result[i]>.05),
                                                                 param[0][i].shape[1])
     return False
+
+#other stuff
+
+def gr_convergence(relevantHistoryEnd, relevantHistoryStart):
+    """
+    Gelman-Rubin Convergence
+    Converged when sum(R <= 1.2) == nparam
+    """
+    start = relevantHistoryStart
+    end = relevantHistoryEnd
+    N = end - start
+    if N==0:
+        return  np.inf*np.ones(self.nchains)
+    N = min(min([len(self.seqhist[c]) for c in range(self.nchains)]), N)
+    seq = [self.seqhist[c][-N:] for c in range(self.nchains)]
+    sequences = array(seq) #this becomes an array (nchains,samples,dimensions)
+    variances  = var(sequences,axis = 1)#array(nchains,dim)
+    means = mean(sequences, axis = 1)#array(nchains,dim)
+    withinChainVariances = mean(variances, axis = 0)
+    betweenChainVariances = var(means, axis = 0) * N
+    varEstimate = (1 - 1.0/N) * withinChainVariances + (1.0/N) * betweenChainVariances
+    R = sqrt(varEstimate/ withinChainVariances)
+    return R
+
+def delayed_rejection(xi, zi, pxi, zprob):
+    """(currnent_state, next_state,current_post, next_post) ->
+    Generates a second proposal based on rejected proposal xi
+    """
+    k=.3 #Deflation factor for the second proposal
+    #make step
+    cv = self.scaling_factor*cov(xi)+self.scaling_factor*self.e*identity(self.dimensions)
+    o=0
+    while o<50:
+        #generate new point
+        zdr = multivariate_normal(xi,k*cv,1).tolist()[0]
+        #check if in prior
+        if not self.check_constraints(zdr):
+            continue
+        if sum ([t>= self.parlimits[i][0] and t <= self.parlimits[i][1] for i, t in enumerate(zdr)]) == self.dimensions:
+                break
+        o+=1
+    #after 50 trials give up if not in priors
+    if not sum ([t>= self.parlimits[i][0] and t <= self.parlimits[i][1] for i, t in enumerate(zdr)]) == self.dimensions:
+        return xi, 0, 0, 0, 0
+    #get net proposal
+    propphi_zdr = self._prop_phi([zdr])
+    #calc lik
+    zdrprob,  zdrlik = self._get_post_prob([zdr],propphi_zdr)
+    #acceptance prob for new param a(zdrprob[0],zprob)
+    alpha2 = min(zdrprob[0]*(1-self._alpha1(self,zdrprob[0],zprob))/(pxi*(1-self._alpha1(self, pxi, zprob))), 1)
+    acc = 0; lik = 0; pr = 0; prop = 0
+    if random()< alpha2:
+        xi = zdr
+        acc = 1
+        liks = zdrlik
+        pr = zdrprob[0]
+        prop = propphi_zdr
+    return xi, acc, lik, pr, prop
+
 
 class rj_dict(dict):
     '''like built in dict, but has methods __add_ and __sub__ to add more key

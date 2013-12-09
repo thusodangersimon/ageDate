@@ -43,6 +43,11 @@ from scipy.integrate import simps
 from pysynphot import observation,spectrum
 import time as Time
 import boundary as bound
+#diffusion stuff
+from scipy.spatial.distance import pdist, squareform
+from scipy.cluster.vq import kmeans2
+#import diffuse as dif
+
 
 #sfr2energy = 1.0/7.9D-42    ; (erg/s) / (M_sun/yr) [Kennicutt 1998]
 
@@ -1060,3 +1065,65 @@ def plot(self,fmt=None,ploterrs=.1,plotcontinuum=True,smoothing=None,
         plt.ylabel('$ {\\rm Flux}/({\\rm erg}\\, {\\rm s}^{-1}\\, {\\rm cm}^{-2} {\\rm %s}^{-1})$'%xl[1])
             
         return res
+
+
+def weight_wavelegth(data, SSP, nlambda, age_to_weight=None):
+    '''Does PCA to find the wavelengths that contribute the most to an age
+    data -spectrum to fit
+    SSP -EZgal wrapper of spectra lib used in fitting
+    nlambda - number of wavelength user wants to use
+    age_to_weigth - age user thinks spectra should fall in (like the prior)
+    [lower,upper] yrs
+    returns:
+    ndarray (n,) of [0:1] weight for each wavelength point
+    '''
+    if age_to_weight is None:
+        #get ages and metals from SSP
+        age,Z,lam = nu.meshgrid(SSP[0].ages,nu.sort(nu.float64(SSP.meta_data['met'])),data[:,0])
+    else:
+        t_age = nu.linspace(age_to_weight[0],age_to_weight[1],69)
+        age,Z,lam = nu.meshgrid(t_age,nu.sort(nu.float64(SSP.meta_data['met'])),data[:,0])
+    ssps = nu.zeros_like(age)
+    #get ssp in same order as above
+    k = 0
+    #norm close to 4020 A
+    index_4020 = nu.searchsorted(data[:,0],[4020])
+    for i,j in zip(age[:,:,0].ravel(),Z[:,:,0].ravel()):
+        index = nu.unravel_index(k,ssps.shape[:2])
+        try:
+            temp_ssp = SSP.get_sed(i+1,j,'yrs')
+        except ValueError:
+             temp_ssp = SSP.get_sed(i-1,j,'yrs')
+        #make wavelengths match data
+        ssps[index] = rebin_spec(SSP.sed_ls, temp_ssp, data[:,0])
+        n = data[index_4020,1]/ssps[index][index_4020]
+        ssps[index] = n * ssps[index]
+        k+=1
+
+        
+    #get pca
+    pca = PCA(10)
+    #age_vs wavelength
+    temp = nu.sum(ssps,axis=0)
+    s=pca.fit_transform(temp.T)
+    #metals vs wavelentght
+    #plot
+    lab.scatter(s[:,0],s[:,1],c=data[:,0])
+    k = 45
+    cen, i = None,0
+    while True:
+        if cen is None:
+            cen, lables = kmeans2(X, k)
+            i += 1
+            continue
+        else:
+            t_cen, lables = kmeans2(X, cen,iter=30, minit='matrix')
+        #check is centroids have changed
+        if (nu.allclose(cen,t_cen) and i > 4) or i > 100:
+            break
+        else:
+            i += 1
+            cen = t_cen.copy()
+
+    #make pdist array with metals vs wavelength
+    met_vs_wave = squareform(pdist(ssps.sum(axis=1)))
