@@ -466,27 +466,21 @@ def gr_convergence(relevantHistoryEnd, relevantHistoryStart):
     R = sqrt(varEstimate/ withinChainVariances)
     return R
 
-def delayed_rejection(xi, zi, pxi, zprob):
-    """(currnent_state, next_state,current_post, next_post) ->
+def delayed_rejection(xi, pxi,xnext,pxnext,sigma,bins, fun):
+    """(currnent_state, current_posterior, lik_object) ->
     Generates a second proposal based on rejected proposal xi
     """
-    k=.3 #Deflation factor for the second proposal
     #make step
-    cv = self.scaling_factor*cov(xi)+self.scaling_factor*self.e*identity(self.dimensions)
-    o=0
-    while o<50:
+    for i in xrange(50):
         #generate new point
-        zdr = multivariate_normal(xi,k*cv,1).tolist()[0]
+        zdr = {bins:fun.proposal(xi[bins],sigma[bins])}
         #check if in prior
-        if not self.check_constraints(zdr):
-            continue
-        if sum ([t>= self.parlimits[i][0] and t <= self.parlimits[i][1] for i, t in enumerate(zdr)]) == self.dimensions:
-                break
-        o+=1
-    #after 50 trials give up if not in priors
-    if not sum ([t>= self.parlimits[i][0] and t <= self.parlimits[i][1] for i, t in enumerate(zdr)]) == self.dimensions:
-        return xi, 0, 0, 0, 0
-    #get net proposal
+        if not nu.isfinite(fun.prior(zdr,bins)):
+            break
+    else:
+        #after 50 trials give up if not in priors
+        return 
+    #get next proposal
     propphi_zdr = self._prop_phi([zdr])
     #calc lik
     zdrprob,  zdrlik = self._get_post_prob([zdr],propphi_zdr)
@@ -500,6 +494,7 @@ def delayed_rejection(xi, zi, pxi, zprob):
         pr = zdrprob[0]
         prop = propphi_zdr
     return xi, acc, lik, pr, prop
+
 
 
 class rj_dict(dict):
