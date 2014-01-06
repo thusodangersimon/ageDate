@@ -195,7 +195,7 @@ def delayed_mcmc(fun, option,bins='1', burnin=5*10**3, birth_rate=0.5,max_iter=1
         #bins = nu.random.choice(fun.models.keys())
 
         #set other RJ params
-        Nacept[bins] , Nreject[bins] = 1.,1.
+        Nacept[bins] , Nreject[bins] = 0.,1.
         acept_rate[bins], out_sigma[bins] = [1.], [sigma[bins][0][:]]
         #bayes_fact[bins] = #something
         T_cuurent[bins] = 0
@@ -282,7 +282,7 @@ def delayed_mcmc(fun, option,bins='1', burnin=5*10**3, birth_rate=0.5,max_iter=1
         
         ###########################step stuff
         #t_step.append(Time.time())
-        if T_cuurent[bins] < burnin + 5000 or acept_rate[bins][-1]<.11:
+        if T_cuurent[bins] < burnin + 5000 or acept_rate[bins][-1]<.11 or option.current < 50.:
             #only tune step if in burn-in
             sigma[bins] =  fun.step_func(acept_rate[bins][-1] ,param[bins], sigma, bins)
 
@@ -323,38 +323,74 @@ def gr_convergence(relevantHistoryEnd, relevantHistoryStart):
     R = sqrt(varEstimate/ withinChainVariances)
     return R
 
-def delayed_rejection(xi, pxi,zi, zprob, sigma, fun):
-    """(walk_state, walk_posterior,original_state,org_postier,step, lik_object) -> (params,accepted(bool),likihood)
-    Generates a second proposal based on rejected proposal xi
+def delayed_rejection(xi, xprob, sigma,bins, fun,k=50):
+    """(original_state,org_postier,step, lik_object) -> (params,accepted(bool),likihood)
+    Generates k proposals or until accepted based on rejected proposal xi
     """
     #make step
-    while True:
-        #generate new point
-        zdr = fun.proposal(xi,sigma)
-        #check if in prior
-        if nu.isfinite(fun.prior({'1':zdr},'1')):
-            break
-    #get next proposal
-    #propphi_zdr = self._prop_phi([zdr])
-    #calc lik
-    zdrprob = fun.lik({'1':zdr},'1') + fun.prior({'1':zdr},'1')
-    #acceptance prob for new param a(zdrprob[0],zprob)
-    
-    alpha2 = min(nu.exp(-(pxi-zdrprob)/2.)*(1-alpha1(zdrprob,zprob))/(1-alpha1(pxi, zprob)), 1)
-    if nu.isnan(alpha2):
-        alpha2 = 0.
-    print pxi, zdrprob,zprob, alpha2
-    #test acceptance
-    if nu.random.rand() < alpha2:
-        return zdr, 1, zdrprob
-    else:
-        return xi,0,pxi
+    s = .001
+    ybest,ybest_prob = xi.copy(),xprob.copy()
+    zdr = None
+    for K in range(k):
+        while True:
+            #generate new point
+            if zdr is None:
+                zdr = fun.proposal(xi,sigma*s)
+            else:
+                zdr = fun.proposal(zdr,sigma*s)
+            #check if in prior
+            if nu.isfinite(fun.prior({bins:zdr},bins)):
+                break
+        s *= 1.05
+        #get next proposal
+        #propphi_zdr = self._prop_phi([zdr])
+        #calc lik
+        zdrprob = fun.lik({bins:zdr},bins) + fun.prior({bins:zdr},bins)
+        #check if new best point found
+        if max(ybest_prob,zdrprob) == zdrprob:
+            ybest,ybest_prob = zdr.copy(), zdrprob.copy()
+            #will never accept so generate new value
+            continue
+        #acceptance prob for new param a(zdrprob[0],zprob)
+        if nu.isfinite(xprob):
+            #if nan or -inf skip x
+            alpha2 = min(1,nu.exp(-(zprob - zdrprob)))
+            #pxi = -nu.inf
+        elif nu.isfinite(zdrprob):
+            #input was not finie but new value is, so always accept
+            return zdr, 1, zdrprob
+        else:
+            #neither are finite. 
+            
+            continue
+            #alpha2 = min(1,nu.exp(nu.logaddexp(zdrprob,-pxi) -
+             #                 nu.logaddexp(zprob, -pxi)))
+            #alpha2 = min(nu.exp(-(zprob-zdrprob)/2.)*(1-alpha1(zdrprob,pxi))/(1-alpha1(zprob,pxi)), 1)
+        if nu.isnan(alpha2):
+            alpha2 = 0.
+        print '%e,%e,%e,%i'%(pxi, zdrprob,zprob, alpha2)
+        #test acceptance
+        if nu.random.rand() < alpha2:
+            return zdr, 1, zdrprob
+        else:
+            return zdr,0,zdrprob
 
+def logsubtractexp(x,y):
+    '''Subtracts 2 log values and returns log values. x <= y or else will return null
+    exp.'''
+
+    if x <= y:
+        return None
+    if y == -nu.inf:
+        return x
+    #do subtraction
+    return x + nu.log(-nu.exp(y - x)))
+        
 def alpha1(old,new):
     '''returns acceptance problablity of min(1,old/new).
      old and new are log probs'''
 
-    return min((1.,nu.exp((new-old)/2.)))
+    return min((.99999999,nu.exp((new-old)/2.)))
 
 import ezgal as gal
 from glob import glob

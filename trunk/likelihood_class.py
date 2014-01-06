@@ -575,7 +575,7 @@ class VESPA_fit(object):
             return Mu
         bins = Mu['gal'].shape[0]
         #save params for multi-block
-        if str(bins) not in self._multi_block_param.keys():
+        '''if str(bins) not in self._multi_block_param.keys():
             self._multi_block_param[str(bins)] = []
         #limit to length to 1000
         while len( self._multi_block_param[str(bins)]) > 1000:
@@ -610,7 +610,7 @@ class VESPA_fit(object):
             t_out = nu.copy(mu)
             #check iteratior
             self._multi_block_i += 1
-
+        '''
         #extract out of mu into correct dict shape
         out = {}
         i,bins = 0,int(bins)
