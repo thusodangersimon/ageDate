@@ -342,34 +342,21 @@ def delayed_rejection(xi, xprob, sigma,bins, fun,k=50):
             if nu.isfinite(fun.prior({bins:zdr},bins)):
                 break
         s *= 1.05
-        #get next proposal
-        #propphi_zdr = self._prop_phi([zdr])
+       
         #calc lik
         zdrprob = fun.lik({bins:zdr},bins) + fun.prior({bins:zdr},bins)
-        #check if new best point found
-        if max(ybest_prob,zdrprob) == zdrprob:
-            ybest,ybest_prob = zdr.copy(), zdrprob.copy()
-            #will never accept so generate new value
-            continue
-        #acceptance prob for new param a(zdrprob[0],zprob)
-        if nu.isfinite(xprob):
-            #if nan or -inf skip x
-            alpha2 = min(1,nu.exp(-(zprob - zdrprob)))
-            #pxi = -nu.inf
-        elif nu.isfinite(zdrprob):
-            #input was not finie but new value is, so always accept
+        #always accept if better like than original
+        if zdrprob >= xprob:
             return zdr, 1, zdrprob
-        else:
-            #neither are finite. 
-            
+        #always reject and move to next trial
+        if zdrprob < ybest_prob:
             continue
-            #alpha2 = min(1,nu.exp(nu.logaddexp(zdrprob,-pxi) -
-             #                 nu.logaddexp(zprob, -pxi)))
-            #alpha2 = min(nu.exp(-(zprob-zdrprob)/2.)*(1-alpha1(zdrprob,pxi))/(1-alpha1(zprob,pxi)), 1)
-        if nu.isnan(alpha2):
-            alpha2 = 0.
-        print '%e,%e,%e,%i'%(pxi, zdrprob,zprob, alpha2)
-        #test acceptance
+        #accept with certan probablity
+        numerator = logsubtractexp(zdrprob,ybest_prob)
+        denominator = logsubtractexp(xprob,ybest_prob)
+        if not (numerator is None) and not (denominator is None) and numerator > denominator:
+            print '%e,%e,%e,%i'%(pxi, zdrprob,zprob, alpha2)
+            #test acceptance
         if nu.random.rand() < alpha2:
             return zdr, 1, zdrprob
         else:
