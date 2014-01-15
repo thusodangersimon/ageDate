@@ -34,6 +34,7 @@ import numpy as nu
 import pylab as lab
 from matplotlib.animation import FuncAnimation
 import cPickle as pik
+import sys,os
 
 def make_chi(flux,spec,t,z,del_index):
     chi = nu.zeros_like(t)
@@ -244,33 +245,33 @@ def delayed_mcmc(fun, option,bins='1', burnin=5*10**3, birth_rate=0.5,max_iter=1
         #just lik part
         a = (chi[bins][-1] - chi[bins][-2])/2.
         #simulated anneling
-        #a /= SA(T_cuurent[bins],burnin,abs(T_start),T_stop)
+        a /= SA(T_cuurent[bins],burnin,abs(T_start),T_stop)
         #put temperature on order of chi calue
         '''if T_start < chi[str(bins)][-1]:
             T_start = chi[str(bins)][-1]+0'''
         #metropolis hastings
         #print a
+        
         if nu.exp(a) > nu.random.rand():
             #acepted
             param[bins].append(active_param[bins].copy())
             Nacept[bins] += 1
         else:
             #rejected
-            #delayed rejection
-            temp_param,temp_chi = active_param[bins].copy(), nu.copy(chi[bins][-1])
-            print 'first', temp_chi
-            for _i in range(50):
+            #check inital runs
+            if len(chi[bins]) < 3:
+                acc = False
+            else:
+                #delayed rejection
                 temp_param,acc, temp_chi = delayed_rejection(
-                    temp_param,temp_chi,param[bins][-1] ,chi[bins][-2]
-                    , sigma[bins], fun)
-                if acc:
-                    active_param[bins] = temp_param.copy()
-                    chi[bins][-1] = nu.copy(temp_chi)
-                    break
-            #if accepted break
+                param[bins][-2] ,chi[bins][-2], param[bins][-1] ,chi[bins][-1]
+                , sigma[bins],bins, fun,SA(T_cuurent[bins],burnin,abs(T_start),T_stop))
+            
             if acc:
+                print 'after',temp_chi,chi[bins][-1]
                 #accepted
-                param[bins].append(active_param[bins].copy())
+                param[bins].append(temp_param.copy())
+                chi[bins][-1] = nu.copy(temp_chi)
                 Nacept[bins] += 1
                
             else:
@@ -295,7 +296,7 @@ def delayed_mcmc(fun, option,bins='1', burnin=5*10**3, birth_rate=0.5,max_iter=1
         acept_rate[bins].append(nu.copy(Nacept[bins]/(Nacept[bins]+Nreject[bins])))
         out_sigma[bins].append(sigma[bins][:])
         ####end
-        if option.current > 10**5:
+        if option.current > max_iter:
              option.iter_stop = False
 
 
@@ -323,25 +324,32 @@ def gr_convergence(relevantHistoryEnd, relevantHistoryStart):
     R = sqrt(varEstimate/ withinChainVariances)
     return R
 
-def delayed_rejection(xi, xprob, sigma,bins, fun,k=50):
+def delayed_rejection(xi, xprob,y0,y0_prob, sigma,bins, fun,aneel,k=50):
     """(original_state,org_postier,step, lik_object) -> (params,accepted(bool),likihood)
     Generates k proposals or until accepted based on rejected proposal xi
     """
     #make step
     s = .001
-    ybest,ybest_prob = xi.copy(),xprob.copy()
+    ybest,ybest_prob = y0.copy(),y0_prob +0
     zdr = None
     for K in range(k):
-        while True:
+        for i in range(100) :
             #generate new point
-            if zdr is None:
-                zdr = fun.proposal(xi,sigma*s)
+            if zdr is None and nu.isfinite(y0_prob):
+                tzdr = fun.proposal(y0,sigma*s)
+            elif  zdr is None:
+                tzdr = fun.proposal(xi,sigma*s)
             else:
-                zdr = fun.proposal(zdr,sigma*s)
+                tzdr = fun.proposal(zdr,sigma*s)
             #check if in prior
-            if nu.isfinite(fun.prior({bins:zdr},bins)):
+            if nu.isfinite(fun.prior({bins:tzdr},bins)):
+                zdr = tzdr.copy()
                 break
-        s *= 1.05
+            s /= 1.05
+        else:
+            print 'not good'
+            return False,False,False
+        
        
         #calc lik
         zdrprob = fun.lik({bins:zdr},bins) + fun.prior({bins:zdr},bins)
@@ -349,21 +357,30 @@ def delayed_rejection(xi, xprob, sigma,bins, fun,k=50):
         if zdrprob >= xprob:
             return zdr, 1, zdrprob
         #always reject and move to next trial
-        if zdrprob < ybest_prob:
+        if zdrprob < y0_prob:
+            if nu.isfinite(zdrprob):
+                y0_prob = zdrprob +0
+                y0 = zdr.copy()
             continue
         #accept with certan probablity
-        numerator = logsubtractexp(zdrprob,ybest_prob)
-        denominator = logsubtractexp(xprob,ybest_prob)
-        if not (numerator is None) and not (denominator is None) and numerator > denominator:
-            print '%e,%e,%e,%i'%(pxi, zdrprob,zprob, alpha2)
-            #test acceptance
-        if nu.random.rand() < alpha2:
-            return zdr, 1, zdrprob
-        else:
-            return zdr,0,zdrprob
-
-def logsubtractexp(x,y):
-    '''Subtracts 2 log values and returns log values. x <= y or else will return null
+        numerator = logsubtractexp(ybest_prob,zdrprob)
+        denominator = logsubtractexp(ybest_prob, xprob)
+        if not (numerator is None or denominator is None):
+            print 'here',ybest_prob,zdrprob,xprob,nu.exp((numerator - denominator)/aneel)
+            #try acceptance criteria
+            if nu.exp((numerator - denominator)/aneel) > nu.random.rand():
+                return zdr, 1, zdrprob
+            else:
+                #didn't accept, chech best params
+                if zdrprob > ybest_prob or not nu.isfinite(ybest_prob):
+                    ybest_prob, ybest = zdrprob+0,zdr.copy()
+                else:
+                    y0_prob = zdrprob +0
+                    y0 = zdr.copy()
+    else:
+        return False,False,False
+def logsubtractexp(y,x):
+    '''Subtracts 2 log values and returns log values. x >= y or else will return null
     exp.'''
 
     if x <= y:
@@ -371,13 +388,15 @@ def logsubtractexp(x,y):
     if y == -nu.inf:
         return x
     #do subtraction
-    return x + nu.log(-nu.exp(y - x)))
+    return x + nu.log(nu.abs(1 - nu.exp(y - x)))
         
-def alpha1(old,new):
-    '''returns acceptance problablity of min(1,old/new).
-     old and new are log probs'''
-
-    return min((.99999999,nu.exp((new-old)/2.)))
+def SA(i,i_fin,T_start,T_stop):
+    #temperature parameter for Simulated anneling (SA). 
+    #reduices false acceptance rate if a<60% as a function on acceptance rate
+    if i>i_fin:
+        return 1.0
+    else:
+        return (T_stop-T_start)/float(i_fin)*i+T_start
 
 import ezgal as gal
 from glob import glob
@@ -481,5 +500,5 @@ if __name__ == '__main__':
     fun = lik.VESPA_fit(data,spec_lib='cb07',use_dust=False,use_losvd=False)
     fun.SSP.is_matched = True
     top =hy.Topologies('single')
-    out = delayed_mcmc(fun,top,max_iter=1000)
+    out = delayed_mcmc(fun,top,max_iter=50000)
     pik.dump((data,param,out),open('finished_%f.pik'%nu.random.rand(),'w'),2)
