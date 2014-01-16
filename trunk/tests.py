@@ -35,6 +35,9 @@ import pylab as lab
 from matplotlib.animation import FuncAnimation
 import cPickle as pik
 import sys,os
+import ezgal as gal
+from glob import glob
+import multiprocessing as multi
 
 def make_chi(flux,spec,t,z,del_index):
     chi = nu.zeros_like(t)
@@ -229,9 +232,17 @@ def delayed_mcmc(fun, option,bins='1', burnin=5*10**3, birth_rate=0.5,max_iter=1
         T_start,T_stop = chi[bins][-1]+0, 1.
         trans_moves = 0
         eff = -999999
+        totdif = [0.,0.]
+        #set up pool workers
+        Qin,Qout = multi.Manager().Queue(),multi.Manager().Queue()
+        pool = []
+        for i in range(multi.cpu_count()-1):
+            I = nu.random.randint(99)
+            pool.append(multi.Process(target=pool_worker, args=(fun.data,Qin,Qout,I)))
+            pool[-1].start()
     while option.iter_stop:
         #show status of running code
-        if T_cuurent[bins] % 501 == 0:
+        if T_cuurent[bins] % 200 == 0:
             show = ('acpt = %.2f,log lik = %e, bins = %s, steps = %i,ESS = %2.0f'
                     %(acept_rate[bins][-1],chi[bins][-1],bins, option.current,eff))
             print show
@@ -251,24 +262,36 @@ def delayed_mcmc(fun, option,bins='1', burnin=5*10**3, birth_rate=0.5,max_iter=1
             T_start = chi[str(bins)][-1]+0'''
         #metropolis hastings
         #print a
-        
+        #send info to workers
+            
         if nu.exp(a) > nu.random.rand():
             #acepted
             param[bins].append(active_param[bins].copy())
             Nacept[bins] += 1
+            totdif[0] += chi[bins][-1] - chi[bins][-2]
+            print 'Did it myself',totdif[0]
         else:
+
             #rejected
+            acc = False
             #check inital runs
-            if len(chi[bins]) < 3:
-                acc = False
-            else:
-                #delayed rejection
-                temp_param,acc, temp_chi = delayed_rejection(
-                param[bins][-2] ,chi[bins][-2], param[bins][-1] ,chi[bins][-1]
-                , sigma[bins],bins, fun,SA(T_cuurent[bins],burnin,abs(T_start),T_stop))
+            if not len(chi[bins]) < 3:
+                #check from workers
+                while Qout.qsize() > 0:
+                    temp_param, temp_chi = Qout.get()
+                    #check if better
+                    acc = del_acc(temp_chi,chi[bins][-1],chi[bins][-2],SA(T_cuurent[bins],burnin,abs(T_start),T_stop))
+                    if acc:
+                        totdif[1] +=temp_chi-chi[bins][-2]
+                        print 'got from worker!',totdif[1]
+                        break
+                '''else:
+                    #delayed rejection
+                    temp_param,acc, temp_chi = delayed_rejection(
+                        param[bins][-2] ,chi[bins][-2],active_param[bins] ,chi[bins][-1]
+                    , sigma[bins],bins, fun,SA(T_cuurent[bins],burnin,abs(T_start),T_stop),k=10)'''
             
             if acc:
-                print 'after',temp_chi,chi[bins][-1]
                 #accepted
                 param[bins].append(temp_param.copy())
                 chi[bins][-1] = nu.copy(temp_chi)
@@ -280,29 +303,55 @@ def delayed_mcmc(fun, option,bins='1', burnin=5*10**3, birth_rate=0.5,max_iter=1
                 active_param[bins] = param[bins][-1].copy()
                 chi[bins][-1] = nu.copy(chi[bins][-2])
                 Nreject[bins]+=1
-        
+            #send to workers
+            for i in range(multi.cpu_count() -1):
+                #xi,xprob,sigma,bins,aneel
+                Qin.put((param[bins][-1],chi[bins][-1],sigma,bins,SA(T_cuurent[bins],burnin,abs(T_start),T_stop)))
+
         ###########################step stuff
         #t_step.append(Time.time())
         if T_cuurent[bins] < burnin + 5000 or acept_rate[bins][-1]<.11 or option.current < 50.:
             #only tune step if in burn-in
             sigma[bins] =  fun.step_func(acept_rate[bins][-1] ,param[bins], sigma, bins)
-
+        if T_cuurent[bins] == burnin:
+            acept_rate[bins][-1] = .0
+            Nacept[bins] = 0.
+            Nreject[bins] = 1.
+            totdif = [0.,0.]
         ##############################convergece assment
        
         ##############################house keeping
         #t_house.append(Time.time())
         j+=1
         option.current += 1
+        T_cuurent[bins] += 1
         acept_rate[bins].append(nu.copy(Nacept[bins]/(Nacept[bins]+Nreject[bins])))
         out_sigma[bins].append(sigma[bins][:])
         ####end
         if option.current > max_iter:
              option.iter_stop = False
-
-
+    #wait for pool to die
+    for i in range(multi.cpu_count()-1):
+        Qin.put((None,None,None,None,None))
+       
     return param, chi, acept_rate , out_sigma, param.keys()
 
-
+def del_acc(y_star,yi,xi,aneel):
+    '''does delayed aceeptance criteria'''
+    if y_star > xi:
+        return True
+    if y_star < yi:
+        return False
+    #check acceptants
+    numerator = logsubtractexp(y_star,yi)
+    denominator = logsubtractexp(y_star, xi)
+    if not (numerator is None or denominator is None):
+        #try acceptance criteria
+        if nu.exp((numerator - denominator)/aneel) > nu.random.rand():
+            return True
+        else:
+            return False
+    
 def gr_convergence(relevantHistoryEnd, relevantHistoryStart):
     """
     Gelman-Rubin Convergence
@@ -333,7 +382,7 @@ def delayed_rejection(xi, xprob,y0,y0_prob, sigma,bins, fun,aneel,k=50):
     ybest,ybest_prob = y0.copy(),y0_prob +0
     zdr = None
     for K in range(k):
-        for i in range(100) :
+        for i in range(20) :
             #generate new point
             if zdr is None and nu.isfinite(y0_prob):
                 tzdr = fun.proposal(y0,sigma*s)
@@ -347,10 +396,9 @@ def delayed_rejection(xi, xprob,y0,y0_prob, sigma,bins, fun,aneel,k=50):
                 break
             s /= 1.05
         else:
-            print 'not good'
+            #print 'not good',xi
             return False,False,False
-        
-       
+
         #calc lik
         zdrprob = fun.lik({bins:zdr},bins) + fun.prior({bins:zdr},bins)
         #always accept if better like than original
@@ -366,7 +414,7 @@ def delayed_rejection(xi, xprob,y0,y0_prob, sigma,bins, fun,aneel,k=50):
         numerator = logsubtractexp(ybest_prob,zdrprob)
         denominator = logsubtractexp(ybest_prob, xprob)
         if not (numerator is None or denominator is None):
-            print 'here',ybest_prob,zdrprob,xprob,nu.exp((numerator - denominator)/aneel)
+            #print 'here',ybest_prob,zdrprob,xprob,nu.exp((numerator - denominator)/aneel)
             #try acceptance criteria
             if nu.exp((numerator - denominator)/aneel) > nu.random.rand():
                 return zdr, 1, zdrprob
@@ -379,6 +427,7 @@ def delayed_rejection(xi, xprob,y0,y0_prob, sigma,bins, fun,aneel,k=50):
                     y0 = zdr.copy()
     else:
         return False,False,False
+    
 def logsubtractexp(y,x):
     '''Subtracts 2 log values and returns log values. x >= y or else will return null
     exp.'''
@@ -397,9 +446,6 @@ def SA(i,i_fin,T_start,T_stop):
         return 1.0
     else:
         return (T_stop-T_start)/float(i_fin)*i+T_start
-
-import ezgal as gal
-from glob import glob
 
 '''makes spectrum for use in fitting'''
 
@@ -479,7 +525,64 @@ def param_out(nparam,age,metal,norm):
     for i in xrange(nparam):
         out.append([.00001,age[i],metal[i],norm[i]])
     return {str(nparam):{'gal':nu.asarray(out)}}
+
+def pool_worker(data,qin,qout,seed):
+    '''(data (ndarray),Queque object to recive params,random seed to start at)
+    runs a worker in the background to help speed up like calculations'''
+    from time import time
+    fun = lik.VESPA_fit(data,spec_lib='cb07',use_dust=False,use_losvd=False)
+    fun.SSP.is_matched = True
+    fun.data = data
+    #set seed
+    fun._seed(seed)
+    xi= False
+    i =0
+    while True:
+        #clear memory
+        if i%20000 == 0 and i >1:
+            del fun
+            fun = lik.VESPA_fit(data,spec_lib='cb07',use_dust=False,use_losvd=False)
+            fun.SSP.is_matched = True
+            fun.data = data
+            #set seed
+            fun._seed(seed)
+
+        #get data
+        try:
+            xi,xprob,sigma,bins,aneel = qin.get()#qin.get(timeout=.5)
+            while qin.qsize() > 6:
+                xi,xprob,sigma,bins,aneel = qin.get(timeout=.01)
+        except IOError:
+                pass
+        except:
+            pass
+        #check if time to stop
+        if xi is None:
+            break
+        elif not xi:
+            continue
+        #print xprob,qin.qsize()
+        #sys.stdout.flush()
+        #make  new param and send to delayed rejection func
+        #random seed
+        for i in range(seed):
+           fun.proposal(xi,sigma[bins])
+            
+        yi = fun.proposal(xi,sigma[bins])
+        yprob = fun.prior({bins:yi},bins)
+        if nu.isfinite(yprob):
+            yprob += fun.lik({bins:yi},bins)
+        t=time()
+        k,s = nu.random.randint(100),nu.random.rand()*5
+        temp_param,acc,temp_chi = delayed_rejection(xi, xprob,yi,yprob, s*sigma[bins], bins, fun, aneel,20)
+        #print time()-t,temp_chi,'time\n',sigma[bins]
+        sys.stdout.flush()
+        #return to root
+        if acc:
+            #print 'accept' ,temp_chi
+            qout.put((temp_param,temp_chi),timeout=5)
     
+            
 if __name__ == '__main__':
     '''test delayed rejection'''
 
@@ -500,5 +603,5 @@ if __name__ == '__main__':
     fun = lik.VESPA_fit(data,spec_lib='cb07',use_dust=False,use_losvd=False)
     fun.SSP.is_matched = True
     top =hy.Topologies('single')
-    out = delayed_mcmc(fun,top,max_iter=50000)
+    out = delayed_mcmc(fun,top,max_iter=100000,burnin=5000)
     pik.dump((data,param,out),open('finished_%f.pik'%nu.random.rand(),'w'),2)

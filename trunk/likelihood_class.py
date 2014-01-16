@@ -556,7 +556,11 @@ class VESPA_fit(object):
         #max total length of bins constraints
         self._max_age = self._age_unq.ptp()
 
-        
+    def _seed(self,Seed):
+        '''Changes the random seed'''
+        nu.random = nu.random.RandomState(Seed)
+        nu.random.seed(Seed)
+            
     def proposal(self,Mu,sigma):
         '''(Example_lik_class, ndarray,ndarray) -> ndarray
 		Proposal distribution, draws steps for chain. Should use a symetric
@@ -787,7 +791,7 @@ class VESPA_fit(object):
         Evaluates step_criteria, with help of param and model and 
         changes step size during burn-in perior. Outputs new step size
         '''
-        if step_crit > .60:
+        if step_crit > .60 and nu.all(step_size[model].diagonal() < 10.):
             step_size[model] *= 1.05
         elif step_crit < .2 and nu.any(step_size[model].diagonal() > 10**-6):
             step_size[model] /= 1.05
