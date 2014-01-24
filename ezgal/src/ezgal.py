@@ -1805,10 +1805,10 @@ class ezgal(object):
 			self.nages = self.ages.size
 			start_filters = 3
 			# how about masses?
-			if fits[2].header.has_key( 'has_mass' ) and fits[2].header['has_mass']:
+			if 'has_mass' in fits[2].header and fits[2].header['has_mass']:
 				self.set_masses( self.ages, fits[2].data.field('masses'), age_units='yrs', grid=False )
 			# and sfh?
-			if fits[2].header.has_key( 'has_sfh' ) and fits[2].header['has_sfh']:
+			if 'has_sfh' in fits[2].header and fits[2].header['has_sfh']:
 				self.sfh = fits[2].data.field('sfh')
 				self.has_sfh = True
 		else:
@@ -1822,7 +1822,7 @@ class ezgal(object):
 
 		# was filter information included in this model file?
 		# if so, load it and store it in the object
-		if not( fits[0].header.has_key( 'nfilters' ) ): return True
+		if not('nfilters' in fits[0].header): return True
 		if fits[0].header['nfilters'] == 0: return True
 
 		# set cosmology specified in the model file
@@ -2198,13 +2198,13 @@ class ezgal(object):
 		
 		Saves the meta data in the fits header into the ezgal object (if present) """
 
-		if not hdr.has_key( 'has_meta' ) or not hdr['has_meta']: return False
+		if not ('has_meta' in hdr) or not hdr['has_meta']: return False
 
 		# loop through all header cards in the header and look for ones with a comment that says 'meta data'
 		self.meta_data = {}
-		for card in hdr.ascardlist():
+		for card in hdr.cards:
 			if str( card ).count( 'meta data' ):
-				self.meta_data[card.key.lower()] = card.value
+				self.meta_data[card.keyword.lower()] = card.value
 
 		self.has_meta_data = True
 		return True

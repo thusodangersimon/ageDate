@@ -269,7 +269,7 @@ def delayed_mcmc(fun, option,bins='1', burnin=5*10**3, birth_rate=0.5,max_iter=1
             param[bins].append(active_param[bins].copy())
             Nacept[bins] += 1
             totdif[0] += chi[bins][-1] - chi[bins][-2]
-            print 'Did it myself',totdif[0]
+            #print 'Did it myself',totdif[0]
         else:
 
             #rejected
@@ -283,7 +283,7 @@ def delayed_mcmc(fun, option,bins='1', burnin=5*10**3, birth_rate=0.5,max_iter=1
                     acc = del_acc(temp_chi,chi[bins][-1],chi[bins][-2],SA(T_cuurent[bins],burnin,abs(T_start),T_stop))
                     if acc:
                         totdif[1] +=temp_chi-chi[bins][-2]
-                        print 'got from worker!',totdif[1]
+                        #print 'got from worker!',totdif[1]
                         break
                 '''else:
                     #delayed rejection
@@ -537,6 +537,8 @@ def pool_worker(data,qin,qout,seed):
     fun._seed(seed)
     xi= False
     i =0
+    Naccept = 0.
+    temp_chi = -nu.inf
     while True:
         #clear memory
         if i%20000 == 0 and i >1:
@@ -552,6 +554,9 @@ def pool_worker(data,qin,qout,seed):
             xi,xprob,sigma,bins,aneel = qin.get()#qin.get(timeout=.5)
             while qin.qsize() > 6:
                 xi,xprob,sigma,bins,aneel = qin.get(timeout=.01)
+            #keep going with param if better than input
+            if xprob > temp_chi and nu.random.rand()>.5:
+                xi,xprob = temp_param.copy(),nu.copy(temp_chi)
         except IOError:
                 pass
         except:
@@ -579,7 +584,8 @@ def pool_worker(data,qin,qout,seed):
         sys.stdout.flush()
         #return to root
         if acc:
-            #print 'accept' ,temp_chi
+            Naccept += 1
+            print 'accept' ,Naccept
             qout.put((temp_param,temp_chi),timeout=5)
     
             
