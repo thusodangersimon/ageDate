@@ -480,11 +480,12 @@ class VESPA_fit(object):
 
     Uses vespa methodology splitting const sfh into multiple componets
     '''
-    def __init__(self,data, resol=180.,min_sfh=1,max_sfh=16,lin_space=False,use_dust=True, 
+    def __init__(self,data,weights=None, resol=180.,min_sfh=1,max_sfh=16,lin_space=False,use_dust=True, 
 		use_losvd=True, spec_lib='p2',imf='salp',
 			spec_lib_path='/home/thuso/Phd/stellar_models/ezgal/'):
         '''(VESPA_fitclass, ndarray,int,int) -> NoneType
         data - spectrum to fit
+        weights/mask for data
         *_sfh - range number of burst to allow
         lin_space - make age bins linearly space or log spaced
         use_* allow useage of dust and line of sigt velocity dispersion
@@ -499,6 +500,11 @@ class VESPA_fit(object):
         self.data[:,1] *= self._norm
         #resoluion of data
         self.resol = resol
+        if weights is None:
+            self.weights = nu.ones_like(data[:,0])
+        else:
+            self.weights = weights
+            self.data[:,1] *= weights
         #load models
         cur_lib = ['basti', 'bc03', 'cb07','m05','c09','p2']
         assert spec_lib.lower() in cur_lib, ('%s is not in ' %spec_lib.lower() + str(cur_lib))
@@ -680,7 +686,8 @@ class VESPA_fit(object):
         
         model = ag.data_match(self.data,model)
         #model = nu.sum(burst_model.values(),0)
-        
+        #weight or mask model
+        model['0'] *= self.weights
 		#return loglik
         if self.data.shape[1] == 3:
             #uncertanty calc
