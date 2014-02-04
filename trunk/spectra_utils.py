@@ -301,7 +301,52 @@ All terms are logrythmic.
     #del ssps,ages, age_unq,metal_unq
     return simps(ssps, ages, axis=0)/(ages.ptp())
     #return SSP.sed_ls + nu.inf
-    
+
+
+def make_numeric( age, sfh, max_bins, metals=None, return_param=False):
+        '''(ndarray,ndarray,ndarray,int,ndarray or None) -> ndarray
+        Like EZGAL's function but with a vespa like framework.
+        Bins function into flat chunks of average of SFH of function in that range.
+        Can also put a function for metalicity to, otherwise will be random.
+        '''
+        age, sfh = nu.asarray(age), nu.asarray(sfh)
+        assert age.shape[0] == sfh.shape[0], 'Age and SFH must have same shape'
+        if max_bins > len(age):
+            print 'Warning, more bins that ages not supported yet'
+            
+        #split up age range and give lengths
+        param = []
+        length = self._age_unq.ptp()/max_bins
+        bins = nu.histogram(age,bins=max_bins)[1]
+        #need to get length, t, norm and metals if avalible
+        length, t, norm, metal = [], [] ,[] ,[]
+        for i in range(0,len(bins)-1):
+            index = nu.searchsorted(age,[bins[i],bins[i+1]])
+            length.append(age[index[0]:index[1]].ptp())
+            t.append(age[index[0]:index[1]].mean())
+            norm.append(sfh[index[0]:index[1]].mean())
+            if metals is None:
+                #no input metal choose random
+                metal.append(nu.random.choice(nu.linspace(self._metal_unq.min(),self._metal_unq.max())))
+            else:
+                pass
+        #normalize norm to 1
+        norm = nu.asarray(norm)/nu.sum(norm)
+        #get bursts
+        out = nu.zeros_like(self._spect[:,:2])
+        out[:,0] = self._spect[:,0].copy()
+        param = []
+        for i in range(len(t)):
+            if return_param:
+                param.append([length[i],t[i],metal[i],norm[i]])
+            out[:,1] += norm[i] * ag.make_burst(length[i],t[i],metal[i]
+                          ,self._metal_unq, self._age_unq, self._spect
+                          , self._lib_vals)
+        if return_param:
+            return out, nu.asarray(param)
+        else:
+            return out
+        
 def random_permute(seed):
     '''(seed (int)) -> int
     does random sequences to produice a random seed for parallel programs'''

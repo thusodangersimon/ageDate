@@ -225,4 +225,31 @@ def blur_image(im, n, ny=None) :
     """
     g = gauss_kern(n, sizey=ny)
     improc = convolve(im,g, mode='valid')
-    return improc
+    return improc 
+
+def make_sfh_plot(param, model=None):
+        '''(dict(ndarray)-> Nonetype
+        Make plot of sfh vs log age of all models in param 
+        '''
+        import pylab as lab
+        if not model is None:
+            x,y = [], []
+            for i in param[model]:
+                x,y = [] , []
+                #make square bracket
+                x.append(i[1]-i[0]/2.)
+                x.append(i[1]-i[0]/2.)
+                x.append(i[1]+i[0]/2.)
+                x.append(i[1]+i[0]/2.)
+                y.append(i[3]-50)
+                y.append(i[3])
+                y.append(i[3])
+                y.append(i[3]-50)
+                lab.plot(x,y,'b',label=model)
+            lab.legend()
+            lab.show()
+        else:
+            for i in param.keys():
+                pass
+        return x,y
+            

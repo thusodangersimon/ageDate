@@ -1,4 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
+
+"""used to make wrapper from boost c++ code"""
  
 from distutils.core import setup
 from distutils.extension import Extension

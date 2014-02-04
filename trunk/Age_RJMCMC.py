@@ -30,14 +30,8 @@
 
 import numpy as nu
 import sys,os
-from scipy.cluster import vq as sci
-from scipy.stats import levene, f_oneway,kruskal
-from anderson_darling import anderson_darling_k as ad_k
-from multiprocessing import *
 import time as Time
-import signal
 import cPickle as pik
-from glob import glob
 import acor
 from memory_profiler import profile
 a=nu.seterr(all='ignore')
@@ -57,7 +51,7 @@ def timeit(method):
 
     return timed
 
-@profile
+#@profile
 def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=None, fail_recover=True):
     '''(likelihood object, running object, int, int, bool) ->
     dict(ndarray), dict(ndarray)
@@ -349,218 +343,6 @@ def random_permute(seed):
     return int(seed)
 
 
-def swarm_func(param,dust_param,chi,parambest,chibest,bins):
-    #pushes current chain towards global best fit with streangth
-    #porportional to the difference in chi squared values * prior volume
-    #if not in same bin number, changes birth/death rate
-    #dust is always affected?
-    best_param = nu.array(parambest)
-    best_param = best_param[~nu.isnan(best_param)]
-    best_bins = (len(best_param)-2)/3
-    if not bins == best_bins:
-        if bins > best_bins:
-            #raise prob of death
-            return nu.zeros(bins*3),nu.zeros(2),0.2
-        else:
-            #raise prob of birth
-            return nu.zeros(bins*3),nu.zeros(2),0.8
-    else:
-        vect = best_param[:-2] - param
-        vect_dust = best_param[-2:] - dust_param
-        #add vector in porportion to chi values
-        weight = nu.tanh(0.000346 * 
-                         abs(chi - chibest.value ))
-        weight_dust = weight * nu.sum(vect_dust**2)**0.5/4.
-        weight *=  nu.sum(vect**2)**0.5/4.
-    return (param + weight * vect, dust_param + weight_dust * vect_dust,
-            0.5)
-
-def ess(t):
-    '''returns the average sample size of a N,M ndarray (doesn't actually take a N,M ndarray'''
-    #extract data from dictoranry
-    data = []
-    for i in t:
-        dics = []
-        for j in i.keys():
-            dics.append(nu.ravel(i[j]))
-        data.append(nu.hstack(dics))
-    data = nu.asarray(data)
-    temp_ess,Len = [],float(len(data[:,0]))
-    #calculate ess for each parameter
-    for i in range(data.shape[1]):
-        try:
-            temp_ess.append(Len/acor.acor(data[:,i])[0])
-        except ZeroDivisionError:
-            pass
-        except RuntimeError:
-            pass
-    if len(temp_ess) == 0:
-        return 0.
-    #return max
-    return nu.nanmax(temp_ess)
-
-def Convergence_tests(param,keys,n=1000):
-    #uses Levene's test to see if var between chains are the same if that is True
-    #uses f_oneway (ANOVA) to see if means are from same distrubution 
-    #if both are true then tells program to exit
-    #uses last n chains only
-    for i in param:
-        for j in keys:
-            i[j]=nu.array(i[j])
-    ad_k
-    D_result={}
-    for i in keys:
-        for k in range(param[0][i].shape[1]):
-            samples='' 
-            for j in range(len(param)):
-                samples+='param['+str(j)+']["'+i+'"][-'+str(int(n))+':,'+str(k)+'],'
-        D_result[i]=eval('ad_k('+samples[:-1]+')')[-1]>.05
-    if any(D_result.values()):
-        print 'A-D test says they are the same'
-        return True
-    #try kustkal test
-    A_result={}
-    out=False
-    for i in keys:
-        A_result[i]=nu.zeros(param[0][i].shape[1])
-        for k in range(param[0][i].shape[1]):
-            samples='' 
-            for j in range(len(param)):
-                samples+='param['+str(j)+']["'+i+'"][-'+str(int(n))+':,'+str(k)+'],'
-            A_result[i][k]=eval('kruskal('+samples[:-1]+')')[1]
-        if nu.all(A_result[i]>.05): #if kruskal test is true
-            out=True
-            print "ANOVA says chains have converged. Ending program"
-            return True            
-        else:
-            print '%i out of %i parameters have same means' %(sum( A_result[i]>.05),
-                                                              param[0][i].shape[1])
-    #do ANOVA to see if means are same
-    if out:
-        L_result={}
-        out=False
-        #turn into an array
-        for i in keys:
-            param[0][i]=nu.array(param[0][i])
-            L_result[i]=nu.zeros(param[0][i].shape[1])
-            for k in range(param[0][i].shape[1]):
-                samples='' 
-                for j in range(len(param)):
-                    samples+='param['+str(j)+']["'+i+'"][-'+str(int(n))+':,'+str(k)+'],'
-                L_result[i][k]=eval('levene('+samples[:-1]+')')[1]
-            if nu.all(L_result[i]>.05): #if leven test is true
-                print "Levene's test is true for %s bins" %i
-                return True
-            else:
-                print '%i out of %i parameters have same varance' %(sum( L_result[i]>.05),
-                                                                param[0][i].shape[1])
-    return False
-
-#other stuff
-
-def gr_convergence(relevantHistoryEnd, relevantHistoryStart):
-    """
-    Gelman-Rubin Convergence
-    Converged when sum(R <= 1.2) == nparam
-    """
-    start = relevantHistoryStart
-    end = relevantHistoryEnd
-    N = end - start
-    if N==0:
-        return  np.inf*np.ones(self.nchains)
-    N = min(min([len(self.seqhist[c]) for c in range(self.nchains)]), N)
-    seq = [self.seqhist[c][-N:] for c in range(self.nchains)]
-    sequences = array(seq) #this becomes an array (nchains,samples,dimensions)
-    variances  = var(sequences,axis = 1)#array(nchains,dim)
-    means = mean(sequences, axis = 1)#array(nchains,dim)
-    withinChainVariances = mean(variances, axis = 0)
-    betweenChainVariances = var(means, axis = 0) * N
-    varEstimate = (1 - 1.0/N) * withinChainVariances + (1.0/N) * betweenChainVariances
-    R = sqrt(varEstimate/ withinChainVariances)
-    return R
-
-def delayed_rejection(xi, pxi,xnext,pxnext,sigma,bins, fun):
-    """(currnent_state, current_posterior, lik_object) ->
-    Generates a second proposal based on rejected proposal xi
-    """
-    #make step
-    for i in xrange(50):
-        #generate new point
-        zdr = {bins:fun.proposal(xi[bins],sigma[bins])}
-        #check if in prior
-        if not nu.isfinite(fun.prior(zdr,bins)):
-            break
-    else:
-        #after 50 trials give up if not in priors
-        return 
-    #get next proposal
-    propphi_zdr = self._prop_phi([zdr])
-    #calc lik
-    zdrprob,  zdrlik = self._get_post_prob([zdr],propphi_zdr)
-    #acceptance prob for new param a(zdrprob[0],zprob)
-    alpha2 = min(zdrprob[0]*(1-self._alpha1(self,zdrprob[0],zprob))/(pxi*(1-self._alpha1(self, pxi, zprob))), 1)
-    acc = 0; lik = 0; pr = 0; prop = 0
-    if random()< alpha2:
-        xi = zdr
-        acc = 1
-        liks = zdrlik
-        pr = zdrprob[0]
-        prop = propphi_zdr
-    return xi, acc, lik, pr, prop
-
-
-
-class rj_dict(dict):
-    '''like built in dict, but has methods __add_ and __sub__ to add more key
-    words and subrtract them'''
-    def __add__(self,x):
-        '''Combines models together, keywords become almagination of the 2
-        '''
-        newkey = ''
-        new_vals = []
-        for i in x.keys():
-            newkey += i + ','
-            new_vals.append(x[i])
-        for i in self.keys():
-            newkey += i + ','
-            new_vals.append(self[i])
-        newkey = newkey[:-1]
-        out = rj_dict()
-        out[newkey] = new_vals
-        return out
-        #remove old key
-        
-    def __iadd__(self,x):
-        return __add__(x)
-
-    def __isub__(self,x):
-        return __sub__(x)
-
-    def __sub__(self,x):
-        '''removes keyword from dict does last one first
-        >>>a = rj_dict()
-        >>>a['1,2,1']=[[1],[2],[3]]
-        >>>a -'2'
-        {'1,1':[[1],[3]]}
-        >>>a - '1'
-        {'1,2':[[1],[2]]}'''
-        assert type(x) is str, "can only remove proper key value"
-        keys = self.keys()[0]
-        keys = keys.split(',')
-        vals = self.copy().values()[0][:]
-        max = -1
-        for i,j in enumerate(keys):
-            if j == x:
-                max = i
-        vals.pop(max)
-        keys.pop(max)
-        newkeys = ''
-        for i in keys:
-            newkeys += i + ','
-        newkeys = newkeys[:-1]
-        out = rj_dict()
-        out[newkeys] = vals
-        return out
 
 #gracefull exit
 #####signal catcher so can exit anytime and save results
@@ -577,7 +359,6 @@ if __name__=='__main__':
     #profiling
     import cProfile as pro
     import cPickle as pik
-    from Age_date import *
     #temp=pik.load(open('0.3836114.pik'))
     data,info1,weight,dust=iterp_spec(1)
     #j='0.865598733333'
