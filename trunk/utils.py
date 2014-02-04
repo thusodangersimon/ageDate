@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Name:  Age Dating Spectra Fitting Program
+# Name:  Database utilities
 #
 # Author: Thuso S Simon
 #
@@ -27,7 +27,7 @@
 #
 #
 #
-""" Utilites used for spectral fitting and other stuff"""
+""" Utilites used for makeing and accessing databases"""
 
 import numpy as nu
 import tables as tab

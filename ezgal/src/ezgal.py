@@ -7,7 +7,7 @@ import numpy as np
 __ver__ = '2.0'
 
 class ezgal(object):
-	""" model = ezgal.ezgal( model_file, is_ised=False, is_fits=False, is_ascii=False, has_masses=False, units='a', age_units='gyrs')
+    """ model = ezgal.ezgal( model_file, is_ised=False, is_fits=False, is_ascii=False, has_masses=False, units='a', age_units='gyrs')
 	
 	Class for converting galaxy seds as a function of age to magnitudes as a function of redshift.
 	Reads in bc03 ised files as well as ascii files, effectively replacing cm_evolution from the bc03 src files
@@ -16,67 +16,67 @@ class ezgal(object):
 	This will automatically try to dtermine which type of file you have passed it.  If this fails, you can specify it manually with the is_* flags.
 	
 	units, age_units, and has_masses apply only for ascii files.  See ezgal._load_ascii()
-	"""
+    """
 
 	# model information
-	filename = ''			# the name of the file
-	nages = 0			# number of different aged SEDs
-	ages = np.array( [] )		# array of ages (years)
-	nvs = 0				# number of frequences in each SED
-	vs = np.array( [] )		# array of frequences for SEDs
-	nls = 0				# number of wavelengths in each SED (same as self.nvs)
-	ls = np.array( [] )		# array of wavelengths for SEDs (angstroms)
-	seds = np.array( [] )		# age/SED grid.  Units need to be ergs/cm^2/s.  Size is nvs x nages
+    filename = '' # the name of the file
+    nages = 0			# number of different aged SEDs
+    ages = np.array( [] )		# array of ages (years)
+    nvs = 0				# number of frequences in each SED
+    vs = np.array( [] )		# array of frequences for SEDs
+    nls = 0				# number of wavelengths in each SED (same as self.nvs)
+    ls = np.array( [] )		# array of wavelengths for SEDs (angstroms)
+    seds = np.array( [] )		# age/SED grid.  Units need to be ergs/cm^2/s.  Size is nvs x nages
 	# normalization info
-	norm = { 'norm': 0, 'z': 0, 'filter': '', 'vega': False, 'apparent': False }
+    norm = { 'norm': 0, 'z': 0, 'filter': '', 'vega': False, 'apparent': False }
 	# mass info
-	has_masses = False		# whether or not masses have been set
-	masses = np.array( [] )		# masses as a function of self.ages
-	# sfh info
-	has_sfh = False			# whether or not a star formation history is set
-	sfh = np.array( [] )		# star formation as a function of self.ages
+    has_masses = False		# whether or not masses have been set
+    masses = np.array( [] )		# masses as a function of self.ages
+    # sfh info
+    has_sfh = False			# whether or not a star formation history is set
+    sfh = np.array( [] )		# star formation as a function of self.ages
 
 	# cosmology related stuff
-	cosmology_loaded = False	# whether or not a cosmology has been loaded
-	cosmo = None			# cosmology object
-	zfs = np.array( [] )		# formation redshifts for models
-	nzfs = 0			# number of formation redshifts to model
-	zs = np.array( [] )		# redshifts at which to project models
-	nzs = 0				# number of redshifts models should calculated at
+    cosmology_loaded = False	# whether or not a cosmology has been loaded
+    cosmo = None			# cosmology object
+    zfs = np.array( [] )		# formation redshifts for models
+    nzfs = 0			# number of formation redshifts to model
+    zs = np.array( [] )		# redshifts at which to project models
+    nzs = 0				# number of redshifts models should calculated at
 
 	# filter stuff.
-	filters = {}			# dictionary of astro_filter objects
-	filter_order = []		# list of filter names (in order added)
-	nfilters = 0			# number of filters
-	current_filter = -1		# counter for iterator
+    filters = {}			# dictionary of astro_filter objects
+    filter_order = []		# list of filter names (in order added)
+    nfilters = 0			# number of filters
+    current_filter = -1		# counter for iterator
 
 	# info for interpolated model SEDs.  The SEDs are interpolated to a regular grid for each formation redshift.
 	# These interpolated models are stored to save time if needed again
-	interp_seds = []		# interpolated seds - each list element is a dictionary with sed info
-	interp_zfs = np.array( [] )	# list of formation redshifts for sed
-	tol = 1e-8			# tolerance for determining whether a given zf matches a stored zf
+    interp_seds = []		# interpolated seds - each list element is a dictionary with sed info
+    interp_zfs = np.array( [] )	# list of formation redshifts for sed
+    tol = 1e-8			# tolerance for determining whether a given zf matches a stored zf
 
 	# additional data
-	data_dir = ''			# data directory for filters, models, and reference spectra
-	filter_dir = False		# user-set directory for filters
-	model_dir = False		# user-set directory for models
-	has_vega = False		# whether or not the vega spectrum is found and loaded
-	vega = np.array( [] )		# vega spectrum (nu vs Fnu)
-	vega_out = False		# if True then retrieved mags will be in vega mags
-	has_solar = False		# whether or not the solar spectrum is found and loaded
-	solar = np.array( [] )		# solar spectrum (nu vs Fnu)
+    data_dir = ''			# data directory for filters, models, and reference spectra
+    filter_dir = False		# user-set directory for filters
+    model_dir = False		# user-set directory for models
+    has_vega = False		# whether or not the vega spectrum is found and loaded
+    vega = np.array( [] )		# vega spectrum (nu vs Fnu)
+    vega_out = False		# if True then retrieved mags will be in vega mags
+    has_solar = False		# whether or not the solar spectrum is found and loaded
+    solar = np.array( [] )		# solar spectrum (nu vs Fnu)
 
 	# meta data
-	has_meta_data = False		# whether or not any meta data has been set for this model
-	meta_data = {}			# meta data for this model
+    has_meta_data = False		# whether or not any meta data has been set for this model
+    meta_data = {}			# meta data for this model
 
 	# weight for adding together models
-	model_weight = 1
+    model_weight = 1
 
 	##########
 	## init ##
 	##########
-	def __init__( self, model_file='', is_ised=False, is_fits=False, is_ascii=False, has_masses=False, units='a', age_units='gyrs', skip_load=False ):
+    def __init__( self, model_file='', is_ised=False, is_fits=False, is_ascii=False, has_masses=False, units='a', age_units='gyrs', skip_load=False ):
 		""" model = ezgal.ezgal( model_file, is_ised=False, is_fits=False, is_ascii=False, has_masses=False, units='a', age_units='gyrs')
 		
 		Class for converting galaxy seds as a function of age to magnitudes as a function of redshift.
@@ -160,14 +160,14 @@ class ezgal(object):
 	#####################
 	## return iterator ##
 	#####################
-	def __iter__(self):
+    def __iter__(self):
 		self.current_filter = -1
 		return self
 
 	#########################
 	## next() for iterator ##
 	#########################
-	def next(self):
+    def next(self):
 
 		self.current_filter += 1
 		if self.current_filter == len( self.filter_order ): raise StopIteration
@@ -178,7 +178,7 @@ class ezgal(object):
 	#####################
 	## load model file ##
 	#####################
-	def _load( self, model_file, is_ised=False, is_fits=False, is_ascii=False, has_masses=False, units='a', age_units='gyrs' ):
+    def _load( self, model_file, is_ised=False, is_fits=False, is_ascii=False, has_masses=False, units='a', age_units='gyrs' ):
 
 		# find the model file
 		model_file = self._find_model_file( model_file )
@@ -212,7 +212,7 @@ class ezgal(object):
 	######################
 	## _find_model_file ##
 	######################
-	def _find_model_file( self, file ):
+    def _find_model_file( self, file ):
 
 		# first check file path
 		files = [ file ]
@@ -234,7 +234,7 @@ class ezgal(object):
 	#####################
 	## set vega output ##
 	#####################
-	def set_vega_output( self ):
+    def set_vega_output( self ):
 		""" ezgal.set_vega_output()
 		
 		:Example:
@@ -262,7 +262,7 @@ class ezgal(object):
 	###################
 	## set AB output ##
 	###################
-	def set_ab_output( self ):
+    def set_ab_output( self ):
 		""" ezgal.set_ab_output()
 		
 		:Example:
@@ -292,7 +292,7 @@ class ezgal(object):
 	################
 	## set masses ##
 	################
-	def set_masses( self, ages, masses, age_units='gyrs', grid=True ):
+    def set_masses( self, ages, masses, age_units='gyrs', grid=True ):
 		""" ezgal.set_masses( ages, masses, age_units='gyrs', grid=True )
 		
 		:param ages: A list of ages
@@ -328,7 +328,7 @@ class ezgal(object):
 	#####################
 	## check cosmology ##
 	#####################
-	def check_cosmology( self ):
+    def check_cosmology( self ):
 		if not self.cosmology_loaded:
 			self.set_cosmology()
 			print 'Default cosmology loaded'
@@ -336,7 +336,7 @@ class ezgal(object):
 	###################
 	## set cosmology ##
 	###################
-	def set_cosmology( self, Om=0.272, Ol=0.728, h=0.704, w=-1 ):
+    def set_cosmology( self, Om=0.272, Ol=0.728, h=0.704, w=-1 ):
 		""" ezgal.set_cosmology( Om=0.272, Ol=0.728, h=0.704, w=-1 )
 		
 		Set the cosmology.  The default cosmology is from `WMAP 7 <http://adsabs.harvard.edu/abs/2011ApJS..192...18K>`_, Komatsu, et al. 2011, ApJS, 192, 18.  If the cosmology changes, then all filters will be regrided and any stored evolution models will be discarded.
@@ -364,7 +364,7 @@ class ezgal(object):
 	#############################
 	## set formation redshifts ##
 	#############################
-	def set_zfs( self, zfs, grid=True ):
+    def set_zfs( self, zfs, grid=True ):
 		""" ezgal.set_zfs( zfs, grid=True )
 		
 		:param zfs: A list of formation redshifts
@@ -389,7 +389,7 @@ class ezgal(object):
 	##########################
 	## set redshift outputs ##
 	##########################
-	def _set_zs( self, zf=None ):
+    def _set_zs( self, zf=None ):
 		""" ezgal._set_zs( zf=None )
 		
 		Set some default redshifts at which models should be evaluated.
@@ -409,7 +409,7 @@ class ezgal(object):
 	#############################
 	## get apparent magnitudes ##
 	#############################
-	def get_apparent_mags( self, zf, filters=None, zs=None, normalize=True, vega=None, ab=None, squeeze=True ):
+    def get_apparent_mags( self, zf, filters=None, zs=None, normalize=True, vega=None, ab=None, squeeze=True ):
 		""" mags = ezgal.get_apparent_mags( zf, filters=None, zs=None, normalize=True, vega=None, ab=None, squeeze=True )
 		
 		Same as :meth:`ezgal.ezgal.get_absolute_mags` excepts returns apparent magnitudes.
@@ -425,7 +425,7 @@ class ezgal(object):
 	######################################
 	## get observed absolute magnitudes ##
 	######################################
-	def get_observed_absolute_mags( self, zf, filters=None, zs=None, normalize=True, vega=None, ab=None, squeeze=True ):
+    def get_observed_absolute_mags( self, zf, filters=None, zs=None, normalize=True, vega=None, ab=None, squeeze=True ):
 		""" mags = ezgal.get_observed_absolute_mags( zf, filters=None, zs=None, normalize=True, vega=None, ab=None, squeeze=True )
 		
 		Same as :meth:`ezgal.ezgal.get_absolute_mags` excepts returns observed-frame absolute magnitudes.  The observed-frame absolute magnitude is the absolute magnitude of the model after being redshifted to the given redshift.
@@ -441,7 +441,7 @@ class ezgal(object):
 	#############################
 	## get absolute magnitudes ##
 	#############################
-	def get_absolute_mags( self, zf, filters=None, zs=None, normalize=True, ab=None, vega=None, squeeze=True ):
+    def get_absolute_mags( self, zf, filters=None, zs=None, normalize=True, ab=None, vega=None, squeeze=True ):
 		""" mags = ezgal.get_absolute_mags( zf, filters=None, zs=None, normalize=True, ab=None, vega=None, squeeze=True )
 		
 		:param zf: The formation redshift of the galaxy
@@ -502,7 +502,7 @@ class ezgal(object):
 	###################
 	## get kcorrects ##
 	###################
-	def get_kcorrects( self, zf, filters=None, zs=None, squeeze=True ):
+    def get_kcorrects( self, zf, filters=None, zs=None, squeeze=True ):
 		""" mags = ezgal.get_kcorrects( zf, filters=None, zs=None, squeeze=True )
 		
 		Same as :meth:`ezgal.ezgal.get_ecorrects` but returns the kcorrections.
@@ -518,7 +518,7 @@ class ezgal(object):
 	###################
 	## get ecorrects ##
 	###################
-	def get_ecorrects( self, zf, filters=None, zs=None, squeeze=True ):
+    def get_ecorrects( self, zf, filters=None, zs=None, squeeze=True ):
 		""" mags = ezgal.get_ecorrects( zf, filters=None, zs=None, squeeze=True )
 		
 		:param zf: The formation redshift
@@ -562,7 +562,7 @@ class ezgal(object):
 	###################
 	## get ecorrects ##
 	###################
-	def get_ekcorrects( self, zf, filters=None, zs=None, squeeze=True ):
+    def get_ekcorrects( self, zf, filters=None, zs=None, squeeze=True ):
 		""" mags = ezgal.get_ecorrects( zf, filters=None, zs=None )
 		
 		Same as :meth:`ezgal.ezgal.get_ecorrects` but returns the e+k corrections.
@@ -578,7 +578,7 @@ class ezgal(object):
 	##############
 	## get mags ##
 	##############
-	def _get_mags( self, zf, kind='absolute', filters=None, zs=None, ab=None, vega=None, normalize=True, squeeze=True ):
+    def _get_mags( self, zf, kind='absolute', filters=None, zs=None, ab=None, vega=None, normalize=True, squeeze=True ):
 		""" mags = ezgal._get_mags( zf, kind='absolute', filters=None, zs=None, ab=None, vega=None, normalize=True )
 
 		Fetch the given type of magnitude, using otherwise the same calling sequence as get_apparent_mags()
@@ -623,7 +623,7 @@ class ezgal(object):
 	#########################
 	## get rest M/L ratios ##
 	#########################
-	def get_rest_ml_ratios( self, zf, filters=None, zs=None, squeeze=True ):
+    def get_rest_ml_ratios( self, zf, filters=None, zs=None, squeeze=True ):
 		""" mls = ezgal.get_rest_ml_ratios( zf, filters=None, zs=None )
 		
 		Same as :meth:`ezgal.ezgal.get_observed_ml_ratios` excepts returns the rest-frame M/L ratios.  Rest frame mass-to-light ratios are calculated using the rest-frame luminosity of the sun and the rest-frame luminosity of the model.
@@ -658,7 +658,7 @@ class ezgal(object):
 	#############################
 	## get observed M/L ratios ##
 	#############################
-	def get_observed_ml_ratios( self, zf, filters=None, zs=None, squeeze=True ):
+    def get_observed_ml_ratios( self, zf, filters=None, zs=None, squeeze=True ):
 		""" mls = ezgal.get_observed_ml_ratios( zf, filters=None, zs=None )
 		
 		:param zf: The formation redshift
@@ -712,7 +712,7 @@ class ezgal(object):
 	#########################
 	## get solar rest mags ##
 	#########################
-	def get_solar_rest_mags( self, nzs=1, filters=None, ab=None, vega=None, squeeze=True ):
+    def get_solar_rest_mags( self, nzs=1, filters=None, ab=None, vega=None, squeeze=True ):
 		""" mags = ezgal.get_solar_rest_mags( nzs=None, filters=None, ab=None, vega=None )
 		
 		:param nzs: The number of redshifts to return solar rest-frame magnitudes for
@@ -783,7 +783,7 @@ class ezgal(object):
 	#############################
 	## get solar observed mags ##
 	#############################
-	def get_solar_observed_mags( self, zf, filters=None, zs=zs, ab=None, vega=None, squeeze=True ):
+    def get_solar_observed_mags( self, zf, filters=None, zs=zs, ab=None, vega=None, squeeze=True ):
 		""" mags = ezgal.get_solar_observed_mags( zf, filters=None, zs=zs, ab=None, vega=None, squeeze=True )
 		
 		:param zf: The formation redshift of the galaxy
@@ -850,7 +850,7 @@ class ezgal(object):
 	###################
 	## get kcorrects ##
 	###################
-	def get_distance_moduli( self, zs=None, nfilters=None, squeeze=True ):
+    def get_distance_moduli( self, zs=None, nfilters=None, squeeze=True ):
 		""" mags = ezgal.get_distance_moduli( zs=None, nfilters=None, squeeze=True )
 		
 		:param zs: The redshifts to return distance moduli for
@@ -892,7 +892,7 @@ class ezgal(object):
 	################
 	## get masses ##
 	################
-	def get_masses( self, zf, zs=None, nfilters=None, squeeze=True ):
+    def get_masses( self, zf, zs=None, nfilters=None, squeeze=True ):
 		""" masses = ezgal.get_masses( zf, zs, nfilters=None, normalize=True, squeeze=True )
 		
 		:param zf: The formation redshift
@@ -951,7 +951,7 @@ class ezgal(object):
 	##################
 	## get vega out ##
 	##################
-	def _get_vega_out( self, ab=None, vega=None ):
+    def _get_vega_out( self, ab=None, vega=None ):
 		""" vega_out = ezgal._get_vega_out( ab=None, vega=None )
 		
 		Returns true or false to specify whether or not mags should be in vega """
@@ -968,7 +968,7 @@ class ezgal(object):
 	#############
 	## squeeze ##
 	#############
-	def _squeeze( self, mags, nfilters ):
+    def _squeeze( self, mags, nfilters ):
 		""" squeezed = ezgal._squeeze( mags, nfilters )
 		
 		Squeeze magnitude array according to number of filters """
@@ -986,7 +986,7 @@ class ezgal(object):
 	#######################
 	## set normalization ##
 	#######################
-	def set_normalization( self, filter, z, mag, vega=False, apparent=False ):
+    def set_normalization( self, filter, z, mag, vega=False, apparent=False ):
 		""" ezgal.set_normalization( filter, z, mag, vega=False, apparent=False )
 		
 		:param filter: The normalization filter
@@ -1031,7 +1031,7 @@ class ezgal(object):
 	#######################
 	## get normalization ##
 	#######################
-	def get_normalization( self, zf, flux=False ):
+    def get_normalization( self, zf, flux=False ):
 		""" normalization = ezgal.get_normalization( zf, flux=False )
 		
 		:param zf: The formation redshift to assume
@@ -1084,7 +1084,7 @@ class ezgal(object):
 	###########################
 	## get mass weighted age ##
 	###########################
-	def get_mass_weighted_ages( self, zf, zs=None, units='gyrs' ):
+    def get_mass_weighted_ages( self, zf, zs=None, units='gyrs' ):
 		""" ezgal.get_mass_weighted_ages( zf, zs=None, units='gyrs' )
 		
 		:param zf: The formation redshift
@@ -1138,7 +1138,7 @@ class ezgal(object):
 	###################################
 	## check if something is gridded ##
 	###################################
-	def _check_grid( self, filters=None, zfs=None, solar=False, masses=False ):
+    def _check_grid( self, filters=None, zfs=None, solar=False, masses=False ):
 		""" ezgal._check_grid( filters=None, zfs=None, solar=False, masses=False )
 		
 		Will check to see if the given filters and formation redshifts are gridded.
@@ -1168,7 +1168,7 @@ class ezgal(object):
 	###################
 	## _grid_filters ##
 	###################
-	def _grid_filters( self, filters=None, zfs=None, force=False, solar=False, masses=False ):
+    def _grid_filters( self, filters=None, zfs=None, force=False, solar=False, masses=False ):
 		""" ezgal._grid_filters( filters=None, zfs=None, solar=False, masses=False )
 		
 		This will generate models for the given filters with the given formation redshifts.
@@ -1238,7 +1238,7 @@ class ezgal(object):
 	##################
 	## populate zfs ##
 	##################
-	def _populate_zfs( self, zfs=None ):
+    def _populate_zfs( self, zfs=None ):
 		""" ezgal._populate_zfs( zfs=None )
 		
 		Returns a list of formation redshifts - either the passed ones (as a numpy array), or the defaults for the model object """
@@ -1254,7 +1254,7 @@ class ezgal(object):
 	#################
 	## populate zs ##
 	#################
-	def _populate_zs( self, zs=None, zf=5.0 ):
+    def _populate_zs( self, zs=None, zf=5.0 ):
 		""" ezgal._populate_zs( zs=None, zf=5.0 )
 		
 		Returns a list of zs - either the passed ones, or the defaults for the model object.
@@ -1274,7 +1274,7 @@ class ezgal(object):
 	######################
 	## populate filters ##
 	######################
-	def _populate_filters( self, filters=None ):
+    def _populate_filters( self, filters=None ):
 		""" ezgal._populate_filters( filters=None )
 		
 		Returns a list of filters - either the passed ones (as a string list), or the filters loaded for the model object """
@@ -1287,8 +1287,8 @@ class ezgal(object):
 	################################
 	## retrieve the sed given age ##
 	################################
-	def get_sed( self, age, age_units='gyrs', units='Fv' ):
-		""" sed = ezgal.get_sed( age, age_units='gyrs', units='Fv' )
+    def get_sed( self, age, age_units='gyrs', units='Fv' ):
+        """ sed = ezgal.get_sed( age, age_units='gyrs', units='Fv' )
 		
 		:param age: The desired age of the SED
 		:param age_units: The units the age is in
@@ -1326,41 +1326,49 @@ class ezgal(object):
 		"""
 
 		# don't interpolate outside of the age range
-		minage = utils.to_years( self.ages[0], units=age_units, reverse=True )
-		maxage = utils.to_years( self.ages[-1], units=age_units, reverse=True )
-		if age < minage or age > maxage: raise ValueError( 'Age must be between %.2f and %.2f %s' % (minage,maxage,age_units) )
-		age_yr = utils.convert_time( age, incoming=age_units, outgoing='yrs' )
+        minage = utils.to_years( self.ages[0], units=age_units, reverse=True )
+        maxage = utils.to_years( self.ages[-1], units=age_units, reverse=True )
+        if age < minage or age > maxage:
+            raise ValueError( 'Age must be between %.2f and %.2f %s' % (minage,maxage,age_units) )
+        age_yr = utils.convert_time( age, incoming=age_units, outgoing='yrs' )
 
 		# simple two point interpolation
 		# find the closest SED younger than the given age
-		yind = np.abs( self.ages - age_yr ).argmin()
-		if self.ages[yind] > age_yr: yind -= 1
+        yind = np.abs( self.ages - age_yr ).argmin()
+        if self.ages[yind] > age_yr:
+            yind -= 1
 		# ind of closest SED older than the given age
-		oind = yind + 1
+        oind = yind + 1
 
-		# are we at the borders of the age array?  If so return
-		if oind == self.nages: return self.seds[:,yind].copy()
-		if yind < 0: return self.seds[:,oind].copy()
-
+		# are we at the borders of the age array? Doesn change units!!! If so return
+        if oind == self.nages:
+            return self.seds[:,yind].copy()
+        if yind < 0:
+            return self.seds[:,oind].copy()
+        
 		# age of older and younger seds
-		yage = self.ages[yind]
-		oage = self.ages[oind]
+        yage = self.ages[yind]
+        oage = self.ages[oind]
 
 		# now interpolate
-		sed = self.seds[:,yind] + (self.seds[:,oind]-self.seds[:,yind])*(age_yr-yage)/(oage-yage)
+        sed = self.seds[:,yind] + (self.seds[:,oind]-self.seds[:,yind])*(age_yr-yage)/(oage-yage)
 
-		units = units.lower()
-		if units == 'fv': return sed
-		if units == 'fl': return sed*self.vs**2.0/utils.convert_length( utils.c, outgoing='a' )
-		sed *= self.vs
-		if units == 'flux': return sed
-		if units == 'luminosity': return sed*4.0*np.pi*utils.convert_length( 10, incoming='pc', outgoing='cm' )**2.0
-		raise NameError( 'Units of %s are unrecognized!' % units )
+        units = units.lower()
+        if units == 'fv':
+            return sed
+        if units == 'fl':
+            return sed*self.vs**2.0/utils.convert_length( utils.c, outgoing='a' )
+        sed *= self.vs
+        if units == 'flux':
+            return sed
+        if units == 'luminosity':
+            return sed*4.0*np.pi*utils.convert_length( 10, incoming='pc', outgoing='cm' )**2.0
+        raise NameError( 'Units of %s are unrecognized!' % units )
 
 	###############################
 	## retrieve sed given zf & z ##
 	###############################
-	def get_sed_z( self, zf, z, units='Fv', normalize=True, observed=False, return_frequencies=False ):
+    def get_sed_z( self, zf, z, units='Fv', normalize=True, observed=False, return_frequencies=False ):
 		""" sed = ezgal.get_sed_z( zf, z, units='Fv', normalize=True, observed=False, return_frequencies=False )
 		
 		:param zf: The formation redshift for the output SED
@@ -1435,7 +1443,7 @@ class ezgal(object):
 	###############
 	## _get_seds ##
 	###############
-	def _get_seds( self, zf ):
+    def _get_seds( self, zf ):
 		""" ezgal.get_seds( zf )
 		
 		Returns a list of SEDs and ages interpolated nicely in redshift space.
@@ -1477,7 +1485,7 @@ class ezgal(object):
 	#############
 	## get age ##
 	#############
-	def get_age( self, z1, z2, units='gyrs' ):
+    def get_age( self, z1, z2, units='gyrs' ):
 		""" age = ezgal.get_age( z1, z2, units='gyrs' )
 		
 		:param z1: The first redshift
@@ -1508,7 +1516,7 @@ class ezgal(object):
 	#################
 	## clear cache ##
 	#################
-	def clear_cache( self ):
+    def clear_cache( self ):
 
 		# reset the list of interpolated SEDs
 		self.interp_seds = []
@@ -1520,7 +1528,7 @@ class ezgal(object):
 	####################################################
 	## get a redshift grid going out to some redshift ##
 	####################################################
-	def get_zs( self, z ):
+    def get_zs( self, z ):
 		""" ezgal.get_zs( z )
 		
 		:param z: The redshift out which to return redshifts
@@ -1546,7 +1554,7 @@ class ezgal(object):
 	#####################
 	## extract filters ##
 	#####################
-	def extract_filters( self, filename, filters=None, grid=True ):
+    def extract_filters( self, filename, filters=None, grid=True ):
 		""" ezgal.extract_filters( filename, filters=None, grid=True )
 		
 		This will extract filter response curves saved in a binary fits file with an ezgal object.
@@ -1589,7 +1597,7 @@ class ezgal(object):
 	###############################
 	## add filter to filter list ##
 	###############################
-	def add_filter( self, file, name=None, units='a', grid=True ):
+    def add_filter( self, file, name=None, units='a', grid=True ):
 		""" ezgal.add_filter( file, name=None, units='a', grid=True )
 		
 		:param file: The filename containing the filter response curve
@@ -1632,7 +1640,7 @@ class ezgal(object):
 	#######################
 	## _find_filter_file ##
 	#######################
-	def _find_filter_file( self, file ):
+    def _find_filter_file( self, file ):
 
 		# first check file path
 		files = [ file ]
@@ -1653,7 +1661,7 @@ class ezgal(object):
 	##########################
 	## save a model to fits ##
 	##########################
-	def save_model( self, model_file, filter_info=True, filter_only=False ):
+    def save_model( self, model_file, filter_info=True, filter_only=False ):
 		""" ezgal.save_model( output_file, filter_info=True, filter_only=False )
 		
 		:param model_file: Output filename
@@ -1784,7 +1792,7 @@ class ezgal(object):
 	############################
 	## load a model from fits ##
 	############################
-	def _load_model( self, model_file ):
+    def _load_model( self, model_file ):
 		""" ezgal._load_model( model_file )
 		
 		loads a model from a fits file created with ezgal.save_model()
@@ -1862,7 +1870,7 @@ class ezgal(object):
 	######################
 	## save ascii model ##
 	######################
-	def save_ascii_model( self, model_file ):
+    def save_ascii_model( self, model_file ):
 		""" ezgal.save_ascii_model( model_file )
 		
 		Save the interpolated model information in an ascii file for later retrieval """
@@ -1958,7 +1966,7 @@ class ezgal(object):
 	#######################
 	## _load_ascii_model ##
 	#######################
-	def _load_ascii_model( self, model_file ):
+    def _load_ascii_model( self, model_file ):
 		""" ezgal.load_ascii_model( model_file )
 		
 		Loads calculated model info outputted by ezgal to an ascii file.  This does not allow calculation of new models. """
@@ -2059,7 +2067,7 @@ class ezgal(object):
 	################################
 	## load model from ascii file ##
 	################################
-	def _load_ascii( self, file, has_masses=False, units='a', age_units='gyrs' ):
+    def _load_ascii( self, file, has_masses=False, units='a', age_units='gyrs' ):
 		""" ezgal._load_ascii( file, has_masses=False, units='a', age_units='gyrs' )
 		
 		Load a model file in ascii format.  The file should be a data array of size (nwavelengths+1,nages+1).
@@ -2118,7 +2126,7 @@ class ezgal(object):
 	###############################
 	## load model from ised file ##
 	###############################
-	def _load_ised( self, file ):
+    def _load_ised( self, file ):
 		""" ezgal._load_ised( file )
 		
 		Load a bruzual and charlot binary ised file.
@@ -2143,7 +2151,7 @@ class ezgal(object):
 	###################
 	## set meta data ##
 	###################
-	def set_meta_data( self, data ):
+    def set_meta_data( self, data ):
 		""" ezgal.set_meta_data( data )
 		
 		:param data: A dictionary containing model information
@@ -2175,7 +2183,7 @@ class ezgal(object):
 	####################
 	## save meta data ##
 	####################
-	def _save_meta_data( self, hdr ):
+    def _save_meta_data( self, hdr ):
 		""" ezgal._save_meta_data( hdr )
 		
 		Stores the SPS model data in a fits header (if meta data is present) """
@@ -2193,7 +2201,7 @@ class ezgal(object):
 	####################
 	## load meta data ##
 	####################
-	def load_meta_data( self, hdr ):
+    def load_meta_data( self, hdr ):
 		""" ezgal.load_meta_data( hdr )
 		
 		Saves the meta data in the fits header into the ezgal object (if present) """
@@ -2212,7 +2220,7 @@ class ezgal(object):
 	##############
 	## make csp ##
 	##############
-	def make_csp( self, sfh_function, args=(), dust_function=None, dust_args=(), break_points=None, meta_data={}, max_err=0.001, max_iter=200 ):
+    def make_csp( self, sfh_function, args=(), dust_function=None, dust_args=(), break_points=None, meta_data={}, max_err=0.001, max_iter=200 ):
 		""" new_model = model.make_csp( sfh_function, args=(), dust_function=None, dust_args=(), break_points=None, meta_data={}, max_err=0.001, max_iter=200 )
 		
 		:param sfh_function: The star formation rate as a function of age
@@ -2292,7 +2300,7 @@ class ezgal(object):
 	######################
 	## make exponential ##
 	######################
-	def make_exponential( self, tau, dust_function=None, dust_args=(), max_err=0.001, max_iter=200 ):
+    def make_exponential( self, tau, dust_function=None, dust_args=(), max_err=0.001, max_iter=200 ):
 		""" new_model = model.make_exponential( tau, dust_function=None, dust_args=(), max_err=0.001, max_iter=200 )
 		
 		:param tau: Time scale for exponentially decaying burst of star formation (in gyrs).
@@ -2328,7 +2336,7 @@ class ezgal(object):
 	################
 	## make burst ##
 	################
-	def make_burst( self, length, dust_function=None, dust_args=(), max_err=0.001, max_iter=200 ):
+    def make_burst( self, length, dust_function=None, dust_args=(), max_err=0.001, max_iter=200 ):
 		""" new_model = model.make_burst( length, dust_function=None, dust_args=(), max_err=0.001, max_iter=200 )
 		
 		:param length: Length of burst (in gyrs)
@@ -2365,7 +2373,7 @@ class ezgal(object):
 	##################
 	## make numeric ##
 	##################
-	def make_numeric( self, ages, sfr, age_units='gyrs', dust_function=None, dust_args=(), break_points=None, max_err=0.001, max_iter=200 ):
+    def make_numeric( self, ages, sfr, age_units='gyrs', dust_function=None, dust_args=(), break_points=None, max_err=0.001, max_iter=200 ):
 		""" new_model = model.make_numeric( ages, sfr, age_units='gyrs', dust_function=None, dust_args=(), break_points=None, max_err=0.001, max_iter=200 )
 		
 		:param ages: A list of ages for the numeric star formation history.
@@ -2409,7 +2417,7 @@ class ezgal(object):
 	##################
 	## make delayed ##
 	##################
-	def make_delayed( self, delay=0.0, age_units='gyrs' ):
+    def make_delayed( self, delay=0.0, age_units='gyrs' ):
 		""" new_model = model.make_delayed( delay, age_units='gyrs' )
 		
 		:param delay: length of delay.
@@ -2456,7 +2464,7 @@ class ezgal(object):
 	#################
 	## _return_new ##
 	#################
-	def _return_new( self, seds, masses=None, sfh=None, meta_data=None, weight=1 ):
+    def _return_new( self, seds, masses=None, sfh=None, meta_data=None, weight=1 ):
 		""" new_model = model._return_new( seds, masses=None, sfh=None, meta_data=meta_data, weight=1 )
 		
 		Return a new EzGal object with the given SEDs, masses, and sfh but with everything else the same.
@@ -2502,7 +2510,7 @@ class ezgal(object):
 	##########
 	## copy ##
 	##########
-	def copy( self ):
+    def copy( self ):
 		""" copy = model.copy()
 		
 		:returns: A copy of the model
@@ -2523,7 +2531,7 @@ class ezgal(object):
 	############
 	## weight ##
 	############
-	def weight( self, weight ):
+    def weight( self, weight ):
 		""" new_model = model.weight( weight )
 		
 		:param weight: Weight to apply to model
@@ -2548,7 +2556,7 @@ class ezgal(object):
 	#############
 	## __mul__ ##
 	#############
-	def __mul__( self, obj ):
+    def __mul__( self, obj ):
 		if type( obj ) == type( self ):
 			return self.weight( obj.model_weight )
 		elif type( obj ) == type( weight.weight( 1 ) ):
@@ -2559,7 +2567,7 @@ class ezgal(object):
 	##############
 	## __imul__ ##
 	##############
-	def __imul__( self, obj ):
+    def __imul__( self, obj ):
 		if type( obj ) == type( self ):
 			self.model_weight *= obj.model_weight
 		elif type( obj ) == type( weight.weight( 1 ) ):
@@ -2571,7 +2579,7 @@ class ezgal(object):
 	#############
 	## __add__ ##
 	#############
-	def __add__( self, obj ):
+    def __add__( self, obj ):
 		new = self.copy()
 		new += obj
 		return new
@@ -2579,7 +2587,7 @@ class ezgal(object):
 	##############
 	## __iadd__ ##
 	##############
-	def __iadd__( self, obj ):
+    def __iadd__( self, obj ):
 		if type( obj ) != type( self ): raise TypeError( 'EzGal model objects can only be added with other EzGal model objects!' )
 		if self.seds.shape != obj.seds.shape or np.max( np.abs( self.ages - obj.ages ) ) > 0 or np.max( np.abs( self.vs - obj.vs ) ) > 0:
 			raise TypeError( 'EzGal model objects can only be added if they have the same age/wavelength grid!' )

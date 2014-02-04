@@ -1,26 +1,27 @@
 import ezgal
 import numpy as np
 
+
 class wrapper(object):
 
-	models = []			# list of ezgal model objects
-	nmodels = 0			# number of models in wrapper
-	meta_data = {}			# meta data from model objects
-	meta_keys = []			# list of meta data keys
-	current_model = -1		# counter for iterator
+    models = []			# list of ezgal model objects
+    nmodels = 0			# number of models in wrapper
+    meta_data = {}			# meta data from model objects
+    meta_keys = []			# list of meta data keys
+    current_model = -1		# counter for iterator
 
 	# these are used to determine if models match precisely and can be interpolated
-	sed_shape = ()			# shape of sed array in models
-	sed_ages = np.array( [] )	# list of sed ages
-	sed_ls = np.array( [] )		# list of sed wavelengths
-	is_matched = True		# whether or not all models match in SED array shape and ages
-	has_masses = True		# whether or not all models have masses
-	has_sfh = True			# whether or not all models have star formation histories
+    sed_shape = ()			# shape of sed array in models
+    sed_ages = np.array( [] )	# list of sed ages
+    sed_ls = np.array( [] )		# list of sed wavelengths
+    is_matched = True		# whether or not all models match in SED array shape and ages
+    has_masses = True		# whether or not all models have masses
+    has_sfh = True			# whether or not all models have star formation histories
 
 	##########
 	## init ##
 	##########
-	def __init__( self, models, extra_data={}, extra_name='' ):
+    def __init__( self, models, extra_data={}, extra_name='' ):
 		""" wrapper_obj = ezgal.wrapper( [model_list], extra_data={}, extra_name='' )
 		
 		Initialize a wrapper object for handling multiple ezgal objects at once.  Model list
@@ -52,20 +53,20 @@ class wrapper(object):
 	############
 	## length ##
 	############
-	def __len__( self ):
+    def __len__( self ):
 		return self.nmodels
 
 	#####################
 	## return iterator ##
 	#####################
-	def __iter__(self):
+    def __iter__(self):
 		self.current_model = -1
 		return self
 
 	#########################
 	## next() for iterator ##
 	#########################
-	def next(self):
+    def next(self):
 
 		self.current_model += 1
 		if self.current_model == self.nmodels: raise StopIteration
@@ -75,7 +76,7 @@ class wrapper(object):
 	#############
 	## getitem ##
 	#############
-	def __getitem__( self, key ):
+    def __getitem__( self, key ):
 
 		# index with tuple (assume a np.where() result)
 		if type( key ) == type( () ):
@@ -106,7 +107,7 @@ class wrapper(object):
 	#########
 	## add ##
 	#########
-	def __add__( self, more ):
+    def __add__( self, more ):
 
 		new = self.copy()
 		new += more
@@ -115,7 +116,7 @@ class wrapper(object):
 	##########
 	## iadd ##
 	##########
-	def __iadd__( self, more ):
+    def __iadd__( self, more ):
 
 		if type( more ) != type( self ): raise TypeError( 'EzGal wrappers can only be added with eachother!' )
 
@@ -133,19 +134,19 @@ class wrapper(object):
 	##########
 	## copy ##
 	##########
-	def copy( self ):
+    def copy( self ):
 		return wrapper( self.models, self.meta_data )
 
 	############
 	## aslist ##
 	############
-	def aslist( self ):
+    def aslist( self ):
 		return [ model for model in self.models ]
 
 	###############
 	## add model ##
 	###############
-	def add_model( self, model, extra_data={}, extra_name='' ):
+    def add_model( self, model, extra_data={}, extra_name='' ):
 		""" wrapper_obj.add_model( model )
 		
 		:param model: A filename/object to add to the wrapper object
@@ -220,7 +221,7 @@ class wrapper(object):
 	####################
 	## normalize data ##
 	####################
-	def _normalize_data( self, extra_data, extra_name, return_list=False, require_length=False ):
+    def _normalize_data( self, extra_data, extra_name, return_list=False, require_length=False ):
 		""" wrapper_obj._normalize_data( extra_data, extra_name )
 		
 		The wrapper object wants all extra data to be a dictionary of scalar or lists. """
@@ -257,7 +258,7 @@ class wrapper(object):
 	#######################
 	## get meta data set ##
 	#######################
-	def get_meta_data_set( self ):
+    def get_meta_data_set( self ):
 		""" wrapper_obj.get_meta_data_set()
 		
 		Returns a meta data dictionary containing 'Mixed' where models have different values,
@@ -281,7 +282,7 @@ class wrapper(object):
 	##########
 	## find ##
 	##########
-	def find( self, keys, vals ):
+    def find( self, keys, vals ):
 		""" model = wrapper_obj.find( keys, vals, silent_fail=False )
 		
 		Returns a boolean mask designating which models have
@@ -310,7 +311,7 @@ class wrapper(object):
 	###############
 	## get model ##
 	###############
-	def get_models( self, keys, vals, silent_fail=False ):
+    def get_models( self, keys, vals, silent_fail=False ):
 		""" new_wrapper = wrapper_obj.get_models( keys, vals, return_wrapper=True, silent_fail=False )
 		
 		Returns a new wrapper object containing the models that have
@@ -332,7 +333,7 @@ class wrapper(object):
 	#############
 	## argsort ##
 	#############
-	def argsort( self, key ):
+    def argsort( self, key ):
 		""" sort_indexes = wrapper_obj.argsort( key )
 		
 		:param key: The name of a meta keyword by which to sort
@@ -363,73 +364,80 @@ class wrapper(object):
 	##########
 	## sort ##
 	##########
-	def sort( self, key ):
-		""" sorted_wrapper = wrapper_obj.sort( key )
+    def sort( self, key ):
+        """ sorted_wrapper = wrapper_obj.sort( key )
 		
 		Returns a new wrapper object with models sorted numerically according to values in
-		meta data keyword `key` """
+        meta data keyword `key` """
 
-		return self[self.argsort( key )]
+        return self[self.argsort( key )]
 
 	#################
 	## get_sed     ##
 	#################
-        def get_sed(self, age, metal, units='gyrs', met_key = 'met'):
-            ''' wrapper_obj.get_sed(age, metal, units='gyrs')
+    def get_sed(self, age, metal, units='gyrs', met_key = 'met',off=False):
+        ''' wrapper_obj.get_sed(age, metal, units='gyrs')
 
             Interpolate among stored models and returns sed for specifyed age and metalicity.
 
             returns ndarray of fluxs
             '''
-            # make sure we can interpolate
-            if not self.is_matched: 
-                raise ValueError( "Can't interpolate among the models because the models have different age/wavelength points in their SEDs!" )
+        
+        # make sure we can interpolate
+        if not self.is_matched: 
+            raise ValueError( "Can't interpolate among the models because the models have different age/wavelength points in their SEDs!" )
+        
+        # make sure wrapper object has "met" key
+        key = met_key
+        if not self.meta_data.has_key( key ): 
+            raise ValueError( "Can't interpolate by %s because that key wasn't found in the wrapper object's meta data!" % key )
 
-            # make sure wrapper object has "met" key
-            key = met_key
-            if not self.meta_data.has_key( key ): 
-                raise ValueError( "Can't interpolate by %s because that key wasn't found in the wrapper object's meta data!" % key )
-
-            # get meta data for the given key and convert to float
-            meta_values = np.sort(np.float64(self.meta_data[key]))
-
-            # make sure the chosen metalicity is bounded by the meta data values
-            #######put in covex hull method
-            if metal < meta_values.min() or metal > meta_values.max():
-                raise ValueError( 'Metalicity is not in range' )
-            #check if age is bounded
-            ######need to check units
-            if age < self.sed_ages.min() or age > self.sed_ages.max():
-                raise ValueError( 'Age is not in range' )
-            #get seds for interp
-            #check if interp needed for metals
-            if np.any(metal == meta_values):
-                for i in self.models:
-                    if float(i.meta_data[key]) == metal:
-                        return i.get_sed(age,age_units=units)
-            #not, get 2 metalicites and interp
-            mod_index = np.searchsorted(meta_values,metal,side='right')
-            if mod_index == 0 or mod_index == len(meta_values):
-                #didn't find metal
-                raise ValueError('Metalicity not in range')
-            temp_sed = []
+        # get meta data for the given key and convert to float
+        meta_values = np.sort(np.float64(self.meta_data[key]))
+        
+        # make sure the chosen metalicity is bounded by the meta data values
+        #######put in covex hull method
+        if metal < meta_values[0] or metal > meta_values[-1]:
+           raise ValueError( 'Metalicity is not in range' )
+        
+        #check if age is bounded
+        ######need to check units
+        if age < self.sed_ages[0] or age > self.sed_ages[-1]:
+            raise ValueError( 'Age is not in range' )
+        
+        #get seds for interp
+        #check if interp needed for metals
+        if np.any(metal == meta_values):
             for i in self.models:
+                if float(i.meta_data[key]) == metal:
+                    return i.get_sed(age,age_units=units)
+        
+            #not, get 2 metalicites and interp
+        mod_index = np.searchsorted(meta_values,metal,side='right')
+        if mod_index == 0 or mod_index == len(meta_values):
+            #didn't find metal
+            raise ValueError('Metalicity not in range')
+            #temp_sed = []
+          
+        for i in self.models:
                 if float(i.meta_data[key]) == meta_values[mod_index - 1]:
-                    temp_sed.append([meta_values[mod_index - 1], i.get_sed(age,age_units=units)])
+                    #temp_sed.append([meta_values[mod_index - 1], i.get_sed(age,age_units=units)])
+                        x,xwave = meta_values[mod_index - 1], i
                 if float(i.meta_data[key]) == meta_values[mod_index]:
-                    temp_sed.append([meta_values[mod_index], i.get_sed(age,age_units=units)])
-            #interp!
-            out_sed = self._linear_interpolation([temp_sed[0][0],temp_sed[1][0]],[temp_sed[0][1],temp_sed[1][1]],metal)
-
-            return out_sed
-                
+                    #temp_sed.append([meta_values[mod_index], i.get_sed(age,age_units=units)])
+                        y,ywave = meta_values[mod_index], i
+            
+        #interp!
+        return  self._linear_interpolation(x,xwave.get_sed(age,age_units=units),y,ywave.get_sed(age,age_units=units),metal)
+           
+            
 	#################
 	## interpolate ##
 	#################
-        def _linear_interpolation(self,x,y_temp,x_eval):
-                return y_temp[0]+(x_eval-x[0])*(y_temp[1]-y_temp[0])/(x[1]-x[0])
+    def _linear_interpolation(self,x0,xwave,y0,ywave,x_eval):
+        return y0 + (x_eval-x0) * (ywave-y0) / (xwave-x0)
 
-	def interpolate( self, key, values, return_wrapper=True ):
+    def interpolate( self, key, values, return_wrapper=True ):
 		""" wrapper_obj.interpolate( key, values, return_wrapper=True ):
 		
 		Interpolate among stored models and return new EzGal objects at interpolated values.
@@ -514,7 +522,7 @@ class wrapper(object):
 	#####################
 	## set vega output ##
 	#####################
-	def set_vega_output( self ):
+    def set_vega_output( self ):
 		""" wrapper.set_vega_output()
 		
 		Calls model.set_vega_output() on all loaded models. """
@@ -525,7 +533,7 @@ class wrapper(object):
 	###################
 	## set AB output ##
 	###################
-	def set_ab_output( self ):
+    def set_ab_output( self ):
 		""" wrapper.set_ab_output()
 		
 		Calls model.set_ab_output() on all loaded models. """
@@ -535,7 +543,7 @@ class wrapper(object):
 	##############
 	## get data ##
 	##############
-	def _get_data( self, zf, kind='', filters=None, zs=None, normalize=True, ab=None, vega=None ):
+    def _get_data( self, zf, kind='', filters=None, zs=None, normalize=True, ab=None, vega=None ):
 		""" wrapper.get_data( zf, filters=None, zs=None, normalize=True, ab=None, vega=None ) """
 
 		# pre-populate calling parameters to ensure everything is done the same way
@@ -571,7 +579,7 @@ class wrapper(object):
 	#######################
 	## get absolute mags ##
 	#######################
-	def get_absolute_mags( self, zf, filters=None, zs=None, normalize=True, ab=None, vega=None ):
+    def get_absolute_mags( self, zf, filters=None, zs=None, normalize=True, ab=None, vega=None ):
 		""" wrapper.get_absolute_mags( zf, filters=None, zs=None, normalize=True, ab=None, vega=None )
 		
 		:param zf: The formation redshift
@@ -618,7 +626,7 @@ class wrapper(object):
 	#######################
 	## get apparent mags ##
 	#######################
-	def get_apparent_mags( self, zf, filters=None, zs=None, normalize=True, ab=None, vega=None ):
+    def get_apparent_mags( self, zf, filters=None, zs=None, normalize=True, ab=None, vega=None ):
 		""" wrapper.get_apparent_mags( zf, filters=None, zs=None, normalize=True, ab=None, vega=None )
 		
 		Same as :meth:`ezgal.wrapper.get_absolute_mags` but calls :meth:`ezgal.ezgal.get_apparent_mags`.
@@ -632,7 +640,7 @@ class wrapper(object):
 	#########################
 	## get distance moduli ##
 	#########################
-	def get_distance_moduli( self, zs=None, nfilters=None ):
+    def get_distance_moduli( self, zs=None, nfilters=None ):
 		""" wrapper.get_distance_moduli( zs=None, nfilters=None )
 		
 		Same as :meth:`ezgal.wrapper.get_absolute_mags` but calls :meth:`ezgal.ezgal.get_distance_moduli`.
@@ -654,7 +662,7 @@ class wrapper(object):
 	###################
 	## get kcorrects ##
 	###################
-	def get_kcorrects( self, zf, filters=None, zs=None ):
+    def get_kcorrects( self, zf, filters=None, zs=None ):
 		""" wrapper.get_kcorrects( zf, filters=None, zs=None )
 		
 		Same as :meth:`ezgal.wrapper.get_absolute_mags` but calls :meth:`ezgal.ezgal.get_kcorrects`.
@@ -668,7 +676,7 @@ class wrapper(object):
 	###################
 	## get ecorrects ##
 	###################
-	def get_ecorrects( self, zf, filters=None, zs=None ):
+    def get_ecorrects( self, zf, filters=None, zs=None ):
 		""" wrapper.get_ecorrects( zf, filters=None, zs=None )
 		
 		Same as :meth:`ezgal.wrapper.get_absolute_mags` but calls :meth:`ezgal.ezgal.get_ecorrects`.
@@ -682,7 +690,7 @@ class wrapper(object):
 	####################
 	## get ekcorrects ##
 	####################
-	def get_ekcorrects( self, zf, filters=None, zs=None ):
+    def get_ekcorrects( self, zf, filters=None, zs=None ):
 		""" wrapper.get_ekcorrects( zf, filters=None, zs=None )
 		
 		Same as :meth:`ezgal.wrapper.get_absolute_mags` but calls :meth:`ezgal.ezgal.get_ekcorrects`.
@@ -696,7 +704,7 @@ class wrapper(object):
 	#########################
 	## get rest M/L ratios ##
 	#########################
-	def get_rest_ml_ratios( self, zf, filters=None, zs=None ):
+    def get_rest_ml_ratios( self, zf, filters=None, zs=None ):
 		""" wrapper.get_rest_ml_ratios( zf, filters=None, zs=None )
 		
 		Same as :meth:`ezgal.wrapper.get_absolute_mags` but calls :meth:`ezgal.ezgal.get_rest_ml_ratios`.
@@ -710,7 +718,7 @@ class wrapper(object):
 	#############################
 	## get observed M/L ratios ##
 	#############################
-	def get_observed_ml_ratios( self, zf, filters=None, zs=None ):
+    def get_observed_ml_ratios( self, zf, filters=None, zs=None ):
 		""" wrapper.get_observed_ml_ratios( zf, filters=None, zs=None )
 		
 		Same as :meth:`ezgal.wrapper.get_absolute_mags` but calls :meth:`ezgal.ezgal.get_observed_ml_ratios`.
@@ -724,7 +732,7 @@ class wrapper(object):
 	#############################
 	## get solar observed mags ##
 	#############################
-	def get_solar_observed_mags( self, zf, filters=None, zs=None, ab=None, vega=None ):
+    def get_solar_observed_mags( self, zf, filters=None, zs=None, ab=None, vega=None ):
 		""" wrapper.get_observed_ml_ratios( zf, filters=None, zs=None, ab=None, vega=None )
 		
 		Same as :meth:`ezgal.wrapper.get_absolute_mags` but calls :meth:`ezgal.ezgal.get_solar_observed_mags`.
@@ -738,7 +746,7 @@ class wrapper(object):
 	################################
 	## get observed absolute mags ##
 	################################
-	def get_observed_absolute_mags( self, zf, filters=None, zs=None, normalize=True, ab=None, vega=None ):
+    def get_observed_absolute_mags( self, zf, filters=None, zs=None, normalize=True, ab=None, vega=None ):
 		""" wrapper.get_observed_absolute_mags( zf, filters=None, zs=None, normalize=True, ab=None, vega=None )
 		
 		Same as :meth:`ezgal.wrapper.get_absolute_mags` but calls :meth:`ezgal.ezgal.get_observed_absolute_mags`.
@@ -752,7 +760,7 @@ class wrapper(object):
 	################
 	## get masses ##
 	################
-	def get_masses( self, zf, zs=None, nfilters=None ):
+    def get_masses( self, zf, zs=None, nfilters=None ):
 		""" wrapper.get_masses( zf, zs=zs, nfilters=None )
 		
 		Same as :meth:`ezgal.wrapper.get_absolute_mags` but calls :meth:`ezgal.ezgal.get_masses`.
@@ -774,7 +782,7 @@ class wrapper(object):
 	############
 	## get zs ##
 	############
-	def get_zs( self, z ):
+    def get_zs( self, z ):
 		""" zs = wrapper.get_zs( z )
 		
 		:param z: Upper limit for list of redshifts
@@ -793,7 +801,7 @@ class wrapper(object):
 	#############
 	## get age ##
 	#############
-	def get_age( self, z1, z2, units='gyrs' ):
+    def get_age( self, z1, z2, units='gyrs' ):
 		""" ages = wrapper.get_age( z1, z2, units='gyrs' )
 		
 		:param z1: The first redshift
@@ -816,7 +824,7 @@ class wrapper(object):
 	#######################
 	## get normalization ##
 	#######################
-	def get_normalization( self, zf, flux=False ):
+    def get_normalization( self, zf, flux=False ):
 		""" normalizations = wrapper.get_normalization( zf, flux=False )
 		
 		:param zf: The formation redshift to assume
@@ -846,7 +854,7 @@ class wrapper(object):
 	#######################
 	## set normalization ##
 	#######################
-	def set_normalization( self, filter, z, mag, vega=False, apparent=False ):
+    def set_normalization( self, filter, z, mag, vega=False, apparent=False ):
 		""" wrapper.set_normalization( filter, z, mag, vega=False, apparent=False )
 		
 		:param filter: The normalization filter

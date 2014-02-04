@@ -106,9 +106,9 @@ class memoized(object):
                   
 
 ###spectral lib stuff####
-global lib_path,spect
+'''global lib_path,spect
 lib_path = '/home/thuso/Phd/Spectra_lib/'
-spect,info = None,None
+spect,info = None,None'''
 '''try:
     #load in spectral library, if default paths isn't correct ask
     #for correct path to lib
@@ -285,19 +285,23 @@ All terms are logrythmic.
 	#handel situation where stepsize is small
     if len(ages) < 10:
         ages = nu.linspace(t_min,t_max,10)
-    temp_param = []
+    #temp_param = []
     #get ssp's
     try:
+        '''ssps = []
+        sspS = ssps.append
+        for i in xrange(len(ages)):
+            sspS(SSP.get_sed(ages[i]/10**9,metal))'''
         ssps = map(SSP.get_sed,ages/10**9.,[metal]*len(ages))
     except ValueError as e:
         #interp failed
         print e
         return SSP.sed_ls + nu.inf
     #integrate and normalize
+    #del ssps,ages, age_unq,metal_unq
     return simps(ssps, ages, axis=0)/(ages.ptp())
-	#return new ssp
-	
-		
+    #return SSP.sed_ls + nu.inf
+    
 def random_permute(seed):
     '''(seed (int)) -> int
     does random sequences to produice a random seed for parallel programs'''

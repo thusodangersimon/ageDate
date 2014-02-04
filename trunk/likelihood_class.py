@@ -658,6 +658,7 @@ class VESPA_fit(object):
         Calculates likelihood for input parameters. Outuputs log-likelyhood'''
         if not self._check_len(param[bins]['gal'],bins):
             return -nu.inf
+        #with profile.timestamp("Get_SSP"):
         burst_model = {}
         for i in param[bins]['gal']:
             burst_model[str(i[1])] =  10**i[3]*ag.make_burst(i[0],i[1],i[2],
@@ -666,6 +667,7 @@ class VESPA_fit(object):
         if not issorted(burst_model['wave']):
             for i in burst_model.keys():
                 burst_model[i] = burst_model[i][::-1]
+        #return None
 		#do dust
         if self._has_dust:
             #dust requires wavelengths
