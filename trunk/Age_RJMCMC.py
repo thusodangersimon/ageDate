@@ -32,8 +32,10 @@ import numpy as nu
 import sys,os
 import time as Time
 import cPickle as pik
-import acor
-from memory_profiler import profile
+import MC_utils as MC
+#import acor
+#from memory_profiler import profile
+from glob import glob
 a=nu.seterr(all='ignore')
 
 def timeit(method):
@@ -51,7 +53,7 @@ def timeit(method):
 
     return timed
 
-#@profile
+
 def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=None, fail_recover=True):
     '''(likelihood object, running object, int, int, bool) ->
     dict(ndarray), dict(ndarray)
@@ -97,22 +99,22 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
                 initalize = True
     elif type(fail_recover) is str:
             #load from path
-            initalize = False
-            reover_file = glob(fail_recover)
+        initalize = False
+        reover_file = glob(fail_recover)
     else:
-            #do nothing and initalize normaliy
-            initalize = True
+        #do nothing and initalize normaliy
+        initalize = True
     #initalize parameters from class
     if initalize:
-        active_param, sigma = rj_dict(), rj_dict()
-        param,chi = rj_dict(), rj_dict()
-        Nacept, Nreject = rj_dict(), rj_dict()
-        acept_rate, out_sigma = rj_dict(), rj_dict()
-        bayes_fact = rj_dict() #to calculate bayes factor
+        active_param, sigma = {},{}
+        param,chi = {},{}
+        Nacept, Nreject = {},{}
+        acept_rate, out_sigma = {},{}
+        bayes_fact = {} #to calculate bayes factor
         #simulated anneling param
-        T_cuurent = rj_dict()
+        T_cuurent = {}
         for i in fun.models.keys(): ####todo add random combination of models
-                active_param[i], sigma[i] = fun.initalize_param(i)
+            active_param[i], sigma[i] = fun.initalize_param(i)
         #start with random model
         bins = nu.random.choice(fun.models.keys())
 
@@ -154,8 +156,7 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
         (fun.data,active_param,sigma,param,chi,bins,Nacept,Nreject,acept_rate,out_sigma,
                     option.current,T_cuurent,j,j_timeleft,fun._multi_block,T_start,T_stop,
                     trans_moves) = pik.load(open(reover_file[0]))
-    #profiling
-    #t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm = [],[],[],[],[],[],[],[],[] 
+
     while option.iter_stop:
         #show status of running code
         if T_cuurent[bins] % 501 == 0:
@@ -163,103 +164,88 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
                     %(acept_rate[bins][-1],chi[bins][-1],bins, option.current,eff))
             print show
             sys.stdout.flush()
-			
-        #sample from distiburtion
-        #t_pro.append(Time.time())
-        0.
-        active_param[bins] = fun.proposal(active_param[bins], sigma[bins])
-        #t_pro[-1] -= Time.time()
-        #swarm stuff
-        #t_swarm.append(Time.time())
-        '''active_param[str(bins)], active_dust, active_losvd, birth_rate = swarm_function(active_param[str(bins)]'''
-        #if option.rank == 1:
-            #print 'after',active_param[str(bins)] 
-
-        #t_swarm[-1] -= Time.time()
-        #calculate new model and chi
-        #t_lik.append(Time.time())
-        chi[bins].append(0.)
-        chi[bins][-1] = fun.lik(active_param,bins) + fun.prior(active_param,bins)
-        #just lik part
-        a = (chi[bins][-1] - chi[bins][-2])
-        #simulated anneling
-        a /= SA(T_cuurent[bins],burnin,abs(T_start),T_stop)
-        
-        #t_lik[-1]-=Time.time()
-        #t_accept.append(Time.time())
-        #put temperature on order of chi calue
-        if T_start < chi[str(bins)][-1]:
-            T_start = chi[str(bins)][-1]+0
-        0.
-        #metropolis hastings
-        #print a
-        if nu.exp(a) > nu.random.rand():
-            #acepted
-            param[bins].append(active_param[bins].copy())
-            Nacept[bins] += 1
-        else:
-            #rejected
-            param[bins].append(param[bins][-1].copy())
-            active_param[bins] = param[bins][-1].copy()
-            chi[bins][-1] = nu.copy(chi[bins][-2])
-            Nreject[bins]+=1
-        0.
-        #t_accept[-1]-=Time.time()
-        ###########################step stuff
-        #t_step.append(Time.time())
-        if T_cuurent[bins] < burnin + 5000 or acept_rate[bins][-1]<.11:
-            #only tune step if in burn-in
-            sigma[bins] =  fun.step_func(acept_rate[bins][-1] ,param[bins], sigma, bins)
-        #t_step[-1]-=Time.time()
-        #############################decide if birth or death
-        #t_birth.append(Time.time())
-        0.
-        if j >= j_timeleft:
-            #print len(active_param[bins].keys())
+		#either stay or try to jump
+        if nu.random.rand() > .3:	
+            #sample from distiburtion
+            active_param[bins] = fun.proposal(active_param[bins], sigma[bins])
+            #calculate new model and chi
+            chi[bins].append(0.)
+            chi[bins][-1] = fun.prior(active_param,bins)
+            if nu.isfinite(chi[bins][-1]):
+                chi[bins][-1] =+ fun.lik(active_param,bins)
+                #just lik part
+                a = (chi[bins][-1] - chi[bins][-2])
+                #simulated anneling
+                a /= SA(T_cuurent[bins],burnin,abs(T_start),T_stop)
+            else:
+                a = -nu.inf
+            #put temperature on order of chi calue
+            if T_start < chi[str(bins)][-1]:
+                T_start = chi[str(bins)][-1]+0
+            #metropolis hastings
+            if nu.exp(a) > nu.random.rand():
+                #acepted
+                param[bins].append(active_param[bins].copy())
+                Nacept[bins] += 1
+            else:
+                #rejected
+                param[bins].append(param[bins][-1].copy())
+                active_param[bins] = param[bins][-1].copy()
+                chi[bins][-1] = nu.copy(chi[bins][-2])
+                Nreject[bins]+=1
+        else: 
+            #############################decide if birth or death
+            #if j >= j_timeleft:
             active_param, temp_bins, attempt, critera = fun.birth_death(birth_rate, bins, active_param)
             #print len(active_param[bins].keys())
             #print bins, active_param[bins].shape, sigma[bins][0].shape
-            if attempt:
-                0.
-                #check if accept move
-                tchi = fun.lik(active_param, temp_bins)+fun.prior(active_param, temp_bins)
+            #if attempt:
+            #check if accept move
+            tchi = fun.prior(active_param, temp_bins)
+            if nu.isfinite(tchi):
+                tchi += fun.lik(active_param, temp_bins)
                 #likelihoods
                 rj_a = (tchi - chi[bins][-1])
                 #model priors
                 rj_a += (fun.model_prior(temp_bins) - fun.model_prior(bins))
                 trans_moves += 1
                 #simulated aneeling 
-                rj_a /= SA(trans_moves,50,abs(chi[bins][0]),T_stop)
+                rj_a /= SA(trans_moves,50,abs(chi[bins][-1]),T_stop)
                 #RJ-MH critera
-                #print active_param[temp_bins]
-                if nu.exp(rj_a) * critera > nu.random.rand():
+            else:
+                rj_a,critera = -nu.inf ,1.   #print active_param[temp_bins]
+            if nu.exp(rj_a) * critera > nu.random.rand():
                     #accept move
-                    0.
                     bins = temp_bins + ''
                     #see if model has be created before
                     if not chi.has_key(bins):
-                        0.
                         chi[bins] ,param[bins] = [] ,[] 
                         T_cuurent[bins] = 0
                         acept_rate[bins] = [.5]
                         Nacept[bins] , Nreject[bins] = 1., 1.
                         out_sigma[bins] = []
-                    0.
                     chi[bins].append(tchi + 0)
                     param[bins].append(active_param[bins].copy())
-                    
                     #allow for quick tuneing of sigma
                     if T_cuurent[bins] > burnin + 5000:
                         T_cuurent[bins] = burnin + 4800
                         Nacept[bins] , Nreject[bins] = 1., 1.
-                else:
-                    pass
-                0.
-                j, j_timeleft = 0 , 1#nu.random.exponential(100)
-                #print T_cuurent[str(bins)],burnin,T_start,T_stop
-                attempt = False
-        #t_birth[-1]-=Time.time()
+            else:
+                #rejected
+                param[bins].append(param[bins][-1].copy())
+                #active_param[bins] = param[bins][-1].copy()
+                chi[bins].append(nu.copy(chi[bins][-1]))
+                Nreject[bins] += 1
+ 
+                #j, j_timeleft = 0 , 1#nu.random.exponential(100)
+                #attempt = False
         
+        ###########step stuff
+        #change step size
+        if T_cuurent[bins] < burnin + 5000 or acept_rate[bins][-1]<.11:
+            #only tune step if in burn-in
+            sigma[bins] =  fun.step_func(acept_rate[bins][-1] ,param[bins], sigma, bins)
+
         #########################################change temperature
         T_cuurent[bins] += 1
         ###################bad performance notifier
@@ -270,14 +256,13 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
                 fun._multi_block = True
                 Nacept[bins] , Nreject[bins] = 1., 1.
                 #T_cuurent[bins] = burnin + 4000
-        0.
         ################turn off burnin after 40% percent of total iterations
         if option.current == int(max_iter*.4):
             for i in T_cuurent.keys():
                 if not T_cuurent[i] > burnin:
                     T_cuurent[i] = burnin + 1
         ##############################convergece assment
-        0.
+        
         ##############################house keeping
         #t_house.append(Time.time())
         j+=1
@@ -287,7 +272,6 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
         #save current state incase of crash
         if option.current % 500 == 0:
             try:
-                0.
                 os.popen('mv failed_%i.pik failed_%i.pik.bak'%(os.getpid(),os.getpid()))
                 pik.dump((fun.data,active_param,sigma,param,chi,bins,Nacept,Nreject,acept_rate,out_sigma,option.current,T_cuurent,j,j_timeleft,fun._multi_block,T_start,T_stop,trans_moves),open('failed_%i.pik'%(os.getpid()),'w'),2)
                 os.popen('rm failed_%i.pik.bak'%os.getpid())
@@ -298,22 +282,18 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
         #t_comm.append(Time.time())
         #t_comm[-1]-=Time.time()
         #if mpi isn't on allow exit
-        0.
         if option.comm_world.size == 1:
-            0.
             #exit if reached max iterations
             if option.current > max_iter:
                 option.iter_stop = False
-            0.
             #exit if reached target effective sample size
             if option.current % 501 == 0:
-                eff = ess(param[bins])
+                eff = MC.ess(param[bins])
                 if eff > 10**5 and option.current > 10**5 :
                     option.iter_stop = False
         #pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm),open('time_%i.pik'%option.rank_world,'w'),2)
     #####################################return once finished 
     #remove incase of crash file
-    0.
     os.popen('rm failed_%i.pik'%(os.getpid()))
 		#pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm,param,chi),open('time_%i.pik'%option.rank_world,'w'),2)
     return param, chi, acept_rate #, out_sigma, param.keys()

@@ -41,6 +41,7 @@ from itertools import izip
 from scipy.cluster.hierarchy import fcluster,linkage
 import os, sys, subprocess
 from time import time
+import MC_utils as MC
 
 #hdf5 handling stuff
 try:
@@ -480,6 +481,7 @@ class VESPA_fit(object):
 
     Uses vespa methodology splitting const sfh into multiple componets
     '''
+    
     def __init__(self,data,weights=None, resol=180.,min_sfh=1,max_sfh=16,lin_space=False,use_dust=True, 
 		use_losvd=True, spec_lib='p2',imf='salp',
 			spec_lib_path='/home/thuso/Phd/stellar_models/ezgal/'):
@@ -494,6 +496,13 @@ class VESPA_fit(object):
         spec_lib_path - path to ssps
         sets up vespa like fits
         '''
+        #set externel functions
+        self._check_len = MC._check_len
+        self.issorted = MC.issorted
+        self._birth = MC._birth
+        self._merge = MC._merge
+        self._death = MC._death
+        self._split = MC._split
         self.data = nu.copy(data)
 		#make mean value of data= 100
         self._norm = 1./(self.data[:,1].mean()/100.)
@@ -516,24 +525,10 @@ class VESPA_fit(object):
         assert len(models) > 0, "Did not find any models"
         #crate ezgal class of models
         SSP = gal.wrapper(models)
-        self.SSP = SSP
         #make sure is matched for interpolatioin
-        self.SSP.is_matched = True
+        SSP.is_matched = True
         #extract seds from ezgal wrapper
-        '''spect, info = [SSP.sed_ls], []
-        for i in SSP:
-			metal = float(i.meta_data['met'])
-			ages = nu.float64(i.ages)
-			for j in ages:
-				if j == 0:
-					continue
-				spect.append(i.get_sed(j,age_units='yrs'))
-				info.append([metal+0,j])
-        info,self._spect = [nu.log10(info),None],nu.asarray(spect).T
-        #test if sorted
-        self._spect = self._spect[::-1,:]'''
-        #make spect match wavelengths of data
-        #self._spect = ag.data_match_all(data,self._spect)[0]
+        self._lib_val, self._spect = ag.ez_to_rj(SSP)
         #extra models to use
         self._has_dust = use_dust
         self._has_losvd = use_losvd
@@ -545,8 +540,8 @@ class VESPA_fit(object):
             self._key_order.append('losvd')
 		#set hidden varibles
         #self._lib_vals = info
-        self._age_unq = nu.unique(nu.log10(SSP[0].ages))[1:]
-        self._metal_unq = nu.log10(nu.float64(SSP.meta_data['met']))
+        self._age_unq = nu.unique(self._lib_val[0][:,1])
+        self._metal_unq = nu.unique(self._lib_val[0][:,0])
         #self._lib_vals[0][:,0] = 10**self._lib_vals[0][:,0]
         self._min_sfh, self._max_sfh = min_sfh,max_sfh +1
 		#params
@@ -652,21 +647,21 @@ class VESPA_fit(object):
         Does all things for multi try (proposal,lik, and selects best param'''
         temp_param = map(self.proposal,[param]*N, [self._sigma]*N)
     
-    
+    #@profile
     def lik(self,param, bins,return_all=False):
         '''(Example_lik_class, ndarray) -> float
         Calculates likelihood for input parameters. Outuputs log-likelyhood'''
-        if not self._check_len(param[bins]['gal'],bins):
+        if not self._check_len(param[bins]['gal'],bins,self._age_unq):
             return -nu.inf
         #with profile.timestamp("Get_SSP"):
         burst_model = {}
         for i in param[bins]['gal']:
             burst_model[str(i[1])] =  10**i[3]*ag.make_burst(i[0],i[1],i[2],
-            self.SSP)
-        burst_model['wave'] = nu.copy(self.SSP.sed_ls)
-        if not issorted(burst_model['wave']):
+            self._lib_val, self._spect)
+        burst_model['wave'] = nu.copy(self._spect[:,0])
+        '''if not self.issorted(burst_model['wave']):
             for i in burst_model.keys():
-                burst_model[i] = burst_model[i][::-1]
+                burst_model[i] = burst_model[i][::-1]'''
         #return None
 		#do dust
         if self._has_dust:
@@ -709,7 +704,7 @@ class VESPA_fit(object):
         #return logprior
         out = 0.
         #make sure shape is ok
-        if not self._check_len(param[bins]['gal'],bins):
+        if not self._check_len(param[bins]['gal'],bins,self._age_unq):
             return -nu.inf
         #uniform priors
         #gal priors
@@ -784,7 +779,7 @@ class VESPA_fit(object):
         sigma = nu.identity(len([j for i in out.values() for j in nu.ravel(i)]))
 
         #make coorrect shape
-        out['gal'] = self._make_square({model:out['gal']},model)
+        out['gal'] = MC.make_square({model:out['gal']},model,self._age_unq)
         #check if only 1 metalicity
         if len(self._metal_unq) == 1:
             #set all metalicites to only value
@@ -806,7 +801,7 @@ class VESPA_fit(object):
             step_size[model] /= 1.05
         #cov matrix
         if len(param) % 200 == 0 and len(param) > 0.:
-            temp = nu.cov(self.list_dict_to(param[-2000:]).T)
+            temp = nu.cov(MC.list_dict_to(param[-2000:],self._key_order).T)
             #make sure not stuck
             if nu.any(temp.diagonal() > 10**-6):
                 step_size[model] = temp
@@ -828,25 +823,24 @@ class VESPA_fit(object):
 
         Brith_rate is ['birth','split','merge','death']
         '''
-        
-        step = nu.random.choice(['birth','split','merge','death'],p=birth_rate)
-        param = {model:Param[model]['gal'].copy()}
-        if step == 'birth' and int(model) + 1 < self._max_sfh:
-            new_param, jacob, temp_model = self._birth(param,model)
-        elif step == 'death' and int(model) - 1 >= self._min_sfh :
-            new_param, jacob, temp_model = self._death(param,model)
-        elif step == 'merge' and int(model) - 1 >= self._min_sfh:
-            new_param, jacob, temp_model = self._merge(param,model)
-        elif step == 'split' and int(model) + 1 < self._max_sfh:
-            new_param, jacob, temp_model = self._split(param,model)
-        elif step == 'len_chng' and int(model) > 1 :
-            new_param, jacob, temp_model = self._len_chng(param,model)
-        else:
-            #failed, return nulls
-            return Param, None, False, None
-        if new_param is None:
-            #if change didn't work return nulls
-            return param, None, False, None
+        new_param = None
+        while True:
+            #choose step randomly
+            step = nu.random.choice(['birth','split','merge','death'],p=birth_rate)
+            param = {model:Param[model]['gal'].copy()}
+            if step == 'birth' and int(model) + 1 < self._max_sfh:
+                new_param, jacob, temp_model = self._birth(param,model,self)
+            elif step == 'death' and int(model) - 1 >= self._min_sfh :
+                new_param, jacob, temp_model = self._death(param,model,self)
+            elif step == 'merge' and int(model) - 1 >= self._min_sfh:
+                new_param, jacob, temp_model = self._merge(param,model,self)
+            elif step == 'split' and int(model) + 1 < self._max_sfh:
+                new_param, jacob, temp_model = self._split(param,model,self)
+            elif step == 'len_chng' and int(model) > 1 :
+                new_param, jacob, temp_model = self._len_chng(param,model,self)
+            #if able to change break and return
+            if new_param is not None:
+                break
         if not Param.has_key(temp_model):
             Param[temp_model] = {}
         Param[temp_model]['gal'] = new_param[nu.argsort(new_param[:,1])]

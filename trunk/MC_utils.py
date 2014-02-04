@@ -34,7 +34,6 @@ from anderson_darling import anderson_darling_k as ad_k
 import numpy as nu
 from scipy.stats import levene, f_oneway,kruskal
 from glob import glob
-import Age_date as ag
 import ezgal as gal
 import scipy.stats as stats_dist
 from scipy.special import erfinv
@@ -156,7 +155,7 @@ def acceptchange(step,accept_rate):
 ######PMC##########
 
 #######RJMC#############
-def _len_chng(param, model):
+def _len_chng(param, model,s):
         '''(dict(ndarray),str)-> ndarray,float,str
         Stays at same dimesnsion just changes length parameters
         '''
@@ -206,7 +205,7 @@ def _len_chng(param, model):
 
         return param[model], 1., model
 
-def _merge(param,model):
+def _merge(param,model,s):
         '''(dict(ndarray),str)-> ndarray,float,str
         Combines nearby bins together.
         '''
@@ -249,12 +248,12 @@ def _merge(param,model):
         #metal
         new_param[-1][2] = ((1-u)*temp[2] + split[2] * u)
         #norm * correction factior(assumes logs)
-        new_param[-1][3] =nu.log10(10**split[3]+10**temp[3]*5*u)
+        new_param[-1][3] = nu.log10(10**split[3]+10**temp[3]*5*u)
         #make sure metalicity is in bounds
-        if new_param[-1][2] < self._metal_unq.min():
-                new_param[-1][2] = self._metal_unq.min() + 0.
-        if new_param[-1][2] > self._metal_unq.max():
-                new_param[-1][2] = self._metal_unq.max() + 0.
+        if new_param[-1][2] < s._metal_unq.min():
+                new_param[-1][2] = s._metal_unq.min() + 0.
+        if new_param[-1][2] > s._metal_unq.max():
+                new_param[-1][2] = s._metal_unq.max() + 0.
         #copy the rest of the params
         for i in param[model]:
             if nu.all(temp == i) or nu.all(split == i):
@@ -267,14 +266,14 @@ def _merge(param,model):
             
         return nu.asarray(new_param), jacob, temp_model
         
-def _birth(param, model):
+def _birth(param, model,s):
         '''(dict(ndarray),str)-> ndarray,float,str
         Creates a new bins, with parameters randomized.
         '''
         new_param = []
-        age, metal, norm =  self._age_unq,self._metal_unq, self._norm
+        age, metal, norm =  s._age_unq,s._metal_unq, s._norm
         lengths = age.ptp()/float(model) * nu.random.rand()
-        new_param.append([lengths, 0.,0,nu.log10(self._norm*nu.random.rand())])
+        new_param.append([lengths, 0.,0,nu.log10(s._norm*nu.random.rand())])
         #metals
         new_param[-1][2] = nu.random.rand()*metal.ptp()+metal.min()
         #age
@@ -287,7 +286,7 @@ def _birth(param, model):
         
         return new_param, jacob, temp_model
     
-def _split(param, model):
+def _split(param, model,s):
         '''(VESPA_Class,dict(ndarray),str)-> ndarray,float,str
         Splits a bin into 2 with a random weight.
         '''
@@ -322,8 +321,8 @@ def _split(param, model):
         jacob = ((2*u-1)*temp_param[index,0])/((u-1)*u*nu.log(10))
         return nu.asarray(new_param), jacob, temp_model
     
-def _death(param, model):
-        '''(VESPA_Class,dict(ndarray),str)-> ndarray,float,str
+def _death(param, model,s):
+        '''(dict(ndarray),str,vespa class)-> ndarray,float,str
         Removes a bin from array.
         '''
         index = nu.random.randint(int(model))
@@ -333,11 +332,11 @@ def _death(param, model):
                 continue
             new_param.append(nu.copy(param[model][i]))
         temp_model = str(nu.asarray(new_param).shape[0])
-        jacob = float(model)/(self._metal_unq.ptp()*self._age_unq.ptp()**2)
+        jacob = float(model)/(s._metal_unq.ptp()*s._age_unq.ptp()**2)
 
         return nu.asarray(new_param), jacob, temp_model
 
-def _check_len(tparam, key):
+def _check_len(tparam, key, age_unq):
         '''( dict(ndarray) or ndarray,str)-> ndarray
         Make sure parameters ahere to criterion listed below:
         1. bins cannot overlap
@@ -355,7 +354,7 @@ def _check_len(tparam, key):
         else:
             raise TypeError('input must be dict or ndarray')
         #make sure age is sorted
-        if not self.issorted(param[key][:,1]):
+        if not issorted(param[key][:,1]):
             return False
         #make sure bins do not overlap fix if they are
         for i in xrange(param[key].shape[0]-1):
@@ -369,15 +368,15 @@ def _check_len(tparam, key):
                     return False
             #check if in age bounds
             if i == 0:
-                if self._age_unq.min() > param[key][i,1] - param[key][i,0]/2.:
+                if age_unq.min() > param[key][i,1] - param[key][i,0]/2.:
                     return False
         else:
-            if self._age_unq.max() < param[key][-1,1] + param[key][-1,0]/2.:
-                if not nu.allclose(param[key][-1,1] + param[key][-1,0]/2,self._age_unq.max()):
+            if age_unq.max() < param[key][-1,1] + param[key][-1,0]/2.:
+                if not nu.allclose(param[key][-1,1] + param[key][-1,0]/2,age_unq.max()):
                     return False
         #check if length is less than age_unq.ptp()
-        if param[key][:,0].sum() > self._age_unq.ptp():
-            if not nu.allclose( param[key][:,0].sum(),self._age_unq.ptp()):
+        if param[key][:,0].sum() > age_unq.ptp():
+            if not nu.allclose( param[key][:,0].sum(),age_unq.ptp()):
                 return False
         #make sure age is in bounds
         
@@ -497,12 +496,34 @@ def issorted(l):
             return False
     return True
 
-def list_dict_to(self, s,outtype='ndarray'):
+def list_dict_to(s, key_order, outtype='ndarray'):
         '''(list(dict(ndarray)),str) -> outtype
-        
         Turns a list of dictoraies into a ndarray or type specified
         '''
         size = sum([nu.size(j) for j in s[0].values()])
-        out = nu.hstack([i for Mu in s for j in self._key_order for i in Mu[j] ])
+        out = nu.hstack([i for Mu in s for j in key_order for i in Mu[j] ])
         return out.reshape((len(s),size))
   
+def make_square(param, key, age_unq):
+        '''(dict(ndarray),str)-> ndarray
+       
+        Makes lengths and ages line up,sorts and makes sure length
+        covers all length
+        '''
+        #sort params by age
+        out = nu.copy(param[key][nu.argsort(param[key][:,1]),:])
+        #check that lengths are correct 
+        if not out[:,0].sum() == age_unq.ptp():
+            out[:,0] = out[:,0] / out[:,0].sum()
+            out[:,0] *= age_unq.ptp()
+
+        #and cover full range of age space
+        for i in xrange(int(key)):
+            if i == 0:
+                out[i,1] = age_unq.min()+ out[i,0]/2.
+
+            else:
+                out[i,1] = age_unq.min()+out[:i,0].sum()
+                out[i,1] += out[i,0]/2.
+                
+        return out

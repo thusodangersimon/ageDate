@@ -32,9 +32,8 @@
 import numpy as nu
 import os
 import sys
-#from multiprocessing import *
-from interp_func import *
-from spectra_func import *
+from interp_utils import *
+from spectra_lib_utils import *
 from scipy.optimize import nnls
 from scipy.optimize.minpack import leastsq
 from scipy.optimize import fmin_l_bfgs_b as fmin_bound
@@ -43,12 +42,7 @@ from scipy.integrate import simps
 from pysynphot import observation,spectrum
 import time as Time
 import boundary as bound
-#diffusion stuff
-from scipy.spatial.distance import pdist, squareform
-from scipy.cluster.vq import kmeans2
-#import diffuse as dif
-
-
+from MC_utils import issorted
 #sfr2energy = 1.0/7.9D-42    ; (erg/s) / (M_sun/yr) [Kennicutt 1998]
 
 #123456789012345678901234567890123456789012345678901234567890123456789
@@ -121,7 +115,7 @@ except OSError :
     spect,info = load_spec_lib(lib_path)
     '''              
 def find_az_box(param, age_unq, metal_unq):
-    'depricated'
+    '''Find 4 cloest values from param in age and meta_unq'''
 
     #find closest metal
     line = None
@@ -158,13 +152,12 @@ def find_az_box(param, age_unq, metal_unq):
 
 def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins, 
 						spect):
-    'depricated'
-    #does dirty work to make spectra models
-    #search age_unq and metal_unq to find closet box spectra and interps
-    #does multi componets spectra and fits optimal normalization
+    '''does dirty work to make spectra models
+    search age_unq and metal_unq to find closet box spectra and interps
+    does multi componets spectra'''
     out = {}
     for ii in xrange(bins):
-        temp_param = param[ii * 3: ii * 3 + 2]
+        temp_param = param[ii]
         metal, age, line = find_az_box(temp_param, age_unq, metal_unq)
         closest = []
         #check to see if on a lib spectra or on a line
@@ -173,7 +166,7 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins,
             metal.sort()
             age = age[0]
             #find spectra
-            for i in 10 ** metal:
+            for i in  metal:
                 index = nu.nonzero(nu.logical_and(lib_vals[0][:,0] == i
                                                   ,lib_vals[0][:,1] ==age))[0]
                 if len(index)<1: #if not in lib_vals return dummy array
@@ -184,8 +177,8 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins,
                     closest.append(spect[:,index[0] + 1])
                     interp = True
             if interp:
-                out[str(ii)] = linear_interpolation(10 ** metal,
-                                                    closest, 10 ** 
+                out[str(ii)] = linear_interpolation(metal,
+                                                    closest,  
                                                     temp_param[0])
         elif line == 'metal': #run 1 d interp along age only
             age = nu.array([age[0], age[-1]])
@@ -196,7 +189,7 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins,
             for i in age:
                 index = nu.nonzero(nu.logical_and(lib_vals[0][:,1] ==
                                                   i, lib_vals[0][:,0]
-                                                  == 10 ** metal))[0]
+                                                  ==  metal))[0]
                 
                 if len(index)<1: #if not in lib_vals return dummy array
                     out[str(ii)] = spect[:,0] + nu.inf
@@ -210,7 +203,7 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins,
                                                     temp_param[1])
 
         elif line == 'both': #on a lib spectra
-            index=nu.nonzero(nu.logical_and(lib_vals[0][:,0] == 10 **
+            index=nu.nonzero(nu.logical_and(lib_vals[0][:,0] == 
                                             temp_param[0], 
                                             lib_vals[0][:,1] == 
                                             temp_param[1]))[0]
@@ -229,7 +222,7 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins,
                 index = nu.nonzero(nu.logical_and(lib_vals[0][:, 1] ==
                                                   age[i],
                                                   lib_vals[0][:, 0] ==
-                                                  10 ** metal[i]))[0]
+                                                   metal[i]))[0]
                 if len(index)<1: #if not in lib_vals return dummy array
                     out[str(ii)] = spect[:, 0] + nu.inf
                     interp = False
@@ -238,9 +231,8 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins,
                     closest.append(spect[:, index[0] + 1])
                     interp = True
             if interp:
-                out[str(ii)] = bilinear_interpolation(10 ** metal, age
+                out[str(ii)] = bilinear_interpolation( metal, age
                                                       , closest,
-                                                      10 ** 
                                                       temp_param[0],
                                                       temp_param[1])
     #give wavelength axis
@@ -249,35 +241,54 @@ def get_model_fit_opt(param, lib_vals, age_unq, metal_unq, bins,
    #exit program
     return out
 
-def make_burst(length, T, Metal, SSP):
-    '''def make_burst(length, t, metal, SSP)
-    (float, float,float, ezgal wrapper object) -> ndarray(float)
+def ez_to_rj(SSP):
+    '''Get ssp's from EZGAL and make usable for this program'''
+    spect, info = [SSP.sed_ls], []
+    for i in SSP:
+        metal = float(i.meta_data['met'])
+        ages = nu.float64(i.ages)
+        for j in ages:
+            if j == 0:
+                continue
+            spect.append(i.get_sed(j,age_units='yrs'))
+            info.append([metal+.0,j])
+    info, spect = [nu.log10(info),None],nu.asarray(spect).T
+    #test if sorted
+    if not issorted(spect[:,0]):
+        spect = spect[::-1,:]
+
+    return info, spect
+
+@profile
+def make_burst(length, T, metal, lib_vals, spect):
+    '''def make_burst(length, t, metal, lib_vals,spect)
+    (float, float,float, list(ndarray,ndarry),ndarray) -> ndarray(float)
 Turns SSP into busrt of constant stellar formation and of length dt at
 age t for a const metalicity 10**(t-9) - length/2 to 10**(t-9) + length/2.
 All terms are logrythmic.
 '''
     #set up boundaries
-    age_unq = nu.copy(SSP[0].ages)
+    age_unq = nu.unique(lib_vals[0][:,1])
     t = 10**T
-    metal = 10**Metal
-    metal_unq = nu.float64(SSP.meta_data['met'])
-    if t < age_unq.min() or t > age_unq.max():
+    #metal = 10**Metal
+    metal_unq = nu.unique(lib_vals[0][:,0])
+    if T < age_unq.min() or T > age_unq.max():
 		#Age not in range
-		return SSP.sed_ls +  nu.inf
+		return spect[:,0] +  nu.inf
     if metal < metal_unq.min() or metal > metal_unq.max():
 		#Metalicity not in range
-		return SSP.sed_ls + nu.inf
+		return spect[:,0] +  nu.inf
 	#get all ssp's with correct age range and metalicity
 	#min age range
-    if 10**(T - length/2.) < age_unq.min():
+    if (T - length/2.) < age_unq.min():
 		t_min = age_unq.min() + 0.
     else:
-		t_min = 10**(T - length/2.)
+		t_min = T - length/2.
 	#max age range
-    if 	10**(T + length/2.) > age_unq.max():
+    if 	T + length/2. > age_unq.max():
 		t_max = age_unq.max() + 0.
     else:
-		t_max = 10**(T + length/2.)
+		t_max = T + length/2.
     index = nu.searchsorted(age_unq, [t_min,t_max])
     ages = age_unq[index[0]:index[1]]
 	#get SSP's
@@ -285,22 +296,28 @@ All terms are logrythmic.
 	#handel situation where stepsize is small
     if len(ages) < 10:
         ages = nu.linspace(t_min,t_max,10)
-    #temp_param = []
+    temp_param = []
     #get ssp's
     try:
-        '''ssps = []
-        sspS = ssps.append
-        for i in xrange(len(ages)):
-            sspS(SSP.get_sed(ages[i]/10**9,metal))'''
-        ssps = map(SSP.get_sed,ages/10**9.,[metal]*len(ages))
+        #param [[metal,age,norm]]
+        for i in ages:
+            temp_param.append([metal,i,0]) 
+        ssps = get_model_fit_opt(temp_param, lib_vals, age_unq, metal_unq,
+                                ages.shape[0],spect)
+        ssps.pop('wave')
+        #sort for simps
+        ssp = nu.zeros((ages.shape[0],ssps['0'].shape[0]))
+        for i in xrange(ages.shape[0]):
+            ssp[i] = ssps[str(i)]
+        ages = 10**ages
     except ValueError as e:
         #interp failed
         print e
-        return SSP.sed_ls + nu.inf
+        return spect[:,0] +  nu.inf
     #integrate and normalize
     #del ssps,ages, age_unq,metal_unq
-    return simps(ssps, ages, axis=0)/(ages.ptp())
-    #return SSP.sed_ls + nu.inf
+    return simps(ssp, ages, axis=0)/(ages.ptp())
+    
 
 
 def make_numeric( age, sfh, max_bins, metals=None, return_param=False):
@@ -499,7 +516,7 @@ def multivariate_student(mu,sigma,n):
     return mu + (nu.random.multivariate_normal([0] * len(mu), sigma) *
                  (n / nu.random.chisquare(n)) ** 0.5)
 
-def nn_ls_fit(data, max_bins=16, min_norm=10**-4, spect=spect):
+def nn_ls_fit(data,spect, max_bins=16, min_norm=10**-4):
     #not used?
     #uses non-negitive least squares to fit data
     #spect is libaray array
