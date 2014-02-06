@@ -663,6 +663,7 @@ class VESPA_fit(object):
             for i in burst_model.keys():
                 burst_model[i] = burst_model[i][::-1]'''
         #return None
+        #return None
 		#do dust
         if self._has_dust:
             #dust requires wavelengths

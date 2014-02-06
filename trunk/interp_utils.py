@@ -32,24 +32,30 @@
 
 
 import numpy as nu
-import numexpr as ne
+#import numexpr as ne
 from scipy.interpolate import griddata
 
 def bilinear_interpolation(x,y,z_temp,x_eval,y_eval):
     '''takes in x,y as a len(x)=4, z is a len(z)>4 array and x_eval and y_eval
     are floats'''
     x,y=nu.unique(x),nu.unique(y)
-    z_temp0, x1, y1, z_temp1, x0 = z_temp[0], x[1], y[1], z_temp[1], x[0]
-    z_temp2, y0, z_temp3 = z_temp[2], y[0], z_temp[3]
-    return ne.evaluate('''((z_temp0 * (x1 - x_eval) * (y1-y_eval) +
-            z_temp1 * (x_eval - x0) * (y1-y_eval) + 
-            z_temp2 * (x1 - x_eval) * (y_eval - y0) + 
-            z_temp3 * (x_eval - x0) * (y_eval - y0)) / 
-           ((x1-x0)*(y1-y0)))''')
+    return ((z_temp[0] * (x[1] - x_eval) * (y[1]-y_eval) +
+            z_temp[1] * (x_eval - x[0]) * (y[1]-y_eval) + 
+            z_temp[2] * (x[1] - x_eval) * (y_eval - y[0]) + 
+            z_temp[3] * (x_eval - x[0]) * (y_eval - y[0])) / 
+           ((x[1]-x[0])*(y[1]-y[0])))
+    #z_temp0, x1, y1, z_temp1, x0 = z_temp[0], x[1], y[1], z_temp[1], x[0]
+    #z_temp2, y0, z_temp3 = z_temp[2], y[0], z_temp[3]
+    #return ne.evaluate('''((z_temp0 * (x1 - x_eval) * (y1-y_eval) +
+    #        z_temp1 * (x_eval - x0) * (y1-y_eval) + 
+    #        z_temp2 * (x1 - x_eval) * (y_eval - y0) + 
+    #        z_temp3 * (x_eval - x0) * (y_eval - y0)) / 
+    #       ((x1-x0)*(y1-y0)))''')
   
 def linear_interpolation(x,y_temp,x_eval):
-    y_temp0, x0, y_temp1, x1 = y_temp[0],x[0],y_temp[1],x[1]
-    return ne.evaluate('y_temp0+(x_eval - x0) * (y_temp1 - y_temp0)/(x1 - x0)')
+    #y_temp0, x0, y_temp1, x1 = y_temp[0],x[0],y_temp[1],x[1]
+    #return ne.evaluate('y_temp0+(x_eval - x0) * (y_temp1 - y_temp0)/(x1 - x0)')
+    return y_temp[0] + (x_eval - x[0]) * (y_temp[1] - y_temp[0])/(x[1] - x[0])
 
 def spectra_lin_interp(x,y,x_eval):
     #interpolates spectra with x to x_eval
