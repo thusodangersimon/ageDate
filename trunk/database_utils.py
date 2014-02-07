@@ -32,7 +32,7 @@
 import numpy as nu
 import tables as tab
 import os
-
+from sklearn.neighbors import NearestNeighbors as NN
 
 '''Pytable utils for searching and adding spectra with params to a .h5 file'''
 
@@ -140,9 +140,36 @@ def get_close_param_hdf5():
     '''Retreves n*2 closest spectra from param'''
     pass
 
+def skiki_NN(hdf5,col,param):
+    '''Looks for with skit learn function the len(col)*2 nearest neighbors in an hdf5 database'''
+    d = np.empty((rows*batches,))
+    for i in range(batches):
+        nbrs = NearestNeighbors(n_neighbors=k, algorithm='ball_tree').fit(h5f.root.carray[i*rows:(i+1)*rows])
+        distances, indices = nbrs.kneighbors(vec)  # put in dict? 
+def linear_NN(hdf5,col,param):
+    '''same as kikik_NN but linear search'''
+    d = np.empty((rows*batches,))
+    for i in range(batches):
+        d[i*rows:(i+1)*rows] = ((h5f.root.carray[i*rows:(i+1)*rows]-vec)**2).sum(axis=1)
+ 
+
+
 def get_param_from_hdf5(hdf5,param,cols):
     '''searches hdf5 lib for rows of intrest. uses a binary like search'''
-    query = hdf5.where('(%s == %f) & (%s == %f)'%(cols[0],param[0],cols[1],param[1]))
+    query = hdf5.read_where('(%s == %f) & (%s == %f)'%(cols[0],param[0],cols[1],param[1]))
+    if query:
+        #found something check other params
+        for i in query:
+            for j,col in enumerate(cols):
+                if not i[col] == param[j]:
+                    break
+            else:
+                #match!
+                return i['spec']
+        #not match try interp
+    else:
+        #found nothing get nearest neightbors
+        pass
     sub_query = [i for i in query]
     #2 param search
     if len(sub_query) == 0:
@@ -170,3 +197,50 @@ def get_param_from_hdf5(hdf5,param,cols):
     else:
         print 'Warrning 2, same specra found',param
         return sub_query[0].table[0]['spec']
+    
+def pik_hdf5(pik_path, out_hdf5_path):
+    '''Turns a pickle file into an hdf5 database'''
+    
+    
+if __name__ == '__main__':
+    '''makes database from likelihood.CV_Fit'''
+    from mpi4py import MPI as mpi
+    from likelihood_class import CV_Fit
+    comm = mpi.COMM_WORLD
+    rank = comm.rank
+    size = comm.size
+    #load spectra maker
+    
+    bins = fun.models.keys()[0]
+    #make persistant comunicators for exit status
+    if rank == 0: pass
+        #create data base
+        #lib = tab.open_file('CV_lib.h5', 'w')
+        #table = lib.create_table(lib.root, 'Param',CV_lib,"Param and spec")
+    #create enough points to take a computer month to calculate
+    #time per iteration
+    t = 160
+    t_month = 31*24*3600.
+    itter = round(t_month/t)
+   
+    #itter = 50
+    #params to use
+    abn = fun._abn_lst
+    out = []
+    #draw points from uniform distribution
+    grid = nu.random.rand(itter,len(abn)+2)
+    #scale grid
+    #Temp
+    grid[:,0] =grid[:,0] * 20000 + 20000
+    #logg
+    grid[:,1] = grid[:,1] * 4 + 4
+    #metals
+    grid[:,2:] = grid[:,2:] *2 -1
+    #round to the tenth
+    grid = nu.around(grid,1)
+    #look for duplicates
+    grid = nu.unique(grid.view(nu.dtype((nu.void, grid.dtype.itemsize*grid.shape[1])))).view(grid.dtype).reshape(-1, grid.shape[1])
+    #make spectra over cluster
+    out = list(fut.map(convert,grid,**{'bins':'1','return_spect':True}))
+    if rank == 0:
+        pik.dump((out,grid),open('pre_hdf5.pik','w'),2)

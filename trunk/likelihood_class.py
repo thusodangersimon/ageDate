@@ -42,8 +42,8 @@ from scipy.cluster.hierarchy import fcluster,linkage
 import os, sys, subprocess
 from time import time
 import MC_utils as MC
-
 #hdf5 handling stuff
+import database_utils  as  utils
 try:
     import tables as tab
 except ImportError:
@@ -152,7 +152,7 @@ class CV_Fit(object):
     '''Fits cv spectrum using fortran codes or spectral libray to generate model spectra.
     Runs with only MCMC'''
 
-    def __init__(self,data,model_name='thuso',spec_path='/home/thuso/Phd/other_codes/Valerio',convolution_path='/home/thuso/Phd/other_codes/Valerio/thuso.dat',lib_path='CV_lib.h5',
+    def __init__(self,data,model_name='thuso',spec_path='/home/thuso/Phd/other_codes/Valerio',convolution_path='/home/thuso/Phd/other_codes/Valerio/thuso.dat',lib_path='/home/thuso/Phd/other_codes/Valerio/CV_lib.h5',
                 gen_spec_lib=False,user_abn=False):
         '''If pool is activated, needs to be run in mpi. Head worker
         will do RJMCMC and working will make likelihoods.'''
