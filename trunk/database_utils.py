@@ -144,7 +144,7 @@ def skiki_NN(hdf5,col,param):
     '''Looks for with skit learn function the len(col)*2 nearest neighbors in an hdf5 database'''
     d = np.empty((rows*batches,))
     for i in range(batches):
-        nbrs = NearestNeighbors(n_neighbors=k, algorithm='ball_tree').fit(h5f.root.carray[i*rows:(i+1)*rows])
+        nbrs = NN(n_neighbors=len(col)*2, algorithm='ball_tree').fit(h5f.root.carray[i*rows:(i+1)*rows])
         distances, indices = nbrs.kneighbors(vec)  # put in dict? 
 def linear_NN(hdf5,col,param):
     '''same as kikik_NN but linear search'''
@@ -154,7 +154,7 @@ def linear_NN(hdf5,col,param):
  
 
 
-def get_param_from_hdf5(hdf5,param,cols):
+def get_param_from_hdf5(hdf5,param,cols,all_param):
     '''searches hdf5 lib for rows of intrest. uses a binary like search'''
     query = hdf5.read_where('(%s == %f) & (%s == %f)'%(cols[0],param[0],cols[1],param[1]))
     if query:
@@ -169,7 +169,9 @@ def get_param_from_hdf5(hdf5,param,cols):
         #not match try interp
     else:
         #found nothing get nearest neightbors
-        pass
+        Nei_clas = NN(len(param)*2).fit(all_param)
+        index = Nei_clas.kneighbors(param)
+        #get spec and interp
     sub_query = [i for i in query]
     #2 param search
     if len(sub_query) == 0:

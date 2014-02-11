@@ -254,6 +254,14 @@ class CV_Fit(object):
             for i in use_col:
                 index.append(nu.where(atoms == i)[0][0])
             self._no_abn,self._abn_lst = len(use_col),nu.asarray(use_col)[nu.argsort(index)]
+            #get all param avalible
+            self.all_param = []
+            #T,logg
+            self.all_param.append(self.tab.cols.Temp[:])
+            self.all_param.append(self.tab.cols.logg[:])
+            for i in self._abn_lst:
+                self.all_param.append(eval('self.tab.cols.%s[:]'%i))
+            self.all_param = nu.vstack(self.all_param).T
         #generates spectra
         self.gen_spec_lib = gen_spec_lib
                 
