@@ -32,6 +32,7 @@
 import numpy as nu
 import tables as tab
 import os
+from interp_utils import n_dim_interp
 from sklearn.neighbors import NearestNeighbors as NN
 
 '''Pytable utils for searching and adding spectra with params to a .h5 file'''
@@ -145,15 +146,14 @@ def skiki_NN(hdf5,col,param):
     d = np.empty((rows*batches,))
     for i in range(batches):
         nbrs = NN(n_neighbors=len(col)*2, algorithm='ball_tree').fit(h5f.root.carray[i*rows:(i+1)*rows])
-        distances, indices = nbrs.kneighbors(vec)  # put in dict? 
+        distances, indices = nbrs.kneighbors(vec)  # put in dict?
+        
 def linear_NN(hdf5,col,param):
     '''same as kikik_NN but linear search'''
     d = np.empty((rows*batches,))
     for i in range(batches):
         d[i*rows:(i+1)*rows] = ((h5f.root.carray[i*rows:(i+1)*rows]-vec)**2).sum(axis=1)
  
-
-
 def get_param_from_hdf5(hdf5,param,cols,all_param):
     '''searches hdf5 lib for rows of intrest. uses a binary like search'''
     query = hdf5.read_where('(%s == %f) & (%s == %f)'%(cols[0],param[0],cols[1],param[1]))
@@ -170,35 +170,15 @@ def get_param_from_hdf5(hdf5,param,cols,all_param):
     else:
         #found nothing get nearest neightbors
         Nei_clas = NN(len(param)*2).fit(all_param)
-        index = Nei_clas.kneighbors(param)
+        index = Nei_clas.kneighbors(param)[1]
+        #get spec
+        spec = []
+        for i in index[0]:
+            spec.append(hdf5.cols.spec[i][:,1])
         #get spec and interp
-    sub_query = [i for i in query]
-    #2 param search
-    if len(sub_query) == 0:
-        #nothing returned
-        return None
-    #found something, check for more params
-    for col in range(2,len(cols)):
-        i = 0
-        while len(sub_query) > 0:
-            if not sub_query[i].table[0][cols[col]] == param[col]:
-                sub_query.pop(i)
-            else:
-                i+=1
-            if i == len(sub_query):
-                break
-
-
-    #see if any values left
-    if len(sub_query) == 0:
-        #no results found
-        return None
-    elif len(sub_query) == 1:
-        #check if spec is emptly but found values
-        return sub_query[0].table[0]['spec']
-    else:
-        print 'Warrning 2, same specra found',param
-        return sub_query[0].table[0]['spec']
+        return nu.vstack((hdf5.cols.spec[i][:,0],
+                           n_dim_interp(all_param[index],param,spec))).T
+    
     
 def pik_hdf5(pik_path, out_hdf5_path):
     '''Turns a pickle file into an hdf5 database'''

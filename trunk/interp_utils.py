@@ -33,7 +33,12 @@
 
 import numpy as nu
 #import numexpr as ne
-from scipy.interpolate import griddata
+from scipy.interpolate import griddata,LinearNDInterpolator
+import numpy as np
+import scipy.spatial.qhull as qhull
+#cimport scipy.spatial.qhull as qhull
+#cimport cython
+import warnings
 
 def bilinear_interpolation(x,y,z_temp,x_eval,y_eval):
     '''takes in x,y as a len(x)=4, z is a len(z)>4 array and x_eval and y_eval
@@ -61,5 +66,28 @@ def spectra_lin_interp(x,y,x_eval):
     #interpolates spectra with x to x_eval
     return nu.interp(x_eval, x, y)
 
-def n_dim_interp():
-    '''griddata'''
+def n_dim_interp(points, eval_points,spec):
+    '''Does n-dimensional interpolation. Needs at least 2*n points to run'''
+    assert nu.any(nu.asarray(points.shape) == len(eval_points)*2),'Needs more points to run'
+    out = griddata(points,spec,eval_points)[0]
+    return out
+
+if __name__ == '__main__':
+    import likelihood_class as lik
+    import numpy as nu
+    from database_utils import NN,get_param_from_hdf5
+
+    fun = lik.CV_fit(None)
+    param = fun.initalize(1)[0]
+    
+    Nei_clas = NN(len(param)*2).fit(fun.all_param)
+    index = Nei_clas.kneighbors(param)[1]
+    #get spec
+    spec = []
+    for i in index[0]:
+        spec.append(fun.tab.cols.spec[i][:,1])
+    #try interpolation
+    points, eval_points = all_param[index],param
+    
+    a = LinearNDInterpolator(points[0],spec)
+     

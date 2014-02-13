@@ -272,11 +272,11 @@ class CV_Fit(object):
         If rank != 0, recive current state, do trial move and start lik calc. This guy will never leave this function till the end of program
         '''
         
-        #search for spectra
+        #search for spectra and interpolate
         spec = utils.get_param_from_hdf5(self.tab,param[bins],
-                nu.hstack(('Temp','logg',self._abn_lst)))
+                nu.hstack(('Temp','logg',self._abn_lst)),self.all_param)
         #if spectra not there,
-        if spec is None:
+        if not nu.any(nu.isfinite(spec)):
             if self.gen_spec_lib:
                 #calculate it from.
                 loglik,spec = self.lik_calc(param,bins,True)
@@ -284,17 +284,15 @@ class CV_Fit(object):
                 utils.put_in_lib(self.tab,param,spec,self.lock)
                                  
             else:
-                #interpolate it
-                #get close param
-                utils.get_close_param_hdf5
-                #interpolate it
-
-                #calculate loglik
-                
+               #out of bounds or not going to interp
+               return -nu.inf
+        else:
+            #calculate liklihood
+            loglik = stats_dist.norm.logpdf(spec[:,1],self.data[:,1]).sum()
         if not return_spec:
             return loglik
         else:
-            return loglik,model
+            return loglik, spec
        
     def lik_calc(self,param, bins, return_spec=False,gen_spec_only=False):
         '''(Example_lik_class, ndarray) -> float
