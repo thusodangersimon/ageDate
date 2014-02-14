@@ -175,9 +175,10 @@ def get_param_from_hdf5(hdf5,param,cols,all_param):
         spec = []
         for i in index[0]:
             spec.append(hdf5.cols.spec[i][:,1])
+        spec = nu.asarray(spec)
         #get spec and interp
         return nu.vstack((hdf5.cols.spec[i][:,0],
-                           n_dim_interp(all_param[index],param,spec))).T
+                           n_dim_interp(all_param[index][0],param,spec))).T
     
     
 def pik_hdf5(pik_path, out_hdf5_path):
