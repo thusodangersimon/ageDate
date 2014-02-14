@@ -33,11 +33,9 @@
 
 import numpy as nu
 #import numexpr as ne
-from scipy.interpolate import griddata,LinearNDInterpolator
+from scipy.interpolate import griddata
 import numpy as np
 import scipy.spatial.qhull as qhull
-#cimport scipy.spatial.qhull as qhull
-#cimport cython
 import warnings
 
 def bilinear_interpolation(x,y,z_temp,x_eval,y_eval):
@@ -69,8 +67,16 @@ def spectra_lin_interp(x,y,x_eval):
 def n_dim_interp(points, eval_points,spec):
     '''Does n-dimensional interpolation. Needs at least 2*n points to run'''
     assert nu.any(nu.asarray(points.shape) == len(eval_points)*2),'Needs more points to run'
-    out = griddata(points,spec,eval_points)[0]
-    return out
+    #check indexing
+    if len(points.shape) == 3:
+        points = points[0]
+    if len(eval_points.shape) == 1:
+        eval_points = nu.asarray([eval_points])
+    try:
+        out = griddata(points,spec,eval_points)[0]
+        return out
+    except: #qhullerror
+        return spec[0] * nu.nan
 
 if __name__ == '__main__':
     import likelihood_class as lik

@@ -157,7 +157,10 @@ class CV_Fit(object):
         '''If pool is activated, needs to be run in mpi. Head worker
         will do RJMCMC and working will make likelihoods.'''
         self.data = data
+        #make hdf5 thread safe
+        self.lock = multi.RLock()
         try:
+            self.lock.acquire()
             self.lib = tab.open_file(lib_path,'r+')
             self.tab = self.lib.root.param
             #make index if not aready done
@@ -176,7 +179,10 @@ class CV_Fit(object):
             #no cv lib
             if not gen_spec_lib:
                 raise("No hdf5 library and Not making new spectra. Program can't run!")
+        #release hdf5 lock
+        self.lock.release()
         if gen_spec_lib:
+            self.gen_spec_only = False
             #use created library, but creat new spectra when none avalible
             #move to working dir
             os.chdir(spec_path)
@@ -254,14 +260,14 @@ class CV_Fit(object):
             for i in use_col:
                 index.append(nu.where(atoms == i)[0][0])
             self._no_abn,self._abn_lst = len(use_col),nu.asarray(use_col)[nu.argsort(index)]
-            #get all param avalible
-            self.all_param = []
-            #T,logg
-            self.all_param.append(self.tab.cols.Temp[:])
-            self.all_param.append(self.tab.cols.logg[:])
-            for i in self._abn_lst:
-                self.all_param.append(eval('self.tab.cols.%s[:]'%i))
-            self.all_param = nu.vstack(self.all_param).T
+        #get all param avalible
+        self.all_param = []
+        #T,logg
+        self.all_param.append(self.tab.cols.Temp[:])
+        self.all_param.append(self.tab.cols.logg[:])
+        for i in self._abn_lst:
+            self.all_param.append(eval('self.tab.cols.%s[:]'%i))
+        self.all_param = nu.vstack(self.all_param).T
         #generates spectra
         self.gen_spec_lib = gen_spec_lib
                 
@@ -275,17 +281,20 @@ class CV_Fit(object):
         #search for spectra and interpolate
         spec = utils.get_param_from_hdf5(self.tab,param[bins],
                 nu.hstack(('Temp','logg',self._abn_lst)),self.all_param)
+        print spec
         #if spectra not there,
-        if not nu.any(nu.isfinite(spec)):
+        if  type(spec) is list or not nu.all(nu.isfinite(spec)):
             if self.gen_spec_lib:
                 #calculate it from.
-                loglik,spec = self.lik_calc(param,bins,True)
-                #save spec
-                utils.put_in_lib(self.tab,param,spec,self.lock)
-                                 
+                loglik,spec = self.lik_calc(param,bins,True,self.gen_spec_only)
+                #check spectra
+                #print spec
+                if not type(spec) is list:
+                    #save spec
+                    utils.put_in_lib(self.tab,param[bins],self._abn_lst, spec,self.lock)
             else:
                #out of bounds or not going to interp
-               return -nu.inf
+               loglik = -nu.inf
         else:
             #calculate liklihood
             loglik = stats_dist.norm.logpdf(spec[:,1],self.data[:,1]).sum()
@@ -364,7 +373,7 @@ class CV_Fit(object):
             #clean up model
             subprocess.call(['rm %i.spec'%os.getpid()],shell=True)
             if gen_spec_only:
-                return model
+                return -nu.inf, model
         except IOError:
             if return_spec:
                 return -nu.inf,[]

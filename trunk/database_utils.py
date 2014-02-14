@@ -131,15 +131,24 @@ def creat_lib(param,spec,abn_list,lib_path):
     if type(lib_path) is str:
         return lib
 
-def put_in_lib(tab,param,spec,lock):
+def put_in_lib(tab, param, abn_list, spec, lock):
     '''Puts parametrs into hdf5 lib. Checks if spectrum is there if not puts
     holder in place.
     wait's till lock is true before writes table'''
-    pass
-
-def get_close_param_hdf5():
-    '''Retreves n*2 closest spectra from param'''
-    pass
+    lock.acquire()
+    row = tab.row
+    for i in xrange(len(param)):
+        if i == 0:
+            row['Temp'] = param[i]
+        elif i == 1:
+            row['logg'] = param[i]
+        else:
+            #elements
+            row[abn_list[i-2]] = param[i]
+    row['spec'] = spec
+    row.append()
+    tab.flush()
+    lock.release()
 
 def skiki_NN(hdf5,col,param):
     '''Looks for with skit learn function the len(col)*2 nearest neighbors in an hdf5 database'''
@@ -177,6 +186,7 @@ def get_param_from_hdf5(hdf5,param,cols,all_param):
             spec.append(hdf5.cols.spec[i][:,1])
         spec = nu.asarray(spec)
         #get spec and interp
+        print 'interpolating'
         return nu.vstack((hdf5.cols.spec[i][:,0],
                            n_dim_interp(all_param[index][0],param,spec))).T
     
