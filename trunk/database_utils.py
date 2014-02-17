@@ -166,7 +166,7 @@ def linear_NN(hdf5,col,param):
 def get_param_from_hdf5(hdf5,param,cols,all_param):
     '''searches hdf5 lib for rows of intrest. uses a binary like search'''
     query = hdf5.read_where('(%s == %f) & (%s == %f)'%(cols[0],param[0],cols[1],param[1]))
-    if query:
+    if len(query) > 0:
         #found something check other params
         for i in query:
             for j,col in enumerate(cols):
@@ -189,6 +189,7 @@ def get_param_from_hdf5(hdf5,param,cols,all_param):
         print 'interpolating'
         return nu.vstack((hdf5.cols.spec[i][:,0],
                            n_dim_interp(all_param[index][0],param,spec))).T
+    return []
     
     
 def pik_hdf5(pik_path, out_hdf5_path):
