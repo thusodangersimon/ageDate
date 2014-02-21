@@ -154,7 +154,7 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
     else:
         #load failed params
         (fun.data,active_param,sigma,param,chi,bins,Nacept,Nreject,acept_rate,out_sigma,
-                    option.current,T_cuurent,j,j_timeleft,fun._multi_block,T_start,T_stop,
+                    option.current,T_cuurent,j,j_timeleft,T_start,T_stop,
                     trans_moves) = pik.load(open(reover_file[0]))
 
     while option.iter_stop:
@@ -180,8 +180,8 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
             else:
                 a = -nu.inf
             #put temperature on order of chi calue
-            if T_start < chi[str(bins)][-1]:
-                T_start = chi[str(bins)][-1]+0
+            if T_start < chi[bins][-1]:
+                T_start = chi[bins][-1]+0
             #metropolis hastings
             if nu.exp(a) > nu.random.rand():
                 #acepted
@@ -249,13 +249,13 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
         #########################################change temperature
         T_cuurent[bins] += 1
         ###################bad performance notifier
-        if  (acept_rate[bins][-1] < .15
+        '''if  (acept_rate[bins][-1] < .15
                                  and T_cuurent[bins] > burnin):
             if not fun._multi_block:
                 print "acceptance is bad starting multi-block"
                 fun._multi_block = True
                 Nacept[bins] , Nreject[bins] = 1., 1.
-                #T_cuurent[bins] = burnin + 4000
+                #T_cuurent[bins] = burnin + 4000'''
         ################turn off burnin after 40% percent of total iterations
         if option.current == int(max_iter*.4):
             for i in T_cuurent.keys():
@@ -273,11 +273,11 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
         if option.current % 500 == 0:
             try:
                 os.popen('mv failed_%i.pik failed_%i.pik.bak'%(os.getpid(),os.getpid()))
-                pik.dump((fun.data,active_param,sigma,param,chi,bins,Nacept,Nreject,acept_rate,out_sigma,option.current,T_cuurent,j,j_timeleft,fun._multi_block,T_start,T_stop,trans_moves),open('failed_%i.pik'%(os.getpid()),'w'),2)
+                pik.dump((fun.data,active_param,sigma,param,chi,bins,Nacept,Nreject,acept_rate,out_sigma,option.current,T_cuurent,j,j_timeleft,T_start,T_stop,trans_moves),open('failed_%i.pik'%(os.getpid()),'w'),2)
                 os.popen('rm failed_%i.pik.bak'%os.getpid())
             except OSError:
                 print 'Warning: Running out of memory. May crash soon'
-                pik.dump((fun.data,active_param,sigma,param,chi,bins,Nacept,Nreject,acept_rate,out_sigma,option.current,T_cuurent,j,j_timeleft,fun._multi_block,T_start,T_stop,trans_moves),open('failed_%i.pik'%(os.getpid()),'w'),2)
+                pik.dump((fun.data,active_param,sigma,param,chi,bins,Nacept,Nreject,acept_rate,out_sigma,option.current,T_cuurent,j,j_timeleft,T_start,T_stop,trans_moves),open('failed_%i.pik'%(os.getpid()),'w'),2)
         #t_house[-1]-=Time.time()
         #t_comm.append(Time.time())
         #t_comm[-1]-=Time.time()
