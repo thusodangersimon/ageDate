@@ -66,14 +66,19 @@ def spectra_lin_interp(x,y,x_eval):
 
 def n_dim_interp(points, eval_points,spec):
     '''Does n-dimensional interpolation. Needs at least 2*n points to run'''
-    assert nu.any(nu.asarray(points.shape) == len(eval_points)*2),'Needs more points to run'
+    assert nu.any(nu.asarray(points.shape[0]) >= len(eval_points)*2),'Needs more points to run'
     #check indexing
     if len(points.shape) == 3:
         points = points[0]
     if len(eval_points.shape) == 1:
         eval_points = nu.asarray([eval_points])
+    #check if dimension is all the same, don't use if so else give qhull error
+    index = []
+    for i in xrange(points.shape[1]):
+        if not nu.all(points[:,i] == points[0,i]):
+            index.append(i)
     try:
-        out = griddata(points,spec,eval_points)[0]
+        out = griddata(points[:,index],spec,eval_points[:,index],method='nearest')[0]
         return out
     except: #qhullerror
         return spec[0] * nu.nan

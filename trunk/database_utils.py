@@ -165,30 +165,32 @@ def linear_NN(hdf5,col,param):
  
 def get_param_from_hdf5(hdf5,param,cols,all_param):
     '''searches hdf5 lib for rows of intrest. uses a binary like search'''
+    go_on = False
     query = hdf5.read_where('(%s == %f) & (%s == %f)'%(cols[0],param[0],cols[1],param[1]))
     if len(query) > 0:
         #found something check other params
         for i in query:
             for j,col in enumerate(cols):
                 if not i[col] == param[j]:
+                    go_on = True
                     break
             else:
                 #match!
                 return i['spec']
-        #not match try interp
-    else:
+    #not match try interp
+    if len(query) == 0 or go_on:
         #found nothing get nearest neightbors
         Nei_clas = NN(len(param)*2).fit(all_param)
-        index = Nei_clas.kneighbors(param)[1]
+        index = nu.ravel(Nei_clas.kneighbors(param)[1])
         #get spec
         spec = []
-        for i in index[0]:
+        for i in index:
             spec.append(hdf5.cols.spec[i][:,1])
         spec = nu.asarray(spec)
         #get spec and interp
         print 'interpolating'
         return nu.vstack((hdf5.cols.spec[i][:,0],
-                           n_dim_interp(all_param[index][0],param,spec))).T
+                           n_dim_interp(all_param[index],param,spec))).T
     return []
     
     

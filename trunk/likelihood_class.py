@@ -42,6 +42,7 @@ from scipy.cluster.hierarchy import fcluster,linkage
 import os, sys, subprocess
 from time import time
 import MC_utils as MC
+import pdb
 #hdf5 handling stuff
 import database_utils  as  utils
 try:
@@ -196,6 +197,13 @@ class CV_Fit(object):
             #make dir so no io errors
             if not os.path.exists('temp/%i'%pid):
                 os.mkdir('temp/%i'%pid)
+            #make error dir
+            if not os.path.exists('temp/%i/TlError'%pid):
+                 os.mkdir('temp/%i/TlError'%pid)
+            if not os.path.exists('temp/%i/SynError'%pid):
+                 os.mkdir('temp/%i/SynError'%pid)
+            #set error counter
+            self._count = 0
             #change name of output in first line
             os.popen('cp '+convolution_path + ' temp/%i/%i.dat'%(pid,pid))
             dat = open('temp/%i/%i.dat'%(pid,pid),'rw+')
@@ -281,7 +289,7 @@ class CV_Fit(object):
         #search for spectra and interpolate
         spec = utils.get_param_from_hdf5(self.tab,param[bins],
                 nu.hstack(('Temp','logg',self._abn_lst)),self.all_param)
-        print spec
+        
         #if spectra not there,
         if  type(spec) is list or not nu.all(nu.isfinite(spec)):
             if self.gen_spec_lib:
@@ -297,6 +305,9 @@ class CV_Fit(object):
                loglik = -nu.inf
         else:
             #calculate liklihood
+            if self.data is None and self.gen_spec_only:
+                #not calculating liklihood so return
+                return spec
             loglik = stats_dist.norm.logpdf(spec[:,1],self.data[:,1]).sum()
         if not return_spec:
             return loglik
@@ -347,15 +358,24 @@ class CV_Fit(object):
         #call Tl for temp file
         pid = os.getpid()
         out = subprocess.call(['./Tl temp/%i/'%pid+ self.conf_file_name[:-2]],shell=True)
+       
         #check if ran successfully
         if out != 0:
+            #copy error
+            subprocess.call(['cp temp/%i/%i.{5,6} temp/%i/TlError/%i.{5,6}'%(pid,pid,pid,self._count)],shell=True)
+            self._count += 1
+           
             if return_spec:
                 return -nu.inf,[]
             else:
                 return -nu.inf
-        #call synspec
+        #call synspecn
         out = subprocess.call(['./Syn temp/%i/'%pid+ self.conf_file_name[:-2]],shell=True)
+        
         if out != 0:
+            #copy error
+            subprocess.call(['cp temp/%i/%i.{5,6} temp/%i/SynError/%i.{5,6}'%(pid,pid,pid,self._count)],shell=True)
+            self._count += 1
             if return_spec:
                 return -nu.inf,[]
             else:
