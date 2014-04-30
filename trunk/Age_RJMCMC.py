@@ -242,9 +242,9 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
         
         ###########step stuff
         #change step size
-        if T_cuurent[bins] < burnin + 5000 or acept_rate[bins][-1]<.11:
+        #if T_cuurent[bins] < burnin + 5000 or acept_rate[bins][-1]<.11:
             #only tune step if in burn-in
-            sigma[bins] =  fun.step_func(acept_rate[bins][-1] ,param[bins], sigma, bins)
+        sigma[bins] =  fun.step_func(acept_rate[bins][-1] ,param[bins], sigma, bins)
 
         #########################################change temperature
         T_cuurent[bins] += 1
@@ -268,7 +268,7 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
         j+=1
         option.current += 1
         acept_rate[bins].append(nu.copy(Nacept[bins]/(Nacept[bins]+Nreject[bins])))
-        #out_sigma[bins].append(sigma[bins][:])
+        out_sigma[bins].append(sigma[bins][:])
         #save current state incase of crash
         if option.current % 500 == 0:
             try:
@@ -296,7 +296,7 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
     #remove incase of crash file
     os.popen('rm failed_%i.pik'%(os.getpid()))
 		#pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm,param,chi),open('time_%i.pik'%option.rank_world,'w'),2)
-    return param, chi, acept_rate #, out_sigma, param.keys()
+    return param, chi, acept_rate , out_sigma #, param.keys()
 
 def SA(i,i_fin,T_start,T_stop):
     #temperature parameter for Simulated anneling (SA). 
