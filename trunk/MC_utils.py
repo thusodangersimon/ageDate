@@ -86,6 +86,8 @@ def cov_sort(self, param, k):
         self._loc = loc
         return loc'''
         return clusters
+
+    
 #######Samplelers########
 def swarm_func(param,dust_param,chi,parambest,chibest,bins):
     #pushes current chain towards global best fit with streangth
@@ -486,6 +488,14 @@ def ess(t):
     #return max
     return nu.nanmax(temp_ess)
 
+#####SIMULATED ANNEELING#####
+def SA(i,i_fin,T_start,T_stop):
+    '''temperature parameter for Simulated anneling (SA). 
+    reduices false acceptance rate if a<60% as a function on acceptance rate'''
+    if i > i_fin:
+        return 1.0
+    else:
+        return (T_stop - T_start) / float(i_fin) * i + T_start
 #####MISC####################
 def issorted(l):
     '''(list or ndarray) -> bool

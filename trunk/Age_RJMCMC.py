@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 #
 # Name: reverse jump monte carlo
 #
@@ -297,14 +297,7 @@ def RJMC_main(fun, option, burnin=5*10**3, birth_rate=0.5,max_iter=10**5, seed=N
     os.popen('rm failed_%i.pik'%(os.getpid()))
 		#pik.dump((t_pro,t_swarm,t_lik,t_accept,t_step,t_unsitc,t_birth,t_house,t_comm,param,chi),open('time_%i.pik'%option.rank_world,'w'),2)
     return param, chi, acept_rate , out_sigma #, param.keys()
-
-def SA(i,i_fin,T_start,T_stop):
-    #temperature parameter for Simulated anneling (SA). 
-    #reduices false acceptance rate if a<60% as a function on acceptance rate
-    if i>i_fin:
-        return 1.0
-    else:
-        return (T_stop-T_start)/float(i_fin)*i+T_start
+    
 
 def random_permute(seed):
     #does random sequences to produice a random seed for parallel programs
