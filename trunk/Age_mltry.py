@@ -5,7 +5,7 @@
 # Author: Thuso S Simon
 #
 # Date: 29th of June, 2012
-#TODO:  
+# TODO:  
 #    
 #
 #    vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
@@ -23,31 +23,30 @@
 #
 #    For the GNU General Public License, see <http://www.gnu.org/licenses/>.
 #    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-#History (version,date, change author)
+# History (version,date, change author)
 # More general version of RJMCMC, allows multiple objects to be fitted 
 # independetly or hierarically. Also fits single objects and splits into 
 # multiple independent componets via coverance matrix
 
 import numpy as nu
-import sys,os
+import sys
+import os
 import time as Time
 import cPickle as pik
 import MC_utils as MC
 # import acor
 # from memory_profiler import profile
 from glob import glob
-
-a=nu.seterr(all='ignore')
-
+a = nu.seterr(all='ignore')
 
 
 def multi_main(fun, option, burnin=5*10**3, birth_rate=0.5, max_iter=10**5,
-                seed=None, fail_recover=False):
+            seed=None, fail_recover=False):
     '''Main multi RJMCMC program'''
-    #see if to use specific seed
+    # see if to use specific seed
     if seed is not None:
         nu.random.seed(seed)
-    #initalize paramerts/class for use by program
+    # initalize paramerts/class for use by program
     Param = param(fun, burnin)
     if fail_recover:
         # fail recovery
@@ -56,9 +55,8 @@ def multi_main(fun, option, burnin=5*10**3, birth_rate=0.5, max_iter=10**5,
         # initalize and check if param are in range
         timeInit = Time.time()
         while Param.initalize(fun):
-            if Time.time()- timeInit > 60.:
+            if Time.time() - timeInit > 60.:
                 raise MCMCError('Bad Starting position, check params')
-    
     # Start RJMCMC
     while option.iter_stop:
         bins = Param.bins
@@ -68,9 +66,10 @@ def multi_main(fun, option, burnin=5*10**3, birth_rate=0.5, max_iter=10**5,
                       option.current,Param.eff))
             print show
             sys.stdout.flush()
-        #stay, try or jump
+        # stay, try or jump
         doStayTryJump =  nu.random.rand()
-        if doStayTryJump <= .3:
+        stay(Param, fun)
+        '''if doStayTryJump <= .3:
             # Stay
             stay(Param, fun)
         elif doStayTryJump > .3 and doStayTryJump < .6:
@@ -79,11 +78,11 @@ def multi_main(fun, option, burnin=5*10**3, birth_rate=0.5, max_iter=10**5,
         else:
             # Jump
             pass
-            #jump(Param, fun, birth_rate)
+            # jump(Param, fun, birth_rate)'''
         # Change Step size
-        Param.sigma[bins] = Param.step(fun, option.current, 500)
+        Param.step(fun, option.current, 500)
         # Change parameter grouping
-        #reconfigure(Param)
+        # reconfigure(Param)
         # Change temperature
         # Convergence assement
         # Save currnent Chain state
@@ -97,29 +96,29 @@ def multi_main(fun, option, burnin=5*10**3, birth_rate=0.5, max_iter=10**5,
 def stay(Param, fun):
     '''Does stay step for RJMCMC'''
     bins = Param.bins
-    #sample from distiburtion
-    Param.active_param[bins] = fun.proposal(Param.active_param[bins],
-                                            Param.sigma[bins])
-    #calculate new model and chi
+    # sample from distiburtion
+    Param.proposal(fun)
+    # calculate new model and chi
     Param.chi[bins].append(0.)
     Param.chi[bins][-1] = fun.prior(Param.active_param, bins)
     if nu.isfinite(Param.chi[bins][-1]):
         Param.chi[bins][-1] =+ fun.lik(Param.active_param, bins)
     else:
-        #reject
+        # reject
         Param.reject()
-    #put temperature on order of chi calue
+        return
+    # put temperature on order of chi calue
     if Param.T_start < Param.chi[bins][-1]:
         Param.T_start = Param.chi[bins][-1]+0
-    #metropolis hastings
+    # metropolis hastings
     if mh_critera(Param.chi[bins][-2], Param.chi[bins][-1],
                MC.SA(Param.T_cuurent[bins], Param.burnin, abs(Param.T_start),
                      Param.T_stop)):
-        #accept
+        # accept
         Param.accept()
         
     else:
-        #reject
+        # reject
         Param.reject()
 
         
@@ -128,48 +127,49 @@ def jump(Param, fun, birth_rate):
     bins = Param.bins
     Param.active_param, temp_bins, attempt, critera = fun.birth_death(
         birth_rate, bins, Param.active_param)
-    #if attempt:
-    #check if accept move
+    # if attempt:
+    # check if accept move
     tchi = fun.prior(Param.active_param, temp_bins)
     if nu.isfinite(tchi):
         tchi += fun.lik(Param.active_param, temp_bins)
-        #likelihoods
+        # likelihoods
         rj_a = (tchi - Param.chi[bins][-1])
-        #model priors
+        # model prior
         rj_a += (fun.model_prior(temp_bins) - fun.model_prior(Param.bins))
         Param.trans_moves += 1
-        #simulated aneeling 
-        rj_a /= MC.SA(Param.trans_moves, 50, abs(Param.chi[bins][-1]),Param.T_stop)
-        #RJ-MH critera
+        # simulated aneeling 
+        rj_a /= MC.SA(Param.trans_moves, 50, abs(Param.chi[bins][-1]),
+                      Param.T_stop)
+        # RJ-MH critera
     else:
-        rj_a, critera = -nu.inf ,1.   #print active_param[temp_bins]
+        rj_a, critera = -nu.inf, 1.  
         
     if nu.exp(rj_a) * critera > nu.random.rand():
-        #accept move
+        # accept move
         Param.accept(temp_bins)
         bins = Param.bins
-        #bins = temp_bins
+        # bins = temp_bins
         Param.chi[bins].append(tchi + 0)
-        #allow for quick tuneing of sigma
+        # allow for quick tuneing of sigma
         if Param.T_cuurent[bins] > Param.burnin + 5000:
             Param.T_cuurent[bins] = Param.burnin + 4800
             Param.Nacept[bins] , Param.Nreject[bins] = 1., 1.
     else:
-        #rejected
+        # rejected
         Param.reject()
 
         
 def mh_critera(chi_old, chi_new, sa=1.):
     '''Does Metropolis-Hastings criera, with simulated anneling'''
-        
+    sa = 1. 
     a = (chi_new - chi_old)/(2.*sa)
     if not nu.isfinite(a):
         return False
     if nu.exp(a) > nu.random.rand():
-        #acepted
+        # acepted
         return True
     else:
-        #rejected
+        # rejected
         return False
     
 class param(object):
@@ -184,16 +184,17 @@ class param(object):
         self.param, self.chi = {}, {}
         self.Nacept, self.Nreject = {},{}
         self.acept_rate, self.out_sigma = {},{}
-        self.bayes_fact = {} #to calculate bayes factor
-        #simulated anneling param
+        # to calculate bayes factor
+        self.bayes_fact = {}
+        # simulated anneling param
         self.T_cuurent = {}
         self.Nexchange_ratio = 1.0
         self.size, self.a = 0,0
         self.time, self.timeleft = 1, nu.random.exponential(100)
         self.T_stop =  1.
         self.trans_moves = 0
-        #bayes_fact[bins] = #something
-        #set storage functions
+        # bayes_fact[bins] = #something
+        # set storage functions
 
     def initalize(self, lik_fun):
         '''Initalize certan parms'''
@@ -229,25 +230,28 @@ class param(object):
         bins = self.bins
         #select params
         params = self.active_param[bins]
-        params[self.on[bins]] = fun.proposal(params[self.on[bins]],
-                                             self.sigma[bins][self.on[bins]])
+        params[self.on[bins]] = fun.proposal({0:params[self.on[bins]]},
+                                             self.sigma[bins][self.on[bins]])[0]
         
-        #get sigma values and make matrix
+        # get sigma values and make matrix
 
-        #do proposal
-        fun.proposal(Param.active_param[bins], Param.sigma[bins])
-        #set next on
-
+        # do proposal
+        
+        # set next on
+        self.on[self.bins] += 1
+        if not self.on[self.bins] in self.on_dict[self.bins]:
+            # go to min value
+            self.on[self.bins] = min(self.on_dict[self.bins])
         
     def accept(self,bins=None):
         '''Accepts current state of chain, active_param get saved in param
         if bin is different then model is changed'''
         if bins is None:
-            #no trans dimensional change
+            # no trans dimensional change
             self.param[self.bins].append(self.active_param[self.bins].copy())
             self.Nacept[self.bins] += 1
         else:
-            #see if model has be created before
+            # see if model has be created before
             if not bins in self.chi:
                 self.chi[bins], self.param[bins] = [] ,[] 
                 self.T_cuurent[bins] = 0
@@ -267,15 +271,16 @@ class param(object):
         self.chi[self.bins][-1] = nu.copy(self.chi[self.bins][-2])
         self.Nreject[self.bins] += 1
         self.cal_accept()
-
+        
     def step(self, fun, num_iter,step_freq=500.):
         '''check if time to change step size'''
         bins = self.bins
         if num_iter % step_freq == 0:
-            return fun.step_func(self.acept_rate[bins][-1], self.param[bins],
-                                  self.sigma, bins)
-        else:
-            return self.sigma[bins]
+            for sigma in self.sigma[self.bins]:
+                self.sigma[self.bins][sigma] = fun.step_func(self.acept_rate[bins][-1],
+                                                             self.param[bins],
+                                                             self.sigma[self.bins],
+                                                             sigma)
         
     def cal_accept(self):
         '''Calculates accepance rate'''
@@ -286,15 +291,15 @@ class param(object):
 
     def reconfigure(self, param_max):
         '''Changes grouping or something'''
-        #each param is different
+        # each param is different
         self.on[self.bins] = self.active_param[self.bins].keys()[0]
         self.on_dict[self.bins] = range(self.bins)
-        #make new step size
-        self.sigma[bins] = {}
+        # make new step size
+        self.sigma[self.bins] = {}
         for i in self.on_dict[self.bins]:
-            self.sigma[bins][i] = nu.eye(len(self.active_param[bins][
-                self.on[bins]]))
-        #group on correlation
+            self.sigma[self.bins][i] = nu.eye(len(self.active_param[self.bins][
+                self.on[self.bins]]))
+        # group on correlation
 
 
     def plot_param(self):
@@ -302,13 +307,16 @@ class param(object):
         import pylab as lab
         data = {}
         for i in self.param.keys():
-            #M,E,b,m_i
+            # M, E, b, m_i
             out = []
             for j in self.param[i]:
-                out.append(j[0])
-            lab.hist(nu.asarray(out)[:,3],200)
+                t = []
+                for k in j:
+                    t.append(j[k][-2:])
+                out.append(nu.ravel(t))
+            lab.plot(nu.asarray(out))
             lab.show()
-
+    
             
 class MCMCError(Exception):
     def __init__(self, value):
