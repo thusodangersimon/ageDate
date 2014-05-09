@@ -488,6 +488,60 @@ def ess(t):
     #return max
     return nu.nanmax(temp_ess)
 
+
+def effectiveSampleSize(data, stepSize = 1) :
+  """ Effective sample size, as computed by BEAST Tracer."""
+  samples = len(data)
+
+  assert len(data) > 1,"no stats for short sequences"
+  
+  maxLag = min(samples // 3, 1000)
+
+  gammaStat = [0,] * maxLag
+  #varGammaStat = [0,]*maxLag
+
+  varStat = 0.0
+
+  if isinstance(data[0], dict):
+    data = list_dict_to(data,data[0].keys())
+    data = nu.array(data)[:,-1]
+
+  normalizedData = data - data.mean()
+  
+  for lag in xrange(maxLag) :
+    v1 = normalizedData[:samples-lag]
+    v2 = normalizedData[lag:]
+    v = v1 * v2
+    gammaStat[lag] = nu.sum(v) / len(v)
+    #varGammaStat[lag] = nu.sum(v*v) / len(v)
+    #varGammaStat[lag] -= gammaStat[0] ** 2
+
+    #print lag, gammaStat[lag], varGammaStat[lag]
+    
+    if lag == 0 :
+      varStat = gammaStat[0]
+    elif lag % 2 == 0 :
+      s = gammaStat[lag-1] + gammaStat[lag]
+      if s > 0:
+        varStat += 2.0*s
+      else:
+        break
+      '''
+      varStat[s > 0] += 2.0 * s[s > 0]
+      if not nu.any(s[s > 0]):
+        break'''
+      
+  # standard error of mean
+  #stdErrorOfMean = nu.sqrt(varStat/samples);
+
+  # auto correlation time
+  act = stepSize * varStat / gammaStat[0]
+
+  # effective sample size
+  ess = (stepSize * samples) / act
+
+  return ess
+
 #####SIMULATED ANNEELING#####
 def SA(i,i_fin,T_start,T_stop):
     '''temperature parameter for Simulated anneling (SA). 

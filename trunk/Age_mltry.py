@@ -85,6 +85,8 @@ def multi_main(fun, option, burnin=5*10**3, birth_rate=0.5, max_iter=10**5,
         # reconfigure(Param)
         # Change temperature
         # Convergence assement
+        if option.current % 5000 == 0 and option.current > 1:
+            Param.eff = MC.effectiveSampleSize(Param.param[bins])
         # Save currnent Chain state
         option.current += 1
         if option.current >= max_iter:
