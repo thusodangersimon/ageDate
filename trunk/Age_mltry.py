@@ -34,15 +34,20 @@ import os
 import time as Time
 import cPickle as pik
 import MC_utils as MC
+import pylab as lab
 # import acor
 # from memory_profiler import profile
 from glob import glob
 a = nu.seterr(all='ignore')
 
+def _model(x, p):
+    '''makes lower model for fitting'''
+    return p[3] * x + p[2]
+
 
 def multi_main(fun, option, burnin=5*10**3, birth_rate=0.5, max_iter=10**5,
             seed=None, fail_recover=False):
-    '''Main multi RJMCMC program'''
+    '''Main multi RJMCMC program. Like gibbs sampler but for RJMCMC'''
     # see if to use specific seed
     if seed is not None:
         nu.random.seed(seed)
@@ -60,11 +65,15 @@ def multi_main(fun, option, burnin=5*10**3, birth_rate=0.5, max_iter=10**5,
     # Start RJMCMC
     while option.iter_stop:
         bins = Param.bins
-        if Param.T_cuurent[bins] % 501 == 0:
+        if option.current% 501 == 0:
             show = ('acpt = %.2f,log lik = %e, bins = %s, steps = %i,ESS = %2.0f'
                     %(Param.acept_rate[bins][-1],Param.chi[bins][-1],bins,
                       option.current,Param.eff))
             print show
+            #lab.plot(fun.data[0][:,0],fun.data[0][:,1],label='Data')
+            #lab.plot(fun.data[0][:,0], _model(fun.data[0][:,0],Param.active_param[bins][0]))
+            #lab.savefig('%3d.png'%option.current)
+            #lab.close()
             sys.stdout.flush()
         # stay, try or jump
         doStayTryJump =  nu.random.rand()
@@ -86,7 +95,8 @@ def multi_main(fun, option, burnin=5*10**3, birth_rate=0.5, max_iter=10**5,
         # Change temperature
         # Convergence assement
         if option.current % 5000 == 0 and option.current > 1:
-            Param.eff = MC.effectiveSampleSize(Param.param[bins])
+            pass
+            #Param.eff = MC.effectiveSampleSize(Param.param[bins])
         # Save currnent Chain state
         option.current += 1
         if option.current >= max_iter:
@@ -99,30 +109,29 @@ def stay(Param, fun):
     '''Does stay step for RJMCMC'''
     bins = Param.bins
     # sample from distiburtion
-    Param.proposal(fun)
+    Param.active_param[bins] = fun.proposal(Param.active_param[bins], Param.sigma[bins])
     # calculate new model and chi
-    Param.chi[bins].append(0.)
-    Param.chi[bins][-1] = fun.prior(Param.active_param, bins)
-    if nu.isfinite(Param.chi[bins][-1]):
-        Param.chi[bins][-1] =+ fun.lik(Param.active_param, bins)
-    else:
-        # reject
-        Param.reject()
-        return
-    # put temperature on order of chi calue
-    if Param.T_start < Param.chi[bins][-1]:
-        Param.T_start = Param.chi[bins][-1]+0
-    # metropolis hastings
-    if mh_critera(Param.chi[bins][-2], Param.chi[bins][-1],
-               MC.SA(Param.T_cuurent[bins], Param.burnin, abs(Param.T_start),
-                     Param.T_stop)):
-        # accept
-        Param.accept()
-        
-    else:
-        # reject
-        Param.reject()
-
+    prior = fun.prior(Param.active_param, bins)
+    lik = fun.lik(Param.active_param, bins)
+    new_chi = {}
+    #calc posterior for each object
+    for Prior,index in prior:
+        new_chi[index] = Prior
+    for Lik,index in lik:
+        if nu.isfinite(new_chi[index]):
+            new_chi[index] += Lik
+    #MH critera
+    for key in new_chi.keys():
+        if mh_critera(Param.active_chi[bins][key],new_chi[key]):
+            #accept
+            Param.active_chi[bins][key] = new_chi[key] + 0.
+            Param.accept()
+        else:
+            #reject
+            Param.active_param[bins][key] = nu.copy(Param.param[bins][-1][key])
+            Param.reject()
+    Param.save_chain()
+    Param.cal_accept()
         
 def jump(Param, fun, birth_rate):
     '''Does cross model jump for RJMCM'''
@@ -183,6 +192,7 @@ class param(object):
         self.burnin = burnin
         self.on_dict, self.on = {}, {}
         self.active_param, self.sigma = {}, {}
+        self.active_chi = {}
         self.param, self.chi = {}, {}
         self.Nacept, self.Nreject = {},{}
         self.acept_rate, self.out_sigma = {},{}
@@ -205,12 +215,25 @@ class param(object):
         self.T_cuurent[self.bins] = 0
         for i in lik_fun.models.keys():
             self.active_param[i], self.sigma[i] = lik_fun.initalize_param(i)
-            self.reconfigure(i)
+            self.active_chi[i] = {}
+            #self.reconfigure(i)
         self.acept_rate[self.bins] = [1.]
         self.out_sigma[self.bins]  =  [self.sigma[self.bins][0][:]]
         # check if params are in range
-        self.chi[self.bins] = [lik_fun.lik(self.active_param, self.bins) +
-                               lik_fun.prior(self.active_param, self.bins)]
+        lik,prior = (lik_fun.lik(self.active_param, self.bins),
+                               lik_fun.prior(self.active_param, self.bins))
+        self.chi[self.bins] = [0.]
+        #get intal params lik and priors
+        for Prior in prior:
+            if not nu.isfinite(Prior[0]):
+                return True
+            self.chi[self.bins][-1] += Prior[0]
+            self.active_chi[self.bins][Prior[1]] = Prior[0]
+        for Lik in lik:
+            if not nu.isfinite(Lik[0]):
+                return True
+            self.chi[self.bins][-1] += Lik[0]
+            self.active_chi[self.bins][Lik[1]] = Lik[0]
         self.param[self.bins] = [self.active_param[self.bins].copy()]
         self.T_start = self.chi[self.bins][-1] + 0
         return not nu.isfinite(self.chi[self.bins][-1])
@@ -219,38 +242,26 @@ class param(object):
         '''Loads params from old run'''
         raise NotImplementedError
 
+    def save_chain(self):
+        '''Records current chain state'''
+        self.param[self.bins].append(self.active_param[self.bins].copy())
+        self.chi[self.bins].append(nu.sum(self.active_chi[self.bins].values()))
+
     def save_state(self, path=None):
         '''Saves current state of chain incase run crashes'''
         raise NotImplementedError
-    
+        
     def singleObjSplit(self):
         '''Checks correlation between params to see if should split'''
         raise NotImplementedError
-
-    def proposal(self, fun):
-        '''Does proposal for only on parameters or objects'''
-        bins = self.bins
-        #select params
-        params = self.active_param[bins]
-        params[self.on[bins]] = fun.proposal({0:params[self.on[bins]]},
-                                             self.sigma[bins][self.on[bins]])[0]
-        
-        # get sigma values and make matrix
-
-        # do proposal
-        
-        # set next on
-        self.on[self.bins] += 1
-        if not self.on[self.bins] in self.on_dict[self.bins]:
-            # go to min value
-            self.on[self.bins] = min(self.on_dict[self.bins])
         
     def accept(self,bins=None):
         '''Accepts current state of chain, active_param get saved in param
         if bin is different then model is changed'''
         if bins is None:
             # no trans dimensional change
-            self.param[self.bins].append(self.active_param[self.bins].copy())
+            # need to add scalling
+            #self.param[self.bins].append(self.active_param[self.bins].copy())
             self.Nacept[self.bins] += 1
         else:
             # see if model has be created before
@@ -264,25 +275,22 @@ class param(object):
             self.param[bins].append(self.active_param[bins].copy())
             self.bins = bins
 
-        self.cal_accept()
-        
     def reject(self):
         '''Rejects current state and gets data from memory'''
-        self.param[self.bins].append(self.param[self.bins][-1].copy())
-        self.active_param[self.bins] = self.param[self.bins][-1].copy()
-        self.chi[self.bins][-1] = nu.copy(self.chi[self.bins][-2])
+        #self.param[self.bins].append(self.param[self.bins][-1].copy())
+        #self.active_param[self.bins] = self.param[self.bins][-1].copy()
+        #self.chi[self.bins][-1] = nu.copy(self.chi[self.bins][-2])
         self.Nreject[self.bins] += 1
-        self.cal_accept()
+        #self.cal_accept()
         
     def step(self, fun, num_iter,step_freq=500.):
         '''check if time to change step size'''
         bins = self.bins
         if num_iter % step_freq == 0:
-            for sigma in self.sigma[self.bins]:
-                self.sigma[self.bins][sigma] = fun.step_func(self.acept_rate[bins][-1],
-                                                             self.param[bins],
-                                                             self.sigma[self.bins],
-                                                             sigma)
+            self.sigma[bins] = fun.step_func(self.acept_rate[bins][-1],
+                                            self.param[bins],
+                                            self.sigma,
+                                            bins)
         
     def cal_accept(self):
         '''Calculates accepance rate'''
