@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2.7
 
 import os,utils,re,sfhs,weight,collections,astro_filter_light
 import numpy as np

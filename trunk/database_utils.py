@@ -34,6 +34,8 @@ import tables as tab
 import os
 from interp_utils import n_dim_interp
 from sklearn.neighbors import NearestNeighbors as NN
+import sqlite3
+import io
 
 '''Pytable utils for searching and adding spectra with params to a .h5 file'''
 
@@ -240,3 +242,31 @@ if __name__ == '__main__':
     out = list(fut.map(convert,grid,**{'bins':'1','return_spect':True}))
     if rank == 0:
         pik.dump((out,grid),open('pre_hdf5.pik','w'),2)
+
+
+####sql databases
+def numpy_sql(path):
+    '''Allows for storage of numpy arrays in sql databases. Can be used
+    for opening and creating db'''
+     #Converts np.array to TEXT when inserting
+    sqlite3.register_adapter(nu.ndarray, adapt_array)
+
+    # Converts TEXT to np.array when selecting
+    sqlite3.register_converter("array", convert_array)
+    con = sqlite3.connect(path)
+    return con
+
+
+
+def adapt_array(arr):
+    out = io.BytesIO()
+    nu.save(out, arr)
+    out.seek(0)
+    # http://stackoverflow.com/a/3425465/190597 (R. Hill)
+    return buffer(out.read())
+
+
+def convert_array(text):
+    out = io.BytesIO(text)
+    out.seek(0)
+    return nu.load(out)
