@@ -248,12 +248,15 @@ if __name__ == '__main__':
 def numpy_sql(path):
     '''Allows for storage of numpy arrays in sql databases. Can be used
     for opening and creating db'''
-     #Converts np.array to TEXT when inserting
+    #Converts np.array to TEXT when inserting
     sqlite3.register_adapter(nu.ndarray, adapt_array)
 
     # Converts TEXT to np.array when selecting
     sqlite3.register_converter("array", convert_array)
+    
     con = sqlite3.connect(path)
+    # User defined functions
+    con.create_function("dist", 6,distance )
     return con
 
 
@@ -270,3 +273,38 @@ def convert_array(text):
     out = io.BytesIO(text)
     out.seek(0)
     return nu.load(out)
+
+def get_k_neighbors(k, db, param, query_dict,table_name='burst'):
+    '''Returns k nearest neighbors from query'''
+    # get distinct values in columns
+    col, index = {}, {}
+    for key in param:
+        query = db.execute("SELECT DISTINCT %s FROM %s"%(key,table_name))
+        col[key] = nu.asarray(query.fetchall()).ravel()
+        # get index of where point should be
+        index[key] = nu.searchsorted(col[key],param[key])
+    # cheek if in param range
+
+    # Get k neighbors and spectra
+    
+    for key in index:
+        pass
+
+    
+def index_to_vals(index,vals):
+    '''returns values from index and index-1?'''
+    out = {}
+    for key in vals:
+        out
+    iterT.product(*(('%i_%s'%(index[i],i),'%i_%s'%(index[i]-1,i)) for i in index))
+    iterT.product(*((index[i],index[i]-1) for i in index))
+
+def str_index_to_val(s, index):
+    pass
+def distance(x,y,z,X,Y,Z):
+    '''Redurns elucidean distance from lowercase to uppercase param'''
+    out = 0.
+    out += (X - x)**2
+    out += (Y - y)**2
+    out += (Z - z)**2
+    return out
