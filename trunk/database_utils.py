@@ -254,11 +254,10 @@ def numpy_sql(path):
     # Converts TEXT to np.array when selecting
     sqlite3.register_converter("array", convert_array)
     
-    con = sqlite3.connect(path)
+    con = sqlite3.connect(path, cached_statements=1000)
     # User defined functions
     con.create_function("dist", 6,distance )
     return con
-
 
 
 def adapt_array(arr):
@@ -273,6 +272,7 @@ def convert_array(text):
     out = io.BytesIO(text)
     out.seek(0)
     return nu.load(out)
+
 
 def get_k_neighbors(k, db, param, query_dict,table_name='burst'):
     '''Returns k nearest neighbors from query'''

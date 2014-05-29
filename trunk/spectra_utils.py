@@ -445,6 +445,7 @@ def data_match(data, model, keep_wave=False):
       for i in model.keys():
         if i == 'wave':
           continue
+        
         out[i] = rebin_spec(model['wave'], model[i], data[:,0])
         
    if keep_wave:
@@ -658,7 +659,7 @@ def LOSVD(model, param, wave_range,resolution):
     of h3 and h4
 
     model is dict of ssp with ages being the keys
-    param is a 4x1 flat array with params of losvd [log10(sigma), v (redshift), h3, h4]
+    param is a 4x1 flat array with params of losvd [log10(sigma), v , h3, h4]
     wave_range is gives edge support for convolution
     resolution is the resolution of spectra in km/s
     '''

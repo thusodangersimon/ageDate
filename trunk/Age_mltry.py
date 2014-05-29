@@ -35,6 +35,7 @@ import time as Time
 import cPickle as pik
 import MC_utils as MC
 import pylab as lab
+import ipdb
 # import acor
 # from memory_profiler import profile
 from glob import glob
@@ -122,16 +123,18 @@ def stay(Param, fun):
             new_chi[index] += Lik
     #MH critera
     for key in new_chi.keys():
+        ipdb.set_trace()
         if mh_critera(Param.active_chi[bins][key],new_chi[key]):
             #accept
             Param.active_chi[bins][key] = new_chi[key] + 0.
             Param.accept()
         else:
             #reject
-            Param.active_param[bins][key] = nu.copy(Param.param[bins][-1][key])
+            Param.active_param[bins][key] = nu.copy(Param.param[bins][key])
             Param.reject()
     Param.save_chain()
     Param.cal_accept()
+    
         
 def jump(Param, fun, birth_rate):
     '''Does cross model jump for RJMCM'''
@@ -191,11 +194,16 @@ class param(object):
         self.eff = -9999999.
         self.burnin = burnin
         self.on_dict, self.on = {}, {}
-        self.active_param, self.sigma = {}, {}
+        self.active_param, self.sigma = {} ,{}
         self.active_chi = {}
+        self.acept_rate, self.out_sigma = {},{}
+        for bins in lik_class.models:
+            self.active_param[bins], self.sigma[bins] = {}, {}
+            self.active_chi[bins] = {}
+            self.acept_rate[bins], self.out_sigma[bins] = {},{}
         self.param, self.chi = {}, {}
         self.Nacept, self.Nreject = {},{}
-        self.acept_rate, self.out_sigma = {},{}
+        
         # to calculate bayes factor
         self.bayes_fact = {}
         # simulated anneling param
@@ -210,33 +218,36 @@ class param(object):
 
     def initalize(self, lik_fun):
         '''Initalize certan parms'''
-        self.bins = nu.random.choice(lik_fun.models.keys())
-        self.Nacept[self.bins] , self.Nreject[self.bins] = 1.,1.
-        self.T_cuurent[self.bins] = 0
-        for i in lik_fun.models.keys():
-            self.active_param[i], self.sigma[i] = lik_fun.initalize_param(i)
-            self.active_chi[i] = {}
+        self.bins = lik_fun.models.keys()[0]
+        for bins in lik_fun.models:
+            # model level
+            self.Nacept[bins] , self.Nreject[bins] = 1.,1.
+            self.T_cuurent[bins] = 0
+            for gal in range(lik_fun.models[bins]):
+                self.active_param[bins][gal], self.sigma[bins][gal] = lik_fun.initalize_param(gal)
+                self.active_chi[bins][gal] = {}
+                self.out_sigma[bins][gal]  =  [self.sigma[bins][gal][:]]
             #self.reconfigure(i)
-        self.acept_rate[self.bins] = [1.]
-        self.out_sigma[self.bins]  =  [self.sigma[self.bins][0][:]]
+            self.acept_rate[bins] = [1.]
+            
         # check if params are in range
-        lik,prior = (lik_fun.lik(self.active_param, self.bins),
-                               lik_fun.prior(self.active_param, self.bins))
-        self.chi[self.bins] = [0.]
+        lik, prior = (lik_fun.lik(self.active_param, bins),
+                               lik_fun.prior(self.active_param, bins))
+        #self.chi[bins] = {}
         #get intal params lik and priors
-        for Prior in prior:
-            if not nu.isfinite(Prior[0]):
+        for Prior, gal in prior:
+            if not nu.isfinite(Prior):
                 return True
-            self.chi[self.bins][-1] += Prior[0]
-            self.active_chi[self.bins][Prior[1]] = Prior[0]
-        for Lik in lik:
-            if not nu.isfinite(Lik[0]):
+            self.chi[bins] = [Prior]
+            self.active_chi[bins][gal] = Prior
+        for Lik, gal in lik:
+            if not nu.isfinite(Lik):
                 return True
-            self.chi[self.bins][-1] += Lik[0]
-            self.active_chi[self.bins][Lik[1]] = Lik[0]
-        self.param[self.bins] = [self.active_param[self.bins].copy()]
-        self.T_start = self.chi[self.bins][-1] + 0
-        return not nu.isfinite(self.chi[self.bins][-1])
+            self.chi[bins][-1] += Lik
+            self.active_chi[bins][gal] = Lik
+        self.param[bins] = self.active_param[bins].copy()
+        self.T_start = self.chi[bins][-1] + 0
+        return not nu.isfinite(self.chi[bins][-1])
 
     def fail_recover(self, path):
         '''Loads params from old run'''

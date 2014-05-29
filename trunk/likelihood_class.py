@@ -78,7 +78,7 @@ class Example_lik_class(object):
         
         #self.models = {'name of model':[param names or other junk],'name2':nu.asarray([junk])} #initalizes models
         #self._multi_block = False
-        pass
+        raise NotImplementedError
 
 
     def proposal(self,mu,sigma):
@@ -87,20 +87,20 @@ class Example_lik_class(object):
         distribution'''
         
         #return up_dated_param 
-        pass
+        raise NotImplementedError
 
     def lik(self,param,bins):
         '''(Example_lik_class, ndarray) -> float
         Calculates likelihood for input parameters. Outuputs log-likelyhood'''
         
         #return loglik
-        pass
+        raise NotImplementedError
 
     def prior(self,param,bins):
         '''(Example_lik_class, ndarray) -> float
         Calculates log-probablity for prior'''
         #return logprior
-        pass
+        raise NotImplementedError
 
 
     def model_prior(self,model):
@@ -108,7 +108,7 @@ class Example_lik_class(object):
         Calculates log-probablity prior for models. Not used in MCMC and
         is optional in RJMCMC.'''
         #return log_model
-        pass
+        raise NotImplementedError
 
     def initalize_param(self,model):
         '''(Example_lik_class, any type) -> ndarray, ndarray
@@ -116,7 +116,7 @@ class Example_lik_class(object):
         Used to initalize all starting points for run of RJMCMC and MCMC.
         outputs starting point and starting step size'''
         #return init_param, init_step
-        pass
+        raise NotImplementedError
 
         
     def step_func(self,step_crit,param,step_size,model):
@@ -127,7 +127,7 @@ class Example_lik_class(object):
         changes step size during burn-in perior. Outputs new step size
         '''
         #return new_step
-        pass
+        raise NotImplementedError
 
     def birth_death(self,birth_rate, model, param):
         '''(Example_lik_class, float, any type, dict(ndarray)) -> 
@@ -143,12 +143,13 @@ class Example_lik_class(object):
         #for RJCMC
         #return new_param, try_model, attemp_jump, Jocobian
         #for MCMC
+        raise NotImplementedError
         return param, None, False, None
         #pass
 
 #===========================================    
 #catacysmic varible fitting
-class CV_Fit(object):
+class CV_Fit(Example_lik_class):
 
     '''Fits cv spectrum using fortran codes or spectral libray to generate model spectra.
     Runs with only MCMC'''
