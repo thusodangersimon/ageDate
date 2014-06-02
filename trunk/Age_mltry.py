@@ -35,6 +35,7 @@ import time as Time
 import cPickle as pik
 import MC_utils as MC
 import pylab as lab
+from pandas import DataFrame
 import ipdb
 # import acor
 # from memory_profiler import profile
@@ -66,8 +67,8 @@ def multi_main(fun, option, burnin=5*10**3, birth_rate=0.5, max_iter=10**5,
     # Start RJMCMC
     while option.iter_stop:
         bins = Param.bins
-        if option.current% 501 == 0:
-            show = ('acpt = %.2f,log lik = %e, bins = %s, steps = %i,ESS = %2.0f'
+        if option.current % 1 == 0:
+            show = ('acpt = %.2f,log lik = %e, model = %s, steps = %i,ESS = %2.0f'
                     %(Param.acept_rate[bins][-1],Param.chi[bins][-1],bins,
                       option.current,Param.eff))
             print show
@@ -123,14 +124,14 @@ def stay(Param, fun):
             new_chi[index] += Lik
     #MH critera
     for key in new_chi.keys():
-        ipdb.set_trace()
+        #ipdb.set_trace()
         if mh_critera(Param.active_chi[bins][key],new_chi[key]):
             #accept
             Param.active_chi[bins][key] = new_chi[key] + 0.
             Param.accept()
         else:
             #reject
-            Param.active_param[bins][key] = nu.copy(Param.param[bins][key])
+            Param.active_param[bins][key] = Param.param[bins][key].copy()
             Param.reject()
     Param.save_chain()
     Param.cal_accept()
@@ -255,7 +256,15 @@ class param(object):
 
     def save_chain(self):
         '''Records current chain state'''
-        self.param[self.bins].append(self.active_param[self.bins].copy())
+        for gal in self.active_param[self.bins]:
+            #check if active_param is a data frame object
+            if isinstance(self.active_param[self.bins][gal], DataFrame):
+                #ipdb.set_trace()
+                index = self.param[self.bins][gal].shape[0]
+                self.param[self.bins][gal].loc[index] = self.active_param[
+                    self.bins][gal].loc[0]
+            else:
+                ipdb.set_trace()
         self.chi[self.bins].append(nu.sum(self.active_chi[self.bins].values()))
 
     def save_state(self, path=None):
@@ -266,7 +275,7 @@ class param(object):
         '''Checks correlation between params to see if should split'''
         raise NotImplementedError
         
-    def accept(self,bins=None):
+    def accept(self, bins=None):
         '''Accepts current state of chain, active_param get saved in param
         if bin is different then model is changed'''
         if bins is None:
@@ -283,16 +292,13 @@ class param(object):
                 self.Nacept[bins], self.Nreject[bins] = 1., 1.
                 self.out_sigma[bins] = []
             
-            self.param[bins].append(self.active_param[bins].copy())
-            self.bins = bins
+            #self.param[bins].append(self.active_param[bins].copy())
+            #self.bins = bins
 
     def reject(self):
         '''Rejects current state and gets data from memory'''
-        #self.param[self.bins].append(self.param[self.bins][-1].copy())
-        #self.active_param[self.bins] = self.param[self.bins][-1].copy()
-        #self.chi[self.bins][-1] = nu.copy(self.chi[self.bins][-2])
         self.Nreject[self.bins] += 1
-        #self.cal_accept()
+       
         
     def step(self, fun, num_iter,step_freq=500.):
         '''check if time to change step size'''

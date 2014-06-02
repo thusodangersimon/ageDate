@@ -10,6 +10,8 @@ import spectra_utils as ag
 import MC_utils as MC
 import pandas as pd
 import ipdb
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning) 
 '''Likelyhood and functions needed for MCMC for LRGS'''
 
 class Multi_LRG_burst(lik.Example_lik_class):
@@ -18,6 +20,8 @@ class Multi_LRG_burst(lik.Example_lik_class):
                  have_losvd=False):
         self.has_dust = have_dust
         self.has_losvd = have_losvd
+        #check if data is right type
+        
         self.data = data
         self.db = util.numpy_sql(db_name)
         # Tell which models are avalible and how many galaxies to fit
@@ -42,25 +46,34 @@ class Multi_LRG_burst(lik.Example_lik_class):
         '''Checks if a point in in the param range Retuns bool'''
         if not isinstance(self._hull, Delaunay):
             self._make_hull()
-        return self._hull.find_simplex(points) >= 0
+        return self._hull.find_simplex(point) >= 0
         
     def lik(self, param, bins):
         '''Calculates log likelyhood for burst model'''
         for gal in param[bins]:
-        # get interp spectra
-            spec = tri_lin_interp(self.db, param[bins][gal][['tau','age','metalicity']], self.param_range)
-            model = {'wave':spec[:,0],0:spec[:,1]}
+            # get interp spectra
+            #check if points are in range
+            columns = ['tau', 'age', 'metalicity']
+            if self.is_in_hull(param[bins][gal][columns]):
+                spec = tri_lin_interp(self.db,
+                    param[bins][gal][columns], self.param_range)
+            else:
+                yield -nu.inf, gal
+                continue
+            model = {'wave':spec[:,0], 0:spec[:,1]}
             # Dust
             if self.has_dust:
-                model =ag.dust(param[bins][gal][['$T_{bc}$','$T_{ism}$']].iloc[0], model)
+                columns = ['$T_{bc}$','$T_{ism}$']
+                model = ag.dust(param[bins][gal][columns].iloc[0],
+                                model)
         
             # LOSVD
             if self.has_losvd:
                 # wave range for convolution
                 wave_range = [self.data[:,0].min(),self.data[:,0].max()]
                 # check if resolution has been calculated
-            
-                send_param =param[bins][gal][['$\\sigma$','$V$','$h_3$','$h_4$']].iloc[0]
+                columns = ['$\\sigma$','$V$','$h_3$','$h_4$']
+                send_param = param[bins][gal][columns].iloc[0]
                 model = ag.LOSVD(model, send_param,
                                    wave_range, self.resolu)
             #match data wavelengths with model
@@ -69,13 +82,13 @@ class Multi_LRG_burst(lik.Example_lik_class):
             if self.data.shape[1] >= 3:
                 # Has Uncertanty
                 out_lik = stats_dist.norm.logpdf(
-                self.data[:,1],model[0],self.data[:,2])
+                self.data[:,1], model[0], self.data[:,2])
             else:
                 #no uncertanty or bad entry
                 out_lik = stats_dist.norm.logpdf(
-                    self.data[:,1],model[0])
+                    self.data[:,1], model[0])
 
-            yield out_lik.sum(),0
+            yield out_lik.sum(), gal
 
     def step_func(self, step_crit, param, step_size, model):
         '''(Example_lik_class, float, ndarray or list, ndarray, any type) ->
@@ -84,17 +97,19 @@ class Multi_LRG_burst(lik.Example_lik_class):
         Evaluates step_criteria, with help of param and model and 
         changes step size during burn-in perior. Outputs new step size
         '''
-        if step_crit > .60 and nu.all(step_size[model].diagonal() < 10.):
-            step_size[model] *= 1.05
-        elif step_crit < .2 and nu.any(step_size[model].diagonal() > 10**-6):
-            step_size[model] /= 1.05
-        #cov matrix
-        if len(param) % 200 == 0 and len(param) > 0.:
+        #ipdb.set_trace()
+        for gal in step_size[model]:
+            if step_crit > .60 and nu.all(step_size[model][gal].diagonal() < 10.):
+                step_size[model][gal] *= 1.05
+            elif step_crit < .2 and nu.any(step_size[model][gal].diagonal() > 10**-6):
+                step_size[model][gal] /= 1.05
+            #cov matrix
+            if len(param) % 200 == 0 and len(param) > 0.:
             
-            temp = nu.cov(MC.list_dict_to(param[-2000:],self._key_order).T)
-            #make sure not stuck
-            if nu.any(temp.diagonal() > 10**-6):
-                step_size[model] = temp
+                temp = nu.cov(MC.list_dict_to(param[gal][-2000:],self._key_order).T)
+                #make sure not stuck
+                if nu.any(temp.diagonal() > 10**-6):
+                    step_size[model][gal] = temp
         
         return step_size[model]
 
@@ -183,11 +198,14 @@ def grid_search(point, param_range):
     len_array = nu.asarray(len_array)
     # check if at on an edge
     if nu.any(index == 0):
+        ipdb.set_trace()
         raise NotImplementedError
     if nu.any(index == len_array):
+        ipdb.set_trace()
         raise NotImplementedError
     # check if on plane
     if nu.any(nu.hstack(on_plane)):
+        ipdb.set_trace()
         raise NotImplementedError
     # iterate around the point
     com_tupple = [(param_range[j][i-1], param_range[j][i])

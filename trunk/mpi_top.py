@@ -29,6 +29,7 @@
 #
 """Bean counting and distributed mcmc helpers"""
 from mpi4py import MPI as mpi
+import multiprocessing as M
 import time as Time
 import cPickle as pik
 import csv
@@ -379,3 +380,15 @@ class Topologies(object):
             self.init_sync_var()
         except:
             pass
+
+
+class Explore(object):
+    '''Generates a propsal function of mixture of normals by using mutilple
+    chains to explore paramerter space. Can work with Changing dimenstions.
+    '''
+    def __init__(self,cpus=8, multi_dim=False):
+        #create shared arrays
+        pass
+        #create save array for all models being used
+
+        

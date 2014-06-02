@@ -114,24 +114,24 @@ def quick_MCMC(x,y,y_err,params,func=[],constrants=[],sigma=0.8,itter=10**5,quie
     return out_chi,out_param,parambest,chibest
 
 def quick_cov_MCMC(x,y,params,func=[],constrants=[],sigma=0.8,itter=10**5,quiet=False):
-#fits any function to some data using a simple MCMC rutine
-#params should be a array of the length of free parameters from func argument
-#if no func argument func is a poly of order of length of params
-#constraints is a 2Xlen(params) giving upper and lower bounds of fit like
-# constrains=[[parma0_lower,parma0_high],[parma1_lower,parma1_high],...]
-#funct should look like func=lambda x,param:x*param[0]+param[1]x*...param[-1]x
+    '''fits any function to some data using a simple MCMC rutine
+    params should be a array of the length of free parameters from func argument
+    if no func argument func is a poly of order of length of params
+    constraints is a 2Xlen(params) giving upper and lower bounds of fit like
+    constrains=[[parma0_lower,parma0_high],[parma1_lower,parma1_high],...]
+    funct should look like func=lambda x,param:x*param[0]+param[1]x*...param[-1]x'''
 ##################
 #intitalize
-    out_param=nu.zeros([itter,len(params)])
-    out_chi=nu.zeros(itter)+nu.inf
-    sigma=nu.identity(len(params))*sigma
-    param=nu.array([params,params])#set input parameters [0]=old [1]=new
+    out_param = nu.zeros([itter, len(params)])
+    out_chi = nu.zeros(itter) + nu.inf
+    sigma = nu.identity(len(params)) * sigma
+    param = nu.array([params,params])#set input parameters [0]=old [1]=new
     if not func: #see if inputed a function
-        func=''
+        func = ''
         for i in xrange(len(params)):
-            func=func+'param['+str(i)+']*x**'+str(i)+'+'
-        func=func[:-1]
-        func=eval('lambda x,param: '+func)
+            func = func+'param['+str(i)+']*x**'+str(i)+'+'
+        func = func[:-1]
+        func = eval('lambda x,param: '+func)
 
     #if any(constrants):
             #set up constraints checker
@@ -144,36 +144,39 @@ def quick_cov_MCMC(x,y,params,func=[],constrants=[],sigma=0.8,itter=10**5,quiet=
      #   checker=[]
 
     #first fit
-    y_fit=func(x,param[1])
+    y_fit = func(x, param[1])
 #start up chi
-    chi=[nu.sum((y_fit-y)**2),nu.inf]
+    chi = [nu.sum((y_fit - y)**2), nu.inf]
     if nu.isnan(chi[0]):
-       chi[0]=nu.inf
-    chibest=nu.inf
-    parambest=nu.copy(param[0])
-    j=0
-    out_param[0]=nu.copy(param[0])
-    out_chi[0]=nu.copy(chi[0])
+       chi[0] = nu.inf
+    chibest = nu.inf
+    parambest = nu.copy(param[0])
+    j = 0
+    out_param[0] = nu.copy(param[0])
+    out_chi[0] = nu.copy(chi[0])
 
     #start mcmc
     for i in xrange(1,itter):
-        if i%1000==0 and not quiet:
+        if i%1000 == 0 and not quiet:
             print 'current accptence rate %2.2f and chi2 is %2.2f' %(j/(i+1.0)*100.0,chi[1])
            # print param[1] 
  #select new param
-        param[1]=nu.random.multivariate_normal(param[0],sigma)
+        param[1] = nu.random.multivariate_normal(param[0],sigma)
         
         #check constraints      
         '''if checker:
            for ii in checker:
               exec(ii)'''
-        for ii in range(len(params)):
-           i2=0
-           while param[1][ii]<=constrants[ii][0] or param[1][ii]>=constrants[ii][1]: 
-              param[1][ii]=param[0][ii]+nu.random.randn()*sigma[ii,ii]
-              i2+=1
-              if i2>50:#sigma may be too big
-                 sigma[ii,ii]=sigma[ii,ii]/1.05
+        for ii in xrange(len(params)):
+           i2 = 0
+           while (param[1][ii] <= constrants[ii][0]
+                  or param[1][ii] >= constrants[ii][1]):
+                #if fail make a new param
+                param[1][ii] = param[0][ii] + nu.random.randn() * sigma[ii, ii]
+                i2 += 1
+                #sigma may be too big
+                if i2 > 50:
+                    sigma[ii,ii]=sigma[ii,ii]/1.05
 #sample new distribution
         y_fit=func(x,param[1])
         chi[1]=nu.sum((y_fit-y)**2)
