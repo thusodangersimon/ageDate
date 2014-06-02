@@ -6,7 +6,7 @@ from scipy.interpolate import griddata
 '''Makes feducial model for testing'''
 
 
-def random_burst_gal(num_gal, db_path='/home/thuso/Phd/experements/hierarical/LRG_Stack/burst_dtau_10.db'):
+def random_burst_gal(db_path='/home/thuso/Phd/experements/hierarical/LRG_Stack/burst_dtau_10.db'):
     '''gets num_gal of burst model spectra without any background model'''
     db = util.numpy_sql(db_path)
     param = get_points(db)
@@ -19,7 +19,7 @@ def random_burst_gal(num_gal, db_path='/home/thuso/Phd/experements/hierarical/LR
     return data, param
 
 
-def random_exp_gal(num_gal, db_path='/home/thuso/Phd/experements/hierarical/LRG_Stack/exp_dtau_10.db'):
+def random_exp_gal(db_path='/home/thuso/Phd/experements/hierarical/LRG_Stack/exp_dtau_10.db'):
     '''gets num_gal of exponetal model spectra without any background model'''
     db = util.numpy_sql(db_path)
     param = get_points(db)

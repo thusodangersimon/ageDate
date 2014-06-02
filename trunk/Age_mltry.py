@@ -224,7 +224,7 @@ class param(object):
             # model level
             self.Nacept[bins] , self.Nreject[bins] = 1.,1.
             self.T_cuurent[bins] = 0
-            for gal in range(lik_fun.models[bins]):
+            for gal in lik_fun.models[bins]:
                 self.active_param[bins][gal], self.sigma[bins][gal] = lik_fun.initalize_param(gal)
                 self.active_chi[bins][gal] = {}
                 self.out_sigma[bins][gal]  =  [self.sigma[bins][gal][:]]

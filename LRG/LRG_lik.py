@@ -15,7 +15,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 '''Likelyhood and functions needed for MCMC for LRGS'''
 
 class Multi_LRG_burst(lik.Example_lik_class):
-
+    '''Single core, LRG likelihood function'''
     def __init__(self, data, db_name='burst_dtau_10.db', have_dust=False,
                  have_losvd=False):
         self.has_dust = have_dust
@@ -23,9 +23,13 @@ class Multi_LRG_burst(lik.Example_lik_class):
         #check if data is right type
         
         self.data = data
+        #get mean data values to 1
+        self.norm = 1./nu.vstack(self.data.values())[:,1].mean()
+        for i in data:
+            self.data[i][:,1] *= self.norm
         self.db = util.numpy_sql(db_name)
         # Tell which models are avalible and how many galaxies to fit
-        self.models = {'burst': 1}
+        self.models = {'burst': data.keys()}
         # Get param range (tau, age, metal)
         self.param_range = []
         for column in ['tau', 'age', 'metalicity']:
@@ -33,7 +37,9 @@ class Multi_LRG_burst(lik.Example_lik_class):
                 'Select DISTINCT %s FROM burst'%column).fetchall())))
         self._hull = None
         # resolution for CB07 and BC03 in km/s
-        self.resolu = 3. * 299792.458 / data[:,0].mean()
+        self.resolu = {}
+        for gal in data:
+            self.resolu[gal] = 3. * 299792.458 / data[gal][:,0].mean()
 
     def _make_hull(self):
         '''Make convex hull obj for telling if param is in range'''
@@ -47,7 +53,7 @@ class Multi_LRG_burst(lik.Example_lik_class):
         if not isinstance(self._hull, Delaunay):
             self._make_hull()
         return self._hull.find_simplex(point) >= 0
-        
+    
     def lik(self, param, bins):
         '''Calculates log likelyhood for burst model'''
         for gal in param[bins]:
@@ -60,7 +66,9 @@ class Multi_LRG_burst(lik.Example_lik_class):
             else:
                 yield -nu.inf, gal
                 continue
-            model = {'wave':spec[:,0], 0:spec[:,1]}
+            
+            model = {'wave':spec[:,0],
+                     0: spec[:,1] * 10**param[bins][gal]['normalization'].loc[0]}
             # Dust
             if self.has_dust:
                 columns = ['$T_{bc}$','$T_{ism}$']
@@ -70,23 +78,24 @@ class Multi_LRG_burst(lik.Example_lik_class):
             # LOSVD
             if self.has_losvd:
                 # wave range for convolution
-                wave_range = [self.data[:,0].min(),self.data[:,0].max()]
+                wave_range = [self.data[gal][:,0].min(),
+                              self.data[gal][:,0].max()]
                 # check if resolution has been calculated
                 columns = ['$\\sigma$','$V$','$h_3$','$h_4$']
                 send_param = param[bins][gal][columns].iloc[0]
                 model = ag.LOSVD(model, send_param,
-                                   wave_range, self.resolu)
+                                   wave_range, self.resolu[gal])
             #match data wavelengths with model
-            model = ag.data_match(self.data, model)
+            model = ag.data_match(self.data[gal], model)
             # Calc liklihood
-            if self.data.shape[1] >= 3:
+            if self.data[gal].shape[1] >= 3:
                 # Has Uncertanty
                 out_lik = stats_dist.norm.logpdf(
-                self.data[:,1], model[0], self.data[:,2])
+                self.data[gal][:,1], model[0], self.data[gal][:,2])
             else:
                 #no uncertanty or bad entry
                 out_lik = stats_dist.norm.logpdf(
-                    self.data[:,1], model[0])
+                    self.data[gal][:,1], model[0])
 
             yield out_lik.sum(), gal
 
@@ -117,13 +126,17 @@ class Multi_LRG_burst(lik.Example_lik_class):
         dtype = []
         param = []
         # make tau, age, and metal array
+        
         dtype.append(('tau',float))
         dtype.append(('age',float))
         dtype.append(('metalicity', float))
+        dtype.append(('normalization',float))
         dtype.append(('redshift', float))
         #uniform dist for everything except redshift
         param = [nu.random.rand()*i.ptp() + i.min() for i in self.param_range]
-        
+        #norm
+        param.append(nu.random.rand())
+        #redshift
         param.append(0.)
         if self.has_dust:
             dtype.append((r'$T_{bc}$',float))
@@ -159,10 +172,10 @@ class Multi_LRG_burst(lik.Example_lik_class):
                                                 '$T_{bc}$']],0,4).sum()
             if self.has_losvd:
                 out_lik += stats_dist.uniform.logpdf(param[bins][gal]['$\\sigma$'],
-                                                 nu.log10(self.resolu),
-                                                 3- nu.log10(self.resolu))
+                                                 nu.log10(self.resolu[gal]),
+                                                 3- nu.log10(self.resolu[gal]))
                 out_lik += stats_dist.uniform.logpdf(param[bins][gal]['$V$'],0,4)
-            yield out_lik, 0
+            yield out_lik, gal
     
     def model_prior(self, model):
         return 0.
@@ -182,7 +195,11 @@ class Multi_LRG_burst(lik.Example_lik_class):
             out[gal]['$h_4$'] = 0.
         return out
 
-    
+class LRG_mpi_lik(Multi_LRG_burst):
+    '''Does LRG fitting and sends likelihood cal to different
+    processors'''
+    from mpi4py import MPI as mpi
+        
 def grid_search(point, param_range):
     '''Finds points that make a cube around input point and returns them with
     their spectra'''
