@@ -22,10 +22,10 @@ def Multiple_LRG_model(num_gal):
     '''Makes multiple models and fits them simultaneously'''
     data, real_param = get_data(num_gal)
     # run
-    fun = lik.Multi_LRG_burst(data,'/home/thuso/Phd/experements/hierarical/LRG_Stack/burst_dtau_10.db',have_dust=True,have_losvd=True)
+    fun = lik.Multi_LRG_burst(data,'/home/thuso/Phd/experements/hierarical/LRG_Stack/burst_dtau_10.db') #,have_dust=True,have_losvd=True)
     top = mpi_top.Topologies('single')
-    out_class =  mltry.multi_main(fun, top)
-
+    out_class =  mltry.multi_main(fun, top, max_iter=5000)
+    return out_class, real_param, data
     
 def open_mp_LRG_model(cpus):
     '''fits multipule LRGs with multicores'''
@@ -43,4 +43,4 @@ def get_data(num_gal):
 
 if __name__ == "__main__":
     #Single_LRG_model()
-    Multiple_LRG_model(5)
+    Param, real_param, data = Multiple_LRG_model(1)

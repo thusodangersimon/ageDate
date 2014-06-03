@@ -199,50 +199,6 @@ def get_param_from_hdf5(hdf5,param,cols,all_param):
 def pik_hdf5(pik_path, out_hdf5_path):
     '''Turns a pickle file into an hdf5 database'''
     
-    
-if __name__ == '__main__':
-    '''makes database from likelihood.CV_Fit'''
-    from mpi4py import MPI as mpi
-    from likelihood_class import CV_Fit
-    comm = mpi.COMM_WORLD
-    rank = comm.rank
-    size = comm.size
-    #load spectra maker
-    
-    bins = fun.models.keys()[0]
-    #make persistant comunicators for exit status
-    if rank == 0: pass
-        #create data base
-        #lib = tab.open_file('CV_lib.h5', 'w')
-        #table = lib.create_table(lib.root, 'Param',CV_lib,"Param and spec")
-    #create enough points to take a computer month to calculate
-    #time per iteration
-    t = 160
-    t_month = 31*24*3600.
-    itter = round(t_month/t)
-   
-    #itter = 50
-    #params to use
-    abn = fun._abn_lst
-    out = []
-    #draw points from uniform distribution
-    grid = nu.random.rand(itter,len(abn)+2)
-    #scale grid
-    #Temp
-    grid[:,0] =grid[:,0] * 20000 + 20000
-    #logg
-    grid[:,1] = grid[:,1] * 4 + 4
-    #metals
-    grid[:,2:] = grid[:,2:] *2 -1
-    #round to the tenth
-    grid = nu.around(grid,1)
-    #look for duplicates
-    grid = nu.unique(grid.view(nu.dtype((nu.void, grid.dtype.itemsize*grid.shape[1])))).view(grid.dtype).reshape(-1, grid.shape[1])
-    #make spectra over cluster
-    out = list(fut.map(convert,grid,**{'bins':'1','return_spect':True}))
-    if rank == 0:
-        pik.dump((out,grid),open('pre_hdf5.pik','w'),2)
-
 
 ####sql databases
 def numpy_sql(path):
@@ -256,7 +212,7 @@ def numpy_sql(path):
     
     con = sqlite3.connect(path, cached_statements=1000)
     # User defined functions
-    con.create_function("dist", 6,distance )
+    #con.create_function("dist", 6,distance )
     return con
 
 
@@ -301,6 +257,7 @@ def index_to_vals(index,vals):
 
 def str_index_to_val(s, index):
     pass
+
 def distance(x,y,z,X,Y,Z):
     '''Redurns elucidean distance from lowercase to uppercase param'''
     out = 0.
@@ -308,3 +265,48 @@ def distance(x,y,z,X,Y,Z):
     out += (Y - y)**2
     out += (Z - z)**2
     return out
+
+
+    
+if __name__ == '__main__':
+    '''makes database from likelihood.CV_Fit'''
+    from mpi4py import MPI as mpi
+    from likelihood_class import CV_Fit
+    comm = mpi.COMM_WORLD
+    rank = comm.rank
+    size = comm.size
+    #load spectra maker
+    
+    bins = fun.models.keys()[0]
+    #make persistant comunicators for exit status
+    if rank == 0: pass
+        #create data base
+        #lib = tab.open_file('CV_lib.h5', 'w')
+        #table = lib.create_table(lib.root, 'Param',CV_lib,"Param and spec")
+    #create enough points to take a computer month to calculate
+    #time per iteration
+    t = 160
+    t_month = 31*24*3600.
+    itter = round(t_month/t)
+   
+    #itter = 50
+    #params to use
+    abn = fun._abn_lst
+    out = []
+    #draw points from uniform distribution
+    grid = nu.random.rand(itter,len(abn)+2)
+    #scale grid
+    #Temp
+    grid[:,0] =grid[:,0] * 20000 + 20000
+    #logg
+    grid[:,1] = grid[:,1] * 4 + 4
+    #metals
+    grid[:,2:] = grid[:,2:] *2 -1
+    #round to the tenth
+    grid = nu.around(grid,1)
+    #look for duplicates
+    grid = nu.unique(grid.view(nu.dtype((nu.void, grid.dtype.itemsize*grid.shape[1])))).view(grid.dtype).reshape(-1, grid.shape[1])
+    #make spectra over cluster
+    out = list(fut.map(convert,grid,**{'bins':'1','return_spect':True}))
+    if rank == 0:
+        pik.dump((out,grid),open('pre_hdf5.pik','w'),2)

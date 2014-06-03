@@ -79,6 +79,15 @@ def make_csp_lib(csp_type, csp_num=10, save_path='.'):
             conn.commit()
     conn.close()
 
+
+def index_DB(db):
+    '''Index database made like above to improve query speed.'''
+    # get table name
+    table_name = db.execute('select * from sqlite_master').fetchall()[0][1]
+    db.execute('CREATE UNIQUE INDEX i ON %s (imf, model, tau, age,metalicity)'%table_name)
+    db.commit()
+
+    
 if __name__ == '__main__':
     
     #make_csp_lib('burst')

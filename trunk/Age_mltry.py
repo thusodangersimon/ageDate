@@ -42,19 +42,15 @@ import ipdb
 from glob import glob
 a = nu.seterr(all='ignore')
 
-def _model(x, p):
-    '''makes lower model for fitting'''
-    return p[3] * x + p[2]
 
-
-def multi_main(fun, option, burnin=5*10**3, birth_rate=0.5, max_iter=10**5,
+def multi_main(fun, option, burnin=5*10**3,  max_iter=10**5,
             seed=None, fail_recover=False):
     '''Main multi RJMCMC program. Like gibbs sampler but for RJMCMC'''
     # see if to use specific seed
     if seed is not None:
         nu.random.seed(seed)
     # initalize paramerts/class for use by program
-    Param = param(fun, burnin)
+    Param = Param_MCMC(fun, burnin)
     if fail_recover:
         # fail recovery
         Param.fail_recover(fail_recover)
@@ -70,12 +66,8 @@ def multi_main(fun, option, burnin=5*10**3, birth_rate=0.5, max_iter=10**5,
         if option.current % 1 == 0:
             show = ('acpt = %.2f,log lik = %e, model = %s, steps = %i,ESS = %2.0f'
                     %(Param.acept_rate[bins][-1],Param.chi[bins][-1],bins,
-                      option.current,Param.eff))
+                      option.current,Param.sa))
             print show
-            #lab.plot(fun.data[0][:,0],fun.data[0][:,1],label='Data')
-            #lab.plot(fun.data[0][:,0], _model(fun.data[0][:,0],Param.active_param[bins][0]))
-            #lab.savefig('%3d.png'%option.current)
-            #lab.close()
             sys.stdout.flush()
         # stay, try or jump
         doStayTryJump =  nu.random.rand()
@@ -95,6 +87,7 @@ def multi_main(fun, option, burnin=5*10**3, birth_rate=0.5, max_iter=10**5,
         # Change parameter grouping
         # reconfigure(Param)
         # Change temperature
+        Param.SA(option.current)
         # Convergence assement
         if option.current % 5000 == 0 and option.current > 1:
             pass
@@ -119,13 +112,14 @@ def stay(Param, fun):
     #calc posterior for each object
     for Prior,index in prior:
         new_chi[index] = Prior
+        print Param.active_param
     for Lik,index in lik:
         if nu.isfinite(new_chi[index]):
             new_chi[index] += Lik
     #MH critera
     for key in new_chi.keys():
         #ipdb.set_trace()
-        if mh_critera(Param.active_chi[bins][key],new_chi[key]):
+        if mh_critera(Param.active_chi[bins][key], new_chi[key], Param.sa ):
             #accept
             Param.active_chi[bins][key] = new_chi[key] + 0.
             Param.accept()
@@ -176,7 +170,6 @@ def jump(Param, fun, birth_rate):
         
 def mh_critera(chi_old, chi_new, sa=1.):
     '''Does Metropolis-Hastings criera, with simulated anneling'''
-    sa = 1. 
     a = (chi_new - chi_old)/(2.*sa)
     if not nu.isfinite(a):
         return False
@@ -187,7 +180,7 @@ def mh_critera(chi_old, chi_new, sa=1.):
         # rejected
         return False
     
-class param(object):
+class Param_MCMC(object):
     def __doc__(self):
         '''stores params for use in multi_main'''
 
@@ -247,7 +240,8 @@ class param(object):
             self.chi[bins][-1] += Lik
             self.active_chi[bins][gal] = Lik
         self.param[bins] = self.active_param[bins].copy()
-        self.T_start = self.chi[bins][-1] + 0
+        self.T_start = abs(self.chi[bins][-1])
+        self.SA(0)
         return not nu.isfinite(self.chi[bins][-1])
 
     def fail_recover(self, path):
@@ -328,7 +322,21 @@ class param(object):
                 self.on[self.bins]]))
         # group on correlation
 
-
+    def SA(self, chain_number):
+        '''Calculates anneeling parameter'''
+        bins = self.bins
+        if chain_number < self.burnin:
+            #check acceptance rate if to high lower temp
+            '''if self.acept_rate[bins][-1] > .6 and self.T_start > self.T_stop :
+                self.T_start /= 1.05
+            if  self.acept_rate[bins][-1] < .06:
+                self.T_start *= 2.'''
+            # make temp close to chi
+            if self.T_start > self.chi[bins][-1]:
+                self.T_start = abs(self.chi[bins][-1])
+            #calculate anneeling
+            self.sa = MC.SA(chain_number, self.burnin/2., self.T_start, self.T_stop)
+            
     def plot_param(self):
         '''Plots chains'''
         import pylab as lab

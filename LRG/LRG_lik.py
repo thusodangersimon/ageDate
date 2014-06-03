@@ -22,7 +22,7 @@ class Multi_LRG_burst(lik.Example_lik_class):
         self.has_losvd = have_losvd
         #check if data is right type
         
-        self.data = data
+        self.data = data.copy()
         #get mean data values to 1
         self.norm = 1./nu.vstack(self.data.values())[:,1].mean()
         for i in data:
@@ -54,7 +54,7 @@ class Multi_LRG_burst(lik.Example_lik_class):
             self._make_hull()
         return self._hull.find_simplex(point) >= 0
     
-    def lik(self, param, bins):
+    def lik(self, param, bins, return_model=False):
         '''Calculates log likelyhood for burst model'''
         for gal in param[bins]:
             # get interp spectra
@@ -64,11 +64,14 @@ class Multi_LRG_burst(lik.Example_lik_class):
                 spec = tri_lin_interp(self.db,
                     param[bins][gal][columns], self.param_range)
             else:
-                yield -nu.inf, gal
+                if return_model:
+                    yield -nu.inf, gal, []
+                else:
+                    yield -nu.inf, gal
                 continue
             
             model = {'wave':spec[:,0],
-                     0: spec[:,1] * 10**param[bins][gal]['normalization'].loc[0]}
+                     0: spec[:,1] * 10**param[bins][gal]['normalization'].iat[0]}
             # Dust
             if self.has_dust:
                 columns = ['$T_{bc}$','$T_{ism}$']
@@ -96,8 +99,10 @@ class Multi_LRG_burst(lik.Example_lik_class):
                 #no uncertanty or bad entry
                 out_lik = stats_dist.norm.logpdf(
                     self.data[gal][:,1], model[0])
-
-            yield out_lik.sum(), gal
+            if return_model:
+                yield out_lik.sum(), gal, model
+            else:
+                yield out_lik.sum(), gal
 
     def step_func(self, step_crit, param, step_size, model):
         '''(Example_lik_class, float, ndarray or list, ndarray, any type) ->
@@ -108,17 +113,17 @@ class Multi_LRG_burst(lik.Example_lik_class):
         '''
         #ipdb.set_trace()
         for gal in step_size[model]:
-            if step_crit > .60 and nu.all(step_size[model][gal].diagonal() < 10.):
+            if step_crit > .30 and nu.all(step_size[model][gal].diagonal() < 8.):
                 step_size[model][gal] *= 1.05
             elif step_crit < .2 and nu.any(step_size[model][gal].diagonal() > 10**-6):
                 step_size[model][gal] /= 1.05
             #cov matrix
             if len(param) % 200 == 0 and len(param) > 0.:
-            
+                print 'here'
                 temp = nu.cov(MC.list_dict_to(param[gal][-2000:],self._key_order).T)
                 #make sure not stuck
-                if nu.any(temp.diagonal() > 10**-6):
-                    step_size[model][gal] = temp
+                '''if nu.any(temp.diagonal() > 10**-6):
+                    step_size[model][gal] = temp'''
         
         return step_size[model]
 
@@ -126,7 +131,6 @@ class Multi_LRG_burst(lik.Example_lik_class):
         dtype = []
         param = []
         # make tau, age, and metal array
-        
         dtype.append(('tau',float))
         dtype.append(('age',float))
         dtype.append(('metalicity', float))
@@ -135,7 +139,7 @@ class Multi_LRG_burst(lik.Example_lik_class):
         #uniform dist for everything except redshift
         param = [nu.random.rand()*i.ptp() + i.min() for i in self.param_range]
         #norm
-        param.append(nu.random.rand())
+        param.append(nu.random.rand()*nu.log10(self.norm)+15)
         #redshift
         param.append(0.)
         if self.has_dust:
@@ -167,6 +171,9 @@ class Multi_LRG_burst(lik.Example_lik_class):
             out_lik = nu.sum([stats_dist.uniform.logpdf(param[bins][gal].iloc[0][i],
                                                          ran.min(),ran.ptp())
                                 for i,ran in enumerate(self.param_range)])
+            out_lik += stats_dist.uniform.logpdf(param[bins][gal]['normalization'],
+                                              -100, 200)
+            #out_lik += redshift
             if self.has_dust:
                 out_lik += stats_dist.uniform.logpdf(param[bins][gal][['$T_{ism}$',
                                                 '$T_{bc}$']],0,4).sum()
@@ -231,7 +238,7 @@ def grid_search(point, param_range):
                              itertools.product(*com_tupple)])
     return interp_points
 
-    
+
 def tri_lin_interp(db, param, param_range):
     '''Does trilinear interoplation for spectra with points (tau,age,metal).
     Returns interpolated spectra or an array of inf if param is out of range'''
