@@ -22,10 +22,13 @@ class Multi_LRG_burst(lik.Example_lik_class):
         self.has_losvd = have_losvd
         #check if data is right type
         
-        self.data = data.copy()
+        self.data = {}
         #get mean data values to 1
-        self.norm = 1./nu.vstack(self.data.values())[:,1].mean()
+        self.norm = 1./nu.vstack(data.values())[:,1].mean()
+        self.norm_prior = {}
         for i in data:
+            self.norm_prior[i] = self.norm + 0
+            self.data[i] = data[i].copy()
             self.data[i][:,1] *= self.norm
         self.db = util.numpy_sql(db_name)
         # Tell which models are avalible and how many galaxies to fit
@@ -90,6 +93,9 @@ class Multi_LRG_burst(lik.Example_lik_class):
                                    wave_range, self.resolu[gal])
             #match data wavelengths with model
             model = ag.data_match(self.data[gal], model)
+            #calculate map for normalization
+            self.norm_prior[gal] = nu.log10(ag.normalize(self.data[gal],
+                                                         model[0]))
             # Calc liklihood
             if self.data[gal].shape[1] >= 3:
                 # Has Uncertanty
@@ -113,14 +119,15 @@ class Multi_LRG_burst(lik.Example_lik_class):
         '''
         #ipdb.set_trace()
         for gal in step_size[model]:
-            if step_crit > .30 and nu.all(step_size[model][gal].diagonal() < 8.):
+            diag = nu.diagonal(step_size[model][gal])
+            if step_crit > .30 and nu.all(diag < 8.):
                 step_size[model][gal] *= 1.05
-            elif step_crit < .2 and nu.any(step_size[model][gal].diagonal() > 10**-6):
+            elif step_crit < .2 and nu.any(diag > 10**-6):
                 step_size[model][gal] /= 1.05
             #cov matrix
-            if len(param) % 200 == 0 and len(param) > 0.:
-                print 'here'
-                temp = nu.cov(MC.list_dict_to(param[gal][-2000:],self._key_order).T)
+            if len(param[gal]) % 200 == 0 and len(param[gal]) > 0.:
+                #print 'here'
+                step_size[model][gal] = param[gal][-2000:].cov()
                 #make sure not stuck
                 '''if nu.any(temp.diagonal() > 10**-6):
                     step_size[model][gal] = temp'''
@@ -171,8 +178,8 @@ class Multi_LRG_burst(lik.Example_lik_class):
             out_lik = nu.sum([stats_dist.uniform.logpdf(param[bins][gal].iloc[0][i],
                                                          ran.min(),ran.ptp())
                                 for i,ran in enumerate(self.param_range)])
-            out_lik += stats_dist.uniform.logpdf(param[bins][gal]['normalization'],
-                                              -100, 200)
+            out_lik += stats_dist.norm.logpdf(param[bins][gal]['normalization'],
+                                              self.norm_prior[gal], 10)
             #out_lik += redshift
             if self.has_dust:
                 out_lik += stats_dist.uniform.logpdf(param[bins][gal][['$T_{ism}$',

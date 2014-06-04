@@ -63,9 +63,9 @@ def multi_main(fun, option, burnin=5*10**3,  max_iter=10**5,
     # Start RJMCMC
     while option.iter_stop:
         bins = Param.bins
-        if option.current % 1 == 0:
+        if option.current % 50 == 0:
             show = ('acpt = %.2f,log lik = %e, model = %s, steps = %i,ESS = %2.0f'
-                    %(Param.acept_rate[bins][-1],Param.chi[bins][-1],bins,
+                    %(Param.acept_rate[bins][-1],float(Param.chi[bins].iloc[-1].sum(1)),bins,
                       option.current,Param.sa))
             print show
             sys.stdout.flush()
@@ -112,22 +112,20 @@ def stay(Param, fun):
     #calc posterior for each object
     for Prior,index in prior:
         new_chi[index] = Prior
-        print Param.active_param
     for Lik,index in lik:
         if nu.isfinite(new_chi[index]):
             new_chi[index] += Lik
     #MH critera
     for key in new_chi.keys():
-        #ipdb.set_trace()
         if mh_critera(Param.active_chi[bins][key], new_chi[key], Param.sa ):
             #accept
-            Param.active_chi[bins][key] = new_chi[key] + 0.
-            Param.accept()
+            #Param.active_chi[bins][key] = new_chi[key] + 0.
+            Param.accept(key, new_chi[key])
         else:
             #reject
-            Param.active_param[bins][key] = Param.param[bins][key].copy()
-            Param.reject()
-    Param.save_chain()
+            #Param.active_param[bins][key] = Param.param[bins][key].copy()
+            Param.reject(key)
+    #Param.save_chain()
     Param.cal_accept()
     
         
@@ -170,7 +168,7 @@ def jump(Param, fun, birth_rate):
         
 def mh_critera(chi_old, chi_new, sa=1.):
     '''Does Metropolis-Hastings criera, with simulated anneling'''
-    a = (chi_new - chi_old)/(2.*sa)
+    a = float((chi_new - chi_old)/(2. * nu.ravel(sa)))
     if not nu.isfinite(a):
         return False
     if nu.exp(a) > nu.random.rand():
@@ -193,7 +191,7 @@ class Param_MCMC(object):
         self.acept_rate, self.out_sigma = {},{}
         for bins in lik_class.models:
             self.active_param[bins], self.sigma[bins] = {}, {}
-            self.active_chi[bins] = {}
+            self.active_chi[bins] = DataFrame(columns = lik_class.models[bins])
             self.acept_rate[bins], self.out_sigma[bins] = {},{}
         self.param, self.chi = {}, {}
         self.Nacept, self.Nreject = {},{}
@@ -219,7 +217,7 @@ class Param_MCMC(object):
             self.T_cuurent[bins] = 0
             for gal in lik_fun.models[bins]:
                 self.active_param[bins][gal], self.sigma[bins][gal] = lik_fun.initalize_param(gal)
-                self.active_chi[bins][gal] = {}
+                #self.active_chi[bins][gal] = {}
                 self.out_sigma[bins][gal]  =  [self.sigma[bins][gal][:]]
             #self.reconfigure(i)
             self.acept_rate[bins] = [1.]
@@ -227,22 +225,23 @@ class Param_MCMC(object):
         # check if params are in range
         lik, prior = (lik_fun.lik(self.active_param, bins),
                                lik_fun.prior(self.active_param, bins))
-        #self.chi[bins] = {}
+        self.chi[bins] = DataFrame(columns=lik_fun.models[bins])
         #get intal params lik and priors
         for Prior, gal in prior:
             if not nu.isfinite(Prior):
                 return True
-            self.chi[bins] = [Prior]
+            #self.chi[bins][gal] = Prior
             self.active_chi[bins][gal] = Prior
         for Lik, gal in lik:
             if not nu.isfinite(Lik):
                 return True
-            self.chi[bins][-1] += Lik
-            self.active_chi[bins][gal] = Lik
+            #self.chi[bins][gal] += Lik
+            self.active_chi[bins][gal] += Lik
+        self.chi[bins] = self.active_chi[bins].copy()
         self.param[bins] = self.active_param[bins].copy()
-        self.T_start = abs(self.chi[bins][-1])
+        self.T_start = float(abs(self.chi[bins].max(1)))
         self.SA(0)
-        return not nu.isfinite(self.chi[bins][-1])
+        return not nu.isfinite(float(self.chi[bins].sum(1)))
 
     def fail_recover(self, path):
         '''Loads params from old run'''
@@ -259,8 +258,9 @@ class Param_MCMC(object):
                     self.bins][gal].loc[0]
             else:
                 ipdb.set_trace()
+            self.out_sigma[self.bins][gal].append(self.sigma[self.bins][gal].copy())
         self.chi[self.bins].append(nu.sum(self.active_chi[self.bins].values()))
-
+        
     def save_state(self, path=None):
         '''Saves current state of chain incase run crashes'''
         raise NotImplementedError
@@ -269,36 +269,36 @@ class Param_MCMC(object):
         '''Checks correlation between params to see if should split'''
         raise NotImplementedError
         
-    def accept(self, bins=None):
+    def accept(self, gal, new_chi):
         '''Accepts current state of chain, active_param get saved in param
         if bin is different then model is changed'''
-        if bins is None:
-            # no trans dimensional change
-            # need to add scalling
-            #self.param[self.bins].append(self.active_param[self.bins].copy())
-            self.Nacept[self.bins] += 1
-        else:
-            # see if model has be created before
-            if not bins in self.chi:
-                self.chi[bins], self.param[bins] = [] ,[] 
-                self.T_cuurent[bins] = 0
-                self.acept_rate[bins] = [.5]
-                self.Nacept[bins], self.Nreject[bins] = 1., 1.
-                self.out_sigma[bins] = []
-            
-            #self.param[bins].append(self.active_param[bins].copy())
-            #self.bins = bins
-
-    def reject(self):
+        self.Nacept[self.bins] += 1
+        index = self.param[self.bins][gal].shape[0]
+        self.param[self.bins][gal].loc[index] = self.active_param[
+                    self.bins][gal].loc[0]
+        
+        if index == self.chi[self.bins].shape[0]:
+            #create new row
+            self.chi[self.bins].loc[index] = None
+        self.chi[self.bins][gal][index] = float(new_chi)+0
+        
+    def reject(self, gal):
         '''Rejects current state and gets data from memory'''
         self.Nreject[self.bins] += 1
-       
+        index = self.param[self.bins][gal].shape[0]
+        self.active_param[self.bins][gal] = self.param[self.bins][gal].iloc[[-1]].copy()
+        if index == self.chi[self.bins].shape[0]:
+            #create new row
+            self.chi[self.bins].loc[index] = None
+        self.chi[self.bins][gal][index] = self.chi[self.bins][gal][index-1] + 0
+        self.param[self.bins][gal].loc[index] =self.param[self.bins][gal].loc[index-1].copy()
+        
         
     def step(self, fun, num_iter,step_freq=500.):
         '''check if time to change step size'''
         bins = self.bins
-        if num_iter % step_freq == 0:
-            self.sigma[bins] = fun.step_func(self.acept_rate[bins][-1],
+        #if num_iter % step_freq == 0:
+        self.sigma[bins] = fun.step_func(self.acept_rate[bins][-1],
                                             self.param[bins],
                                             self.sigma,
                                             bins)
@@ -332,8 +332,9 @@ class Param_MCMC(object):
             if  self.acept_rate[bins][-1] < .06:
                 self.T_start *= 2.'''
             # make temp close to chi
-            if self.T_start > self.chi[bins][-1]:
-                self.T_start = abs(self.chi[bins][-1])
+            chi_max = float(nu.abs(self.chi[bins].loc[nu.ravel(chain_number)].max(1)))
+            if self.T_start > chi_max:
+                self.T_start = chi_max
             #calculate anneeling
             self.sa = MC.SA(chain_number, self.burnin/2., self.T_start, self.T_stop)
             
