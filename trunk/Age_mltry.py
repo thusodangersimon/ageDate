@@ -97,6 +97,7 @@ def multi_main(fun, option, burnin=5*10**3,  max_iter=10**5,
         if option.current >= max_iter:
             option.iter_stop = False
     # Finish and return
+    fun.exit_signal()
     return Param
 
 
@@ -221,7 +222,6 @@ class Param_MCMC(object):
                 self.out_sigma[bins][gal]  =  [self.sigma[bins][gal][:]]
             #self.reconfigure(i)
             self.acept_rate[bins] = [1.]
-            
         # check if params are in range
         lik, prior = (lik_fun.lik(self.active_param, bins),
                                lik_fun.prior(self.active_param, bins))
@@ -233,6 +233,7 @@ class Param_MCMC(object):
             #self.chi[bins][gal] = Prior
             self.active_chi[bins][gal] = Prior
         for Lik, gal in lik:
+            print Lik,gal
             if not nu.isfinite(Lik):
                 return True
             #self.chi[bins][gal] += Lik
@@ -249,17 +250,6 @@ class Param_MCMC(object):
 
     def save_chain(self):
         '''Records current chain state'''
-        for gal in self.active_param[self.bins]:
-            #check if active_param is a data frame object
-            if isinstance(self.active_param[self.bins][gal], DataFrame):
-                #ipdb.set_trace()
-                index = self.param[self.bins][gal].shape[0]
-                self.param[self.bins][gal].loc[index] = self.active_param[
-                    self.bins][gal].loc[0]
-            else:
-                ipdb.set_trace()
-            self.out_sigma[self.bins][gal].append(self.sigma[self.bins][gal].copy())
-        self.chi[self.bins].append(nu.sum(self.active_chi[self.bins].values()))
         
     def save_state(self, path=None):
         '''Saves current state of chain incase run crashes'''
@@ -284,6 +274,7 @@ class Param_MCMC(object):
         
     def reject(self, gal):
         '''Rejects current state and gets data from memory'''
+        #ipdb.set_trace()
         self.Nreject[self.bins] += 1
         index = self.param[self.bins][gal].shape[0]
         self.active_param[self.bins][gal] = self.param[self.bins][gal].iloc[[-1]].copy()
@@ -291,6 +282,7 @@ class Param_MCMC(object):
             #create new row
             self.chi[self.bins].loc[index] = None
         self.chi[self.bins][gal][index] = self.chi[self.bins][gal][index-1] + 0
+        self.active_chi[self.bins][gal] = self.chi[self.bins][gal][index-1] + 0
         self.param[self.bins][gal].loc[index] =self.param[self.bins][gal].loc[index-1].copy()
         
         

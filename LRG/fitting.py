@@ -2,6 +2,7 @@ import LRG_lik as lik
 import Age_mltry as mltry
 import model
 import mpi_top
+from mpi4py import MPI as mpi
 from numpy.random import randint
 '''Called for fitting of LRG'''
 
@@ -27,8 +28,23 @@ def Multiple_LRG_model(num_gal):
     out_class =  mltry.multi_main(fun, top, max_iter=5000)
     return out_class, real_param, data
     
-def open_mp_LRG_model(cpus):
+def open_mp_LRG_model(num_gal):
     '''fits multipule LRGs with multicores'''
+    comm = mpi.COMM_WORLD
+    rank = comm.Get_rank()
+    if rank == 0:
+        data, real_param = get_data(num_gal)
+    else:
+        data = None
+    data = comm.bcast(data, root=0)
+    fun = lik.LRG_mpi_lik(data,'/home/thuso/Phd/experements/hierarical/LRG_Stack/burst_dtau_10.db')
+    # Workes just calc likelihoods
+    if rank > 0:
+        fun.lik_worker()
+    else:
+        top = mpi_top.Topologies('single')
+        out_class =  mltry.multi_main(fun, top, max_iter=5000)
+        return out_class, real_param, data
     
     
 def get_data(num_gal):
@@ -43,4 +59,15 @@ def get_data(num_gal):
 
 if __name__ == "__main__":
     #Single_LRG_model()
-    Param, real_param, data = Multiple_LRG_model(1)
+    models = 5
+    if mpi.COMM_WORLD.rank == 0:
+        t_single = mpi.Wtime()
+        Param, real_param, data = Multiple_LRG_model(models)
+        t_single -= mpi.Wtime()
+    mpi.COMM_WORLD.barrier()
+    t_multi = mpi.Wtime()
+    Param, real_param, data = open_mp_LRG_model(models)
+    t_multi -= mpi.Wtime()
+    import cPickle as pik
+    pik.dump((Param, real_param, data),open('test.pik','w'),2)
+    print 'Sigle time %f. Multi time %f'%(abs(t_single),abs(t_multi))

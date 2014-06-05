@@ -5,6 +5,8 @@ import interp_utils as interp
 from scipy.spatial import Delaunay
 from scipy.interpolate import griddata
 import itertools
+import sys
+from mpi4py import MPI as mpi
 import scipy.stats as stats_dist
 import spectra_utils as ag
 import MC_utils as MC
@@ -60,6 +62,7 @@ class Multi_LRG_burst(lik.Example_lik_class):
     def lik(self, param, bins, return_model=False):
         '''Calculates log likelyhood for burst model'''
         for gal in param[bins]:
+            #ipdb.set_trace()
             # get interp spectra
             #check if points are in range
             columns = ['tau', 'age', 'metalicity']
@@ -178,7 +181,12 @@ class Multi_LRG_burst(lik.Example_lik_class):
             out_lik = nu.sum([stats_dist.uniform.logpdf(param[bins][gal].iloc[0][i],
                                                          ran.min(),ran.ptp())
                                 for i,ran in enumerate(self.param_range)])
-            out_lik += stats_dist.norm.logpdf(param[bins][gal]['normalization'],
+            
+            norm = param[bins][gal]['normalization'] < -50
+            if norm.bool():
+                out_lik += -nu.inf
+            else:
+                out_lik += stats_dist.norm.logpdf(param[bins][gal]['normalization'],
                                               self.norm_prior[gal], 10)
             #out_lik += redshift
             if self.has_dust:
@@ -196,7 +204,6 @@ class Multi_LRG_burst(lik.Example_lik_class):
     
     def proposal(self, Mu, Sigma):
         # get out of rec array
-        
         out = {}
         for gal in Mu:
             mu = Mu[gal].values[0]
@@ -209,11 +216,135 @@ class Multi_LRG_burst(lik.Example_lik_class):
             out[gal]['$h_4$'] = 0.
         return out
 
+    def exit_signal(self):
+        '''Does any wrap ups before exiting'''
+        pass
+
+    
 class LRG_mpi_lik(Multi_LRG_burst):
     '''Does LRG fitting and sends likelihood cal to different
     processors'''
-    from mpi4py import MPI as mpi
-        
+    def __init__(self,  data, db_name='burst_dtau_10.db', have_dust=False,
+                 have_losvd=False):
+        # Set up like Muliti
+        Multi_LRG_burst.__init__(self, data, db_name, have_dust, have_losvd)
+        self._comm = mpi.COMM_WORLD
+        self._rank = self._comm.Get_rank()
+        self._size = self._comm.Get_size()
+        # get workers
+        if self._rank == 0:
+            self.get_workers()
+            self.lik = self.lik_root
+        else:
+            self.calc_lik = self.lik
+            self.lik = self.lik_worker
+    
+
+    def lik_worker(self):
+        '''Does lik calculation for sent galaxies, returns likelihood'''
+        # keep calculating till run is over
+        self._proc_name = mpi.Get_processor_name()
+        while True:
+            # Send ready signal
+            self._comm.send([{'rank': self._rank,
+                              'name':self._proc_name}], dest=0, tag=1)
+            status = mpi.Status()
+            #try:
+            recv = self._comm.recv(source=0, tag=mpi.ANY_TAG, status=status)
+            #except EOFError:
+                # Didn't recive anything
+                #pass
+            # check if should quit
+            if  status.tag == 2:
+               #print 'trying to quit worker %i'%self._rank
+               self._comm.isend([], dest=0, tag=2)
+               sys.exit(0)
+            # recived data
+            if status.tag == 10:
+                #Multi_LRG_burst.lik
+                #out_lik = -999999
+                gal = recv[1]
+                #print recv
+                Lik = self.calc_lik({0:{gal:recv[0]}},0)
+                out_lik = Lik.next()[0]
+                #print recv,out_lik
+                #print 'Recived %s from root'%gal
+                # return result
+                self._comm.send((gal, out_lik, self.norm_prior[gal]),
+                                dest=0, tag=10)
+            if status.tag == 5:
+                #do nothing
+                pass
+                
+    def lik_root(self, param, bins, return_model=False):
+        '''Root lik calculator, manages workers for likelihood calcs'''
+        # feed all queued jobs to workers
+        # tag 1 codes for initialization.
+        # tag 10 codes for requesting more data.
+        # tag 5 codes for doing nothing
+        # Tag 2 codes for a worker exiting.
+        index = -1
+        #gal = param[bins].keys()[index]
+        recv_num = []
+        while True:
+            status = mpi.Status()
+            recv = self._comm.recv(source=mpi.ANY_SOURCE, tag=mpi.ANY_TAG,
+                                   status=status)
+            if status.tag == 1:
+                #send data to source
+                if index+1 < len(param[bins]):
+                    index += 1
+                    gal = param[bins].keys()[index]
+                    self._comm.send((param[bins][gal],gal),
+                                    dest=status.source, tag=10)
+                    #print 'Send %s to %i'%(gal,status.source)
+                else:
+                    # send nothing
+                    self._comm.send([], dest=status.source, tag=5)
+            if status.tag == 10:
+                #recive likelyhoods
+                recv_gal, recv_lik, recv_norm = recv
+                self.norm_prior[recv_gal] = recv_norm
+                #print 'Recived %s with chi %f'%(recv_gal,recv_lik)
+                yield recv_lik, recv_gal
+                recv_num.append(recv_gal)
+                # Check if should exit
+                if len(recv_num) == len(param[bins].keys()):
+                    #print 'done'
+                    break
+
+            if status.tag == 2:
+                # Worker crashed
+                self.remove_workers(status.source)
+                
+    def get_workers(self):
+        self._workers = range(1,self._size)
+
+    def remove_workers(self, del_work):
+        if del_work in self._workers:
+            self._workers.pop(self._workers.index(del_work))
+            print 'Worker %i has exited'%del_work
+
+    def exit_signal(self):
+        '''Sets varables needed for mpi'''
+        if not self._rank == 0:
+            return None
+        # send exit signal to all workers
+        while len(self._workers) > 0:
+            status = mpi.Status()
+            recv = self._comm.recv(source=mpi.ANY_SOURCE, tag=mpi.ANY_TAG,
+                                   status=status)
+            #print recv
+            if status.tag == 1:
+                # Send Kill Signal
+                print 'Killing worker %i on %s'%(recv[0]['rank'],recv[0]['name'])
+                self._comm.send([], dest=status.source, tag=2)
+                
+            if status.tag == 2:
+                # remove worker
+                self.remove_workers(status.source)
+                
+            
 def grid_search(point, param_range):
     '''Finds points that make a cube around input point and returns them with
     their spectra'''
