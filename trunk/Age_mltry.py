@@ -233,7 +233,6 @@ class Param_MCMC(object):
             #self.chi[bins][gal] = Prior
             self.active_chi[bins][gal] = Prior
         for Lik, gal in lik:
-            print Lik,gal
             if not nu.isfinite(Lik):
                 return True
             #self.chi[bins][gal] += Lik
@@ -328,7 +327,7 @@ class Param_MCMC(object):
             if self.T_start > chi_max:
                 self.T_start = chi_max
             #calculate anneeling
-            self.sa = MC.SA(chain_number, self.burnin/2., self.T_start, self.T_stop)
+            self.sa = MC.SA(chain_number, self.burnin, self.T_start, self.T_stop)
             
     def plot_param(self):
         '''Plots chains'''

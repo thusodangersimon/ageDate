@@ -25,7 +25,7 @@ def Multiple_LRG_model(num_gal):
     # run
     fun = lik.Multi_LRG_burst(data,'/home/thuso/Phd/experements/hierarical/LRG_Stack/burst_dtau_10.db') #,have_dust=True,have_losvd=True)
     top = mpi_top.Topologies('single')
-    out_class =  mltry.multi_main(fun, top, max_iter=5000)
+    out_class =  mltry.multi_main(fun, top, max_iter=1000)
     return out_class, real_param, data
     
 def open_mp_LRG_model(num_gal):
@@ -43,7 +43,7 @@ def open_mp_LRG_model(num_gal):
         fun.lik_worker()
     else:
         top = mpi_top.Topologies('single')
-        out_class =  mltry.multi_main(fun, top, max_iter=5000)
+        out_class =  mltry.multi_main(fun, top, max_iter=10**6)
         return out_class, real_param, data
     
     
@@ -59,15 +59,11 @@ def get_data(num_gal):
 
 if __name__ == "__main__":
     #Single_LRG_model()
-    models = 5
-    if mpi.COMM_WORLD.rank == 0:
-        t_single = mpi.Wtime()
-        Param, real_param, data = Multiple_LRG_model(models)
-        t_single -= mpi.Wtime()
+    models = 100
     mpi.COMM_WORLD.barrier()
     t_multi = mpi.Wtime()
     Param, real_param, data = open_mp_LRG_model(models)
     t_multi -= mpi.Wtime()
     import cPickle as pik
     pik.dump((Param, real_param, data),open('test.pik','w'),2)
-    print 'Sigle time %f. Multi time %f'%(abs(t_single),abs(t_multi))
+    #print 'Sigle time %f. Multi time %f'%(abs(t_single),abs(t_multi))
