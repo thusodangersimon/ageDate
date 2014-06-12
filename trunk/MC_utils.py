@@ -44,6 +44,7 @@ import os, sys, subprocess
 from time import time
 import signal
 import acor
+import ipdb
 ###ALL##########
 
 ##########Proposals######
@@ -549,7 +550,7 @@ def SA(i,i_fin,T_start,T_stop):
     if i > i_fin:
         return 1.0
     else:
-        return ((T_stop - T_start) / float(i_fin)) * i + T_start
+        return ((T_stop - T_start) / float(i_fin)) * float(i) + T_start
 #####MISC####################
 def issorted(l):
     '''(list or ndarray) -> bool

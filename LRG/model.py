@@ -64,6 +64,9 @@ def get_points(db, has_dust=False, has_losvd=False):
     out_param = pd.DataFrame(out_param)
     return out_param
 
+def make_hubble_gal_power_law():
+    '''Makes'''
+    
 def make_param_range(db):
     '''Gets Unique values from spectral range'''
 

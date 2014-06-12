@@ -27,7 +27,8 @@ def Multiple_LRG_model(num_gal):
     top = mpi_top.Topologies('single')
     out_class =  mltry.multi_main(fun, top, max_iter=1000)
     return out_class, real_param, data
-    
+
+
 def open_mp_LRG_model(num_gal):
     '''fits multipule LRGs with multicores'''
     comm = mpi.COMM_WORLD
@@ -59,11 +60,12 @@ def get_data(num_gal):
 
 if __name__ == "__main__":
     #Single_LRG_model()
-    models = 100
+    models = 20
+    #Param, real_param, data = Multiple_LRG_model(models)
     mpi.COMM_WORLD.barrier()
     t_multi = mpi.Wtime()
     Param, real_param, data = open_mp_LRG_model(models)
     t_multi -= mpi.Wtime()
-    import cPickle as pik
-    pik.dump((Param, real_param, data),open('test.pik','w'),2)
+    #import cPickle as pik
+    #pik.dump((Param, real_param, data),open('test.pik','w'),2)
     #print 'Sigle time %f. Multi time %f'%(abs(t_single),abs(t_multi))

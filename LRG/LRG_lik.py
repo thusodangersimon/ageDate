@@ -120,17 +120,19 @@ class Multi_LRG_burst(lik.Example_lik_class):
         Evaluates step_criteria, with help of param and model and 
         changes step size during burn-in perior. Outputs new step size
         '''
-        #ipdb.set_trace()
         for gal in step_size[model]:
             diag = nu.diagonal(step_size[model][gal])
-            if step_crit > .30 and nu.all(diag < 8.):
+            # ipdb.set_trace()
+            if nu.all(step_crit[model].tail(1)[gal] >.3) and nu.all(diag < 8.):
                 step_size[model][gal] *= 1.05
-            elif step_crit < .2 and nu.any(diag > 10**-6):
+            elif nu.all(step_crit[model].tail(1)[gal] < .2) and nu.any(diag > 10**-6):
                 step_size[model][gal] /= 1.05
             #cov matrix
-            if len(param[gal]) % 200 == 0 and len(param[gal]) > 0.:
+            length = param[model][gal].shape[0]
+            if length % 200 == 0 and length > 0.:
                 #print 'here'
-                step_size[model][gal] = param[gal][-2000:].cov()
+                #ipdb.set_trace()
+                step_size[model][gal] = param[model][gal][-2000:].cov().values
                 #make sure not stuck
                 '''if nu.any(temp.diagonal() > 10**-6):
                     step_size[model][gal] = temp'''
@@ -207,14 +209,17 @@ class Multi_LRG_burst(lik.Example_lik_class):
         out = {}
         for gal in Mu:
             mu = Mu[gal].values[0]
-            out[gal] =  nu.random.multivariate_normal(mu, Sigma[gal])
+            try:
+                out[gal] =  nu.random.multivariate_normal(mu, Sigma[gal])
+            except:
+                ipdb.set_trace()
             # put back into DataFrame
             out[gal] = pd.DataFrame(out[gal],Mu[gal].columns).T
         #set h3 and h4 to 0
         if self.has_losvd:
             out[gal]['$h_3$'] = 0.
             out[gal]['$h_4$'] = 0.
-        return out
+        return pd.Panel(out)
 
     def exit_signal(self):
         '''Does any wrap ups before exiting'''
