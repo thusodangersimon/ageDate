@@ -233,6 +233,7 @@ class Param_MCMC(object):
         self.active_param = pd.Panel4D(panel4d_param)
         self.sigma = pd.Panel4D(panel4d_sigma)
         self.out_sigma  =  [self.sigma.copy()]
+        self.models = lik_fun.models.keys()
         for bins in lik_fun.models:
             # check if params are in range
             lik, prior = (lik_fun.lik(self.active_param, bins),
@@ -259,7 +260,42 @@ class Param_MCMC(object):
 
     def fail_recover(self, path):
         '''Loads params from old run'''
-        raise NotImplementedError
+        if not os.path.exists(path):
+            raise OSError('%s does not exsist.'%path)
+        self.con = create_engine('sqlite:///%s'%path)
+        # load saved params as dataframes or panels
+        table_name = self.con.execute('select * from sqlite_master').fetchall()
+        done = []
+        # parse out parameter names
+        for param_name in table_name:
+            if len(param_name[1].split('_')) > 3:
+                print param_name[1]
+                continue
+            elif len(param_name[1].split('_')) == 3:
+                param = '%s_%s'%tuple(param_name[1].split('_')[:-1])
+                print param_name[1]
+            elif len(param_name[1].split('_')) == 2:
+                param = '%s'%tuple(param_name[1].split('_')[:-1])
+                print param_name[1]
+            else:
+                param = '%s'%param_name[1]
+                # Non model depentant parameters
+                exec('self.%s = pd.read_sql_table("%s", self.con)'%(param,param))
+                done.append(param)
+                print param_name[1]
+                continue
+                
+            if param_name[0] == u'index' or param in done:
+                continue
+            # Figure if needs to be in panel
+            temp_panel = {}
+            for model in fun.models.keys():
+                if model in  param_name[1].split('_'):
+                    temp_panel[model] = pd.read_sql_table('%s_%s'%(param,model),self.con)
+                    done.append('%s_%s'%(param,model))
+            exec('self.%s = pd.Panel(temp_panel)'%param)
+                
+        
 
     def save_chain(self):
         '''Records current chain state'''
@@ -272,18 +308,79 @@ class Param_MCMC(object):
             #ipdb.set_trace()
             # check if database exsists in local dir
             path = os.path.realpath('.')
-            self._temp_db_path =  os.path.join(path,'Age_mltry_save.db')
-            if os.path.exists(self._temp_db_path):
-                raise OSError('Recovery data base exsist. Turn on recovery or delete')
-            self.con = create_engine('sqlite:///%s'%self._temp_db_path)
-            self._vars = vars(self).keys()
+            self.con = {}
+            for model in self.models:
+                self._temp_db_path =  os.path.join(path,'%s_save.db'%model)
+                if os.path.exists(self._temp_db_path):
+                    raise OSError('Recovery data base exsist. Turn on recovery or delete')
+                self.con[model] = create_engine('sqlite:///%s'%self._temp_db_path)
+           
             # create tables for different parameters
-        if option.current % save_num == 0:
-            self._save_db(option)
+            self._create_db()
+        if option.current % save_num == 0 and option.current > 0:
+            self._save_db2(option, save_num)
         
     def delete_temp(self):
         '''Deletes temporary database and other clean ups needed'''
         os.remove(self._temp_db_path)
+
+    def _extract_param(self, num, model):
+        '''extracts the last num params from chains in format from _create_db'''
+        for gal in self.param[model]:
+            try:
+                view_param = self.param[model][gal][-num:]
+                view_chi = self.chi[model][gal][-num:]
+                view_rate = self.acept_rate[model][gal][-num:]
+            except KeyError:
+                # return an iterable None
+                yield None, None
+                break
+            for index, row in enumerate(view_param.values):
+                out = nu.hstack((row, view_chi.values[index], view_rate.values[index],
+                                 self.T_start[model][gal][index], self.T_stop,
+                                 self.sigma[model][gal].values.ravel()))
+                yield out, gal
+            
+        
+    def _save_db2(self, option, save_num):
+        '''saves to db. no pandas'''
+        for model in self.models:
+            con = self.con[model]
+            param = self._extract_param(save_num, model)
+            for row,gal in param:
+                if row is None:
+                    return None
+                con.execute('INSERT INTO "%s" VALUES ('%gal + ', '.join(len(row)*['?'])+')',
+                            tuple(row))
+       
+    def _create_db(self):
+        '''creates database with len(model) models.
+        Each galaxy gets own table and each model is a different database'''
+        for model in self.con:
+            con = self.con[model]
+            input_tab_param = []
+            for gal in self.param[model]:
+                if len( input_tab_param) == 0:
+                    # get params from paramerts
+                    for param in self.param[model][gal].columns:
+                        input_tab_param.append('%s real'%param)
+                    # get chi
+                    input_tab_param.append('chi real')
+                    # get acceptance rate
+                    input_tab_param.append('acept_rate real')
+                    input_tab_param.append('T_start real')
+                    input_tab_param.append('T_stop real')
+                    # extract sigma
+                    for row in self.param[model][gal].columns:
+                        for col in self.param[model][gal].columns:
+                            input_tab_param.append('sigma_%s_%s real'%(row,col))
+                # create table
+                con.execute('CREATE TABLE "%s" (%s)'%(gal,', '.join(input_tab_param)))
+                
+        
+    def _save_param(self):
+        '''Saves param to database deletes old chains to save ram'''
+        con = self.con.connect()
             
     def _save_db(self, option):
         '''Creates db to save chain state'''
@@ -304,6 +401,7 @@ class Param_MCMC(object):
                 
             elif isinstance(temp, pd.Panel4D):
                     for panel in temp:
+                        ipdb.set_trace()
                         temp[panel].to_frame().to_sql(var+'_%s'%panel, self.con,
                                                       if_exists='append')
             elif isinstance(temp, (float,int)):

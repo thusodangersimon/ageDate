@@ -61,7 +61,7 @@ def get_data(num_gal):
 if __name__ == "__main__":
     #Single_LRG_model()
     models = 20
-    #Param, real_param, data = Multiple_LRG_model(models)
+    Param, real_param, data = Multiple_LRG_model(models)
     mpi.COMM_WORLD.barrier()
     t_multi = mpi.Wtime()
     Param, real_param, data = open_mp_LRG_model(models)
