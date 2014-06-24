@@ -34,14 +34,11 @@ import os
 import time as Time
 import cPickle as pik
 import MC_utils as MC
-import pandas as pd
-from  database_utils import numpy_sql
-from sqlalchemy import create_engine
+import pylab as lab
 import ipdb
-from glob import glob
-import acor
+# import acor
 # from memory_profiler import profile
-
+from glob import glob
 a = nu.seterr(all='ignore')
 
 
@@ -55,10 +52,7 @@ def multi_main(fun, option, burnin=5*10**3,  max_iter=10**5,
     Param = Param_MCMC(fun, burnin)
     if fail_recover:
         # fail recovery
-        if isinstance(fail_recover, str):
-            Param.fail_recover(fail_recover)
-        else:
-            raise TypeError('Put in str of path to temporary database')
+        Param.fail_recover(fail_recover)
     else:
         # initalize and check if param are in range
         timeInit = Time.time()
@@ -68,15 +62,13 @@ def multi_main(fun, option, burnin=5*10**3,  max_iter=10**5,
     # Start RJMCMC
     while option.iter_stop:
         bins = Param.bins
-        if option.current % 50 == 0: 
-            try:
-                show = ('acpt = %.2f,log lik = %e, model = %s, steps = %i,ESS = %2.0f'
-                        %(nu.min(Param.acept_rate[bins]),float(Param.chi[bins].tail(1).sum(1)),bins,
-                        option.current, nu.max(Param.sa)))
-                print show
-            except TypeError:
-                pass
+        if option.current % 50 == 0 and option.current > 0:
+            acpt = nu.min([i[-1] for i in Param.acept_rate[bins].values()])
+            chi = nu.sum([i[-1] for i in Param.chi[bins].values()])
             
+            show = ('acpt = %.2f,log lik = %e, model = %s, steps = %i,ESS = %2.0f'
+                    %(acpt, chi, bins, option.current, Param.sa))
+            print show
             sys.stdout.flush()
         # stay, try or jump
         doStayTryJump =  nu.random.rand()
@@ -102,13 +94,12 @@ def multi_main(fun, option, burnin=5*10**3,  max_iter=10**5,
             pass
             #Param.eff = MC.effectiveSampleSize(Param.param[bins])
         # Save currnent Chain state
-        Param.save_state(option)
+        Param.save_state(option.current)
         option.current += 1
         if option.current >= max_iter:
             option.iter_stop = False
     # Finish and return
     fun.exit_signal()
-    Param.delete_temp()
     return Param
 
 
@@ -129,8 +120,7 @@ def stay(Param, fun):
             new_chi[index] += Lik
     #MH critera
     for key in new_chi.keys():
-        if mh_critera(Param.active_chi[bins][key], new_chi[key],
-                      Param.sa[key]):
+        if mh_critera(Param.active_chi[bins][key], new_chi[key], Param.sa ):
             #accept
             #Param.active_chi[bins][key] = new_chi[key] + 0.
             Param.accept(key, new_chi[key])
@@ -195,220 +185,122 @@ class Param_MCMC(object):
     def __doc__(self):
         '''stores params for use in multi_main'''
 
-    def __init__(self, lik_fun, burnin):
-        models = lik_fun.models
-        # global params (Vals)
+    def __init__(self, lik_class, burnin):
         self.eff = -9999999.
         self.burnin = burnin
+        self._look_back = 500
+        self.on_dict, self.on = {}, {}
+        self.active_param, self.sigma = {} ,{}
+        self.active_chi = {}
+        self.acept_rate, self.out_sigma = {},{}
+        self.param, self.chi = {}, {}
+        self.Nacept, self.Nreject = {},{}
+        for bins in lik_class.models:
+            self.active_param[bins], self.sigma[bins] = {}, {}
+            self.active_chi[bins] = {}
+            self.acept_rate[bins], self.out_sigma[bins] = {},{}
+            self.param[bins], self.chi[bins] = {}, {}
+            self.Nacept[bins], self.Nreject[bins] = {},{}
+        
+        # to calculate bayes factor
+        self.bayes_fact = {}
+        # simulated anneling param
+        self.T_cuurent = {}
+        self.Nexchange_ratio = 1.0
+        self.time, self.timeleft = 1, nu.random.exponential(100)
         self.T_stop =  1.
-        # Local but simple (Model->objects as columns)
-        self.chi = pd.Panel({model:pd.DataFrame(columns=models[model]
-                                                , dtype=float) for model in models})
-        self.acept_rate = pd.Panel({model:pd.DataFrame(columns=models[model]
-                                                       , dtype=float) for model in models})
-        self.active_chi = pd.Panel({model:pd.DataFrame(columns=models[model]
-                                                       , dtype=float) for model in models})
-        self.mixing_rates = pd.Panel({model:pd.DataFrame(columns=models[model]) for model in models})
-        self.T_start = pd.Panel({model:pd.DataFrame(columns=models[model]
-                                                      , dtype=float) for model in models})
-        # Local but complex (Model->object->multiple colums
-        #self.active_param
-        #self.out_sigma 
-        #self.sigma 
-        #self.param        
-
+        self.trans_moves = 0
+        # bayes_fact[bins] = #something
+        # set storage functions
 
     def initalize(self, lik_fun):
         '''Initalize certan parms'''
         self.bins = lik_fun.models.keys()[0]
-        panel4d_param, panel4d_sigma= {},{}
         for bins in lik_fun.models:
-            panel_param, panel_sigma = {},{}
+            # model level
+            self.T_cuurent[bins] = 0
             for gal in lik_fun.models[bins]:
-                panel_param[gal], panel_sigma[gal] = lik_fun.initalize_param(gal)
-            panel4d_param[bins] = pd.Panel(panel_param)
-            panel4d_sigma[bins] = pd.Panel(panel_sigma)
-        
-        self.param = pd.Panel4D(panel4d_param)
-        self.active_param = pd.Panel4D(panel4d_param)
-        self.sigma = pd.Panel4D(panel4d_sigma)
-        self.out_sigma  =  [self.sigma.copy()]
-        self.models = lik_fun.models.keys()
-        for bins in lik_fun.models:
-            # check if params are in range
-            lik, prior = (lik_fun.lik(self.active_param, bins),
+                self.active_param[bins][gal], self.sigma[bins][gal] = lik_fun.initalize_param(gal)
+                #self.active_chi[bins][gal] = {}
+                self.out_sigma[bins][gal]  =  [self.sigma[bins][gal][:]]
+            #self.reconfigure(i)
+            self.acept_rate[bins][gal] = []
+            
+        # check if params are in range
+        lik, prior = (lik_fun.lik(self.active_param, bins),
                                lik_fun.prior(self.active_param, bins))
-            #get intal params lik and priors
-            for Prior, gal in prior:
-                if not nu.isfinite(Prior):
-                    # Need to try again with param here
-                    #return True
-                    continue
-                self.active_chi[bins][gal] = Prior
-            for Lik, gal in lik:
-                if not nu.isfinite(Lik):
-                    #return True
-                    continue
-                self.active_chi[bins][gal] += Lik
-                self.chi[bins][gal] = self.active_chi[bins][gal].copy()
-                self.T_start[bins][gal] = self.active_chi[bins][gal].abs().copy()
-                self.acept_rate[bins][gal] = [1.]
-        # Set storage params
-            self.param[bins] = self.active_param[bins].copy()
-            self.SA(0)
-        return not nu.isfinite(float(self.chi[bins].sum(1)))
+        #self.chi[bins] = {}
+        #get intal params lik and priors
+        for Prior, gal in prior:
+            if not nu.isfinite(Prior):
+                return True
+            self.chi[bins][gal] = [Prior]
+            self.active_chi[bins][gal] = Prior
+        for Lik, gal in lik:
+            if not nu.isfinite(Lik):
+                return True
+            self.chi[bins][gal][-1] += Lik
+            self.active_chi[bins][gal] = Lik
+            self.param[bins][gal] = [self.active_param[bins][gal].copy()]
+        self.T_start = abs(nu.max(self.chi[bins].values()))
+        self.SA(0)
+        return not nu.all(nu.isfinite(self.chi[bins].values()))
 
     def fail_recover(self, path):
         '''Loads params from old run'''
-        if not os.path.exists(path):
-            raise OSError('%s does not exsist.'%path)
-        self.con = create_engine('sqlite:///%s'%path)
-        # load saved params as dataframes or panels
-        table_name = self.con.execute('select * from sqlite_master').fetchall()
-        done = []
-        # parse out parameter names
-        for param_name in table_name:
-            if len(param_name[1].split('_')) > 3:
-                print param_name[1]
-                continue
-            elif len(param_name[1].split('_')) == 3:
-                param = '%s_%s'%tuple(param_name[1].split('_')[:-1])
-                print param_name[1]
-            elif len(param_name[1].split('_')) == 2:
-                param = '%s'%tuple(param_name[1].split('_')[:-1])
-                print param_name[1]
-            else:
-                param = '%s'%param_name[1]
-                # Non model depentant parameters
-                exec('self.%s = pd.read_sql_table("%s", self.con)'%(param,param))
-                done.append(param)
-                print param_name[1]
-                continue
-                
-            if param_name[0] == u'index' or param in done:
-                continue
-            # Figure if needs to be in panel
-            temp_panel = {}
-            for model in fun.models.keys():
-                if model in  param_name[1].split('_'):
-                    temp_panel[model] = pd.read_sql_table('%s_%s'%(param,model),self.con)
-                    done.append('%s_%s'%(param,model))
-            exec('self.%s = pd.Panel(temp_panel)'%param)
-                
-        
-
-    def save_chain(self):
-        '''Records current chain state'''
         raise NotImplementedError
-    
-    def save_state(self, option, save_num=500):
+        
+    def save_state(self, path=None):
         '''Saves current state of chain incase run crashes'''
-        # Make db if none created
-        if option.current == 0 or not 'con' in vars(self):
-            #ipdb.set_trace()
-            # check if database exsists in local dir
-            path = os.path.realpath('.')
-            self.con = {}
-            for model in self.models:
-                self._temp_db_path =  os.path.join(path,'%s_save.db'%model)
-                if os.path.exists(self._temp_db_path):
-                    raise OSError('Recovery data base exsist. Turn on recovery or delete')
-                self.con[model] = create_engine('sqlite:///%s'%self._temp_db_path)
-           
-            # create tables for different parameters
-            self._create_db()
-        if option.current % save_num == 0 and option.current > 0:
-            self._save_db2(option, save_num)
-        
-    def delete_temp(self):
-        '''Deletes temporary database and other clean ups needed'''
-        os.remove(self._temp_db_path)
+        raise NotImplementedError
 
-    def _extract_param(self, num, model):
-        '''extracts the last num params from chains in format from _create_db'''
-        for gal in self.param[model]:
-            try:
-                view_param = self.param[model][gal][-num:]
-                view_chi = self.chi[model][gal][-num:]
-                view_rate = self.acept_rate[model][gal][-num:]
-            except KeyError:
-                # return an iterable None
-                yield None, None
-                break
-            for index, row in enumerate(view_param.values):
-                out = nu.hstack((row, view_chi.values[index], view_rate.values[index],
-                                 self.T_start[model][gal][index], self.T_stop,
-                                 self.sigma[model][gal].values.ravel()))
-                yield out, gal
+    def _create_dir_sturct(self, path):
+        '''Create dir structure for failure recovery.
+        Each model -> gal or object is giving a dir and
+        each varible is given own file. Global vars like sigma will be under
+        appropeate places'''
+        cur_parent = path
+        self.save_path = {}
+        # Top is model
+        models = self.chi.keys()
+        for model in models:
+            if not os.path.exists(os.path.join(cur_parent, model)):
+                os.mkdir(os.path.join(cur_parent, model))
+            cur_parent = os.path.join(cur_parent, model)
+            self.save_path[model] = {}
+            # Gal or obj
+            for gal in self.chi[model]:
+                if not os.path.exists(os.path.join(cur_parent, gal)):
+                    os.mkdir(os.path.join(cur_parent, gal))
+                cur_parent = os.path.join(cur_parent, gal)
+                self.save_path[model][gal] = {}
+                # Params in each Gal
+                for param in vars(self):
+                    if param == 'eff' or param == 'save_path':
+                        continue
+                    # [save_obj, path]
+                    cur_parent = os.path.join(cur_parent, param +'.csv')
+                    self.save_path[model][gal][param] = [open(cur_parent,'w'),
+                                                         cur_parent]
+                    cur_parent = os.path.split(cur_parent)[0]
+                cur_parent = os.path.split(cur_parent)[0]
+            cur_parent = os.path.split(cur_parent)[0]
+ 
+    def save_state(self, itter):
+        '''Saves current state of chain incase run crashes'''
+        # Make state folder if none created
+        save_num = self._look_back
+        if itter == 0:
+            # Make directory for saving
+            if not os.path.exists('save_files'):
+                os.mkdir('save_files')
+            else:
+                raise OSError('Fail recovery exsits. Please delete before running agai')
+            self._create_dir_sturct('save_files')
+        if itter % save_num == 0 and itter > 0:
+            self._save_csv(itter, save_num)
+            print 'done'
             
-        
-    def _save_db2(self, option, save_num):
-        '''saves to db. no pandas'''
-        for model in self.models:
-            con = self.con[model]
-            param = self._extract_param(save_num, model)
-            for row,gal in param:
-                if row is None:
-                    return None
-                con.execute('INSERT INTO "%s" VALUES ('%gal + ', '.join(len(row)*['?'])+')',
-                            tuple(row))
-       
-    def _create_db(self):
-        '''creates database with len(model) models.
-        Each galaxy gets own table and each model is a different database'''
-        for model in self.con:
-            con = self.con[model]
-            input_tab_param = []
-            for gal in self.param[model]:
-                if len( input_tab_param) == 0:
-                    # get params from paramerts
-                    for param in self.param[model][gal].columns:
-                        input_tab_param.append('%s real'%param)
-                    # get chi
-                    input_tab_param.append('chi real')
-                    # get acceptance rate
-                    input_tab_param.append('acept_rate real')
-                    input_tab_param.append('T_start real')
-                    input_tab_param.append('T_stop real')
-                    # extract sigma
-                    for row in self.param[model][gal].columns:
-                        for col in self.param[model][gal].columns:
-                            input_tab_param.append('sigma_%s_%s real'%(row,col))
-                # create table
-                con.execute('CREATE TABLE "%s" (%s)'%(gal,', '.join(input_tab_param)))
-                
-        
-    def _save_param(self):
-        '''Saves param to database deletes old chains to save ram'''
-        con = self.con.connect()
-            
-    def _save_db(self, option):
-        '''Creates db to save chain state'''
-        con = self.con.connect()
-        for var in self._vars:
-            temp = eval('self.%s'%var)
-            if isinstance(temp, pd.DataFrame):
-                # dicts with DataFrames mostly for chi
-                # does not work with multiple models
-                for model in temp:
-                    temp[model].to_sql(var, self.con, if_exists='append')
-                    
-            elif isinstance(temp, pd.Panel) and not isinstance(temp,
-                                                               pd.Panel4D) :
-                for frame in temp:
-                    temp[frame].to_sql(var+'_%s'%frame,
-                        self.con, if_exists='append')
-                
-            elif isinstance(temp, pd.Panel4D):
-                    for panel in temp:
-                        ipdb.set_trace()
-                        temp[panel].to_frame().to_sql(var+'_%s'%panel, self.con,
-                                                      if_exists='append')
-            elif isinstance(temp, (float,int)):
-                # save floats as data frames
-                temp_DF = pd.DataFrame([temp],columns=['val'])
-                temp_DF.to_sql(var, self.con, if_exists='replace')
-        
     def singleObjSplit(self):
         '''Checks correlation between params to see if should split'''
         raise NotImplementedError
@@ -416,44 +308,52 @@ class Param_MCMC(object):
     def accept(self, gal, new_chi):
         '''Accepts current state of chain, active_param get saved in param
         if bin is different then model is changed'''
-        if self.mixing_rates[self.bins].empty:
-            self.mixing_rates[self.bins][gal] = [1.]
+        if not gal in self.Nacept[self.bins]:
+            self.Nacept[self.bins][gal] = 1
         else:
-            self.mixing_rates[self.bins][gal] += 1
-        index = self.param[self.bins][gal].shape[0]
-        self.param[self.bins][gal].loc[index] = self.active_param[
-                    self.bins][gal].loc[0]
+            self.Nacept[self.bins][gal] += 1
         
-        if index == self.chi[self.bins].shape[0]:
-            #create new row
-            self.chi[self.bins].loc[index] = None
-        self.chi[self.bins][gal][index] = float(new_chi)+0
+        self.param[self.bins][gal].append(self.active_param[self.bins][gal].copy())
+        self.chi[self.bins][gal].append((new_chi)+0)
         
     def reject(self, gal):
         '''Rejects current state and gets data from memory'''
-        index = self.param[self.bins][gal].shape[0]
-        self.active_param[self.bins][gal] = self.param[self.bins][gal].tail(1).copy()
-        if index == self.chi[self.bins].shape[0]:
-            #create new row
-            self.chi[self.bins].loc[index] = None
-        self.chi[self.bins][gal][index] = self.chi[self.bins][gal][index-1] + 0
-        self.active_chi[self.bins][gal] = self.chi[self.bins][gal][index-1] + 0
-        self.param[self.bins][gal].loc[index] =self.param[self.bins][gal].loc[index-1].copy()
+        #ipdb.set_trace()
+        if gal in self.Nreject[self.bins]:
+            self.Nreject[self.bins][gal] += 1
+        else:
+            self.Nreject[self.bins][gal] = 1
         
+        self.active_param[self.bins][gal] = self.param[self.bins][gal][-1].copy()
+        self.param[self.bins][gal].append(self.param[self.bins][gal][-1].copy())
+        self.chi[self.bins][gal].append(self.chi[self.bins][gal][-1].copy())
+        self.active_chi[self.bins][gal] = self.chi[self.bins][gal][-1].copy()
         
     def step(self, fun, num_iter,step_freq=500.):
         '''check if time to change step size'''
         bins = self.bins
-        self.sigma[bins] = fun.step_func(self.acept_rate,
-                                            self.param, self.sigma, bins)
+        if num_iter % step_freq == 0 and num_iter > 0:
+            for gal in self.sigma[bins]:
+                self.sigma[bins][gal] = fun.step_func(self.acept_rate[bins][gal][-1],
+                                            self.param[bins][gal],
+                                            self.sigma[bins][gal],self._look_back)
         
     def cal_accept(self):
         '''Calculates accepance rate'''
         bins = self.bins
-        for gal in self.acept_rate[bins]:
-            index = self.acept_rate[bins][gal].shape[0]
-            self.acept_rate[bins][gal].loc[index] =self.mixing_rates[bins][gal]/float(index)
-            
+        for gal in self.chi[bins]:
+            if not gal in self.acept_rate[bins]:
+                self.acept_rate[bins][gal] = []
+            # No Nacept acept_rate = 0
+            if not gal in self.Nacept[bins]:
+                self.acept_rate[bins][gal].append(0.)
+            # No Nreject acept_rate = 1
+            elif not gal in self.Nreject[bins]:
+                self.acept_rate[bins][gal].append(1.)
+            else:
+                self.acept_rate[bins][gal].append(self.Nacept[bins][gal] /
+                                                float(self.Nacept[bins][gal] +
+                                                self.Nreject[bins][gal]))
 
     def reconfigure(self, param_max):
         '''Changes grouping or something'''
@@ -471,17 +371,12 @@ class Param_MCMC(object):
         '''Calculates anneeling parameter'''
         bins = self.bins
         if chain_number < self.burnin:
-            #check acceptance rate if to high lower temp
-            '''if self.acept_rate[bins][-1] > .6 and self.T_start > self.T_stop :
-                self.T_start /= 1.05
-            if  self.acept_rate[bins][-1] < .06:
-                self.T_start *= 2.'''
             # make temp close to chi
-            chi_max = self.chi[bins].tail(1).max().abs()
-            if nu.any(self.T_start[bins] > chi_max):
-                self.T_start[bins][self.T_start[bins] > chi_max] = [chi_max[self.T_start[bins] > chi_max]]
+            chi_max = abs(nu.max([self.chi[bins][gal][-1] for gal in self.chi[bins]]))
+            if self.T_start > chi_max:
+                self.T_start = chi_max
             #calculate anneeling
-            self.sa = MC.SA(chain_number, self.burnin, self.T_start[bins], self.T_stop)
+            self.sa = MC.SA(chain_number, self.burnin, self.T_start, self.T_stop)
             
     def plot_param(self):
         '''Plots chains'''
