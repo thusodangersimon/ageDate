@@ -113,31 +113,29 @@ class Multi_LRG_burst(lik.Example_lik_class):
             else:
                 yield out_lik.sum(), gal
 
-    def step_func(self, step_crit, param, step_size, model):
+    def step_func(self, step_crit, param, step_size, itter):
         '''(Example_lik_class, float, ndarray or list, ndarray, any type) ->
         ndarray
         param should be a pandas.DataFrame
         Evaluates step_criteria, with help of param and model and 
         changes step size during burn-in perior. Outputs new step size
         '''
-        for gal in step_size[model]:
-            diag = nu.diagonal(step_size[model][gal])
-            # ipdb.set_trace()
-            if nu.all(step_crit[model].tail(1)[gal] >.3) and nu.all(diag < 8.):
-                step_size[model][gal] *= 1.05
-            elif nu.all(step_crit[model].tail(1)[gal] < .2) and nu.any(diag > 10**-6):
-                step_size[model][gal] /= 1.05
-            #cov matrix
-            length = param[model][gal].shape[0]
-            if length % 200 == 0 and length > 0.:
-                #print 'here'
-                #ipdb.set_trace()
-                step_size[model][gal] = param[model][gal][-2000:].cov().values
-                #make sure not stuck
-                '''if nu.any(temp.diagonal() > 10**-6):
-                    step_size[model][gal] = temp'''
+        diag = nu.diagonal(step_size)
+        # ipdb.set_trace()
+        if nu.all(step_crit > 0.3) and nu.all(diag < 8.):
+            step_size *= 1.05
+        elif nu.all(step_crit < 0.2) and nu.any(diag > 10**-6):
+                step_size /= 1.05
+        #cov matrix
+        if itter % 200 == 0 and itter > 0.:
+            #print 'here'
+            #ipdb.set_trace()
+            step_size = nu.cov(param[-2000:].T)
+            #make sure not stuck
+            '''if nu.any(temp.diagonal() > 10**-6):
+            step_size[model][gal] = temp'''
         
-        return step_size[model]
+        return step_size
 
     def initalize_param(self, bins):
         dtype = []

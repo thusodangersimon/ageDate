@@ -34,7 +34,7 @@ import os
 import time as Time
 import cPickle as pik
 import MC_utils as MC
-import pylab as lab
+import pandas as pd
 import ipdb
 # import acor
 # from memory_profiler import profile
@@ -62,12 +62,12 @@ def multi_main(fun, option, burnin=5*10**3,  max_iter=10**5,
     # Start RJMCMC
     while option.iter_stop:
         bins = Param.bins
-        if option.current % 50 == 0 and option.current > 0:
+        if option.current % 1 == 0 and option.current > 0:
             acpt = nu.min([i[-1] for i in Param.acept_rate[bins].values()])
             chi = nu.sum([i[-1] for i in Param.chi[bins].values()])
             
             show = ('acpt = %.2f,log lik = %e, model = %s, steps = %i,ESS = %2.0f'
-                    %(acpt, chi, bins, option.current, Param.sa))
+                    %(acpt, chi, bins, option.current, nu.min(Param.sa.values())))
             print show
             sys.stdout.flush()
         # stay, try or jump
@@ -120,7 +120,8 @@ def stay(Param, fun):
             new_chi[index] += Lik
     #MH critera
     for key in new_chi.keys():
-        if mh_critera(Param.active_chi[bins][key], new_chi[key], Param.sa ):
+        if mh_critera(Param.active_chi[bins][key], new_chi[key],
+                      Param.sa[key] ):
             #accept
             #Param.active_chi[bins][key] = new_chi[key] + 0.
             Param.accept(key, new_chi[key])
@@ -201,24 +202,16 @@ class Param_MCMC(object):
             self.acept_rate[bins], self.out_sigma[bins] = {},{}
             self.param[bins], self.chi[bins] = {}, {}
             self.Nacept[bins], self.Nreject[bins] = {},{}
-        
-        # to calculate bayes factor
-        self.bayes_fact = {}
         # simulated anneling param
-        self.T_cuurent = {}
-        self.Nexchange_ratio = 1.0
-        self.time, self.timeleft = 1, nu.random.exponential(100)
+        self.T_start = {}
+        self.sa = {}
         self.T_stop =  1.
-        self.trans_moves = 0
-        # bayes_fact[bins] = #something
-        # set storage functions
-
+        
     def initalize(self, lik_fun):
         '''Initalize certan parms'''
         self.bins = lik_fun.models.keys()[0]
         for bins in lik_fun.models:
             # model level
-            self.T_cuurent[bins] = 0
             for gal in lik_fun.models[bins]:
                 self.active_param[bins][gal], self.sigma[bins][gal] = lik_fun.initalize_param(gal)
                 #self.active_chi[bins][gal] = {}
@@ -242,7 +235,7 @@ class Param_MCMC(object):
             self.chi[bins][gal][-1] += Lik
             self.active_chi[bins][gal] = Lik
             self.param[bins][gal] = [self.active_param[bins][gal].copy()]
-        self.T_start = abs(nu.max(self.chi[bins].values()))
+            self.T_start[gal] = abs(nu.max(self.chi[bins].values()))
         self.SA(0)
         return not nu.all(nu.isfinite(self.chi[bins].values()))
 
@@ -250,9 +243,34 @@ class Param_MCMC(object):
         '''Loads params from old run'''
         raise NotImplementedError
         
-    def save_state(self, path=None):
+    def _save_csv(self, indici, dump_number):
         '''Saves current state of chain incase run crashes'''
-        raise NotImplementedError
+        for model in self.save_path:
+            for gal in self.save_path[model]:
+                for param in self.save_path[model][gal]:
+                    if param in ['T_start']:
+                        save_param = eval('self.%s["%s"]'%(param,gal))
+                    else:
+                        save_param = eval('self.%s["%s"]["%s"]'%(param,model,
+                                                                 gal))
+                    print save_param, param
+                    if isinstance(save_param[0], (nu.ndarray,list)):
+                        try:
+                            nu.savetxt(self.save_path[model][gal][param][0],
+                                save_param[:-1])
+                        except:
+                            ipdb.set_trace()
+                    elif isinstance(save_param[0], pd.DataFrame):
+                        nu.savetxt(self.save_path[model][gal][param][0],
+                                    [i.values[0] for i in save_param[:-1]])
+                    elif isinstance(save_param, (float,int)):
+                        nu.savetxt(self.save_path[model][gal][param][0],save_param)
+                    else:
+                        ipdb.set_trace()
+                    self.save_path[model][gal][param][0].flush()
+                    # Save only current val
+                    save_param = [save_param[-1]]
+                    print save_param
 
     def _create_dir_sturct(self, path):
         '''Create dir structure for failure recovery.
@@ -260,6 +278,8 @@ class Param_MCMC(object):
         each varible is given own file. Global vars like sigma will be under
         appropeate places'''
         cur_parent = path
+        save_list = ['acept_rate', 'chi', 'sigma' ,'param','T_stop'
+                     ,'T_start', 'Nacept', 'Nreject'] 
         self.save_path = {}
         # Top is model
         models = self.chi.keys()
@@ -276,11 +296,11 @@ class Param_MCMC(object):
                 self.save_path[model][gal] = {}
                 # Params in each Gal
                 for param in vars(self):
-                    if param == 'eff' or param == 'save_path':
+                    if not param in save_list :
                         continue
                     # [save_obj, path]
                     cur_parent = os.path.join(cur_parent, param +'.csv')
-                    self.save_path[model][gal][param] = [open(cur_parent,'w'),
+                    self.save_path[model][gal][param] = [open(cur_parent,'a'),
                                                          cur_parent]
                     cur_parent = os.path.split(cur_parent)[0]
                 cur_parent = os.path.split(cur_parent)[0]
@@ -289,7 +309,7 @@ class Param_MCMC(object):
     def save_state(self, itter):
         '''Saves current state of chain incase run crashes'''
         # Make state folder if none created
-        save_num = self._look_back
+        save_num = 50 #self._look_back
         if itter == 0:
             # Make directory for saving
             if not os.path.exists('save_files'):
@@ -371,12 +391,14 @@ class Param_MCMC(object):
         '''Calculates anneeling parameter'''
         bins = self.bins
         if chain_number < self.burnin:
-            # make temp close to chi
-            chi_max = abs(nu.max([self.chi[bins][gal][-1] for gal in self.chi[bins]]))
-            if self.T_start > chi_max:
-                self.T_start = chi_max
-            #calculate anneeling
-            self.sa = MC.SA(chain_number, self.burnin, self.T_start, self.T_stop)
+            for gal in self.T_start:
+                # make temp close to chi
+                chi_max = abs(nu.max(self.chi[bins][gal]))
+                if self.T_start[gal] > chi_max:
+                    self.T_start[gal] = chi_max
+                #calculate anneeling
+                self.sa[gal] = MC.SA(chain_number, self.burnin, self.T_start[gal],
+                                     self.T_stop)
             
     def plot_param(self):
         '''Plots chains'''
