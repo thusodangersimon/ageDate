@@ -251,26 +251,38 @@ class Param_MCMC(object):
                     if param in ['T_start']:
                         save_param = eval('self.%s["%s"]'%(param,gal))
                     else:
-                        save_param = eval('self.%s["%s"]["%s"]'%(param,model,
-                                                                 gal))
-                    print save_param, param
-                    if isinstance(save_param[0], (nu.ndarray,list)):
                         try:
-                            nu.savetxt(self.save_path[model][gal][param][0],
-                                save_param[:-1])
+                        
+                            save_param = eval('self.%s["%s"]["%s"]'%(param,
+                                                                    model, gal))
+                        except KeyError:
+                            print 'self.%s["%s"]["%s"] Does not exsist.'%(param
+                                                                ,model,gal)
                         except:
                             ipdb.set_trace()
-                    elif isinstance(save_param[0], pd.DataFrame):
-                        nu.savetxt(self.save_path[model][gal][param][0],
+                    if isinstance(save_param, (nu.ndarray,list)):
+                        #check contents
+                        if isinstance(save_param[0], (float, nu.ndarray, list)):
+                            #check if
+                            nu.savetxt(self.save_path[model][gal][param][0],
+                                save_param[:-1])
+                        elif isinstance(save_param[0], pd.DataFrame):
+                            nu.savetxt(self.save_path[model][gal][param][0],
                                     [i.values[0] for i in save_param[:-1]])
+                        # Save only current val
+                        #ipdb.set_trace()
+                        #skip sigma
+                        if param in ['sigma']:
+                            continue
+                        exec('self.%s["%s"]["%s"]=[save_param[-1]]'%(param, model, gal))
                     elif isinstance(save_param, (float,int)):
-                        nu.savetxt(self.save_path[model][gal][param][0],save_param)
+                        nu.savetxt(self.save_path[model][gal][param][0],
+                                   [save_param])
                     else:
                         ipdb.set_trace()
+                    if isinstance(self.save_path[model][gal][param][0],str):
+                        continue
                     self.save_path[model][gal][param][0].flush()
-                    # Save only current val
-                    save_param = [save_param[-1]]
-                    print save_param
 
     def _create_dir_sturct(self, path):
         '''Create dir structure for failure recovery.
@@ -278,7 +290,7 @@ class Param_MCMC(object):
         each varible is given own file. Global vars like sigma will be under
         appropeate places'''
         cur_parent = path
-        save_list = ['acept_rate', 'chi', 'sigma' ,'param','T_stop'
+        save_list = ['acept_rate', 'chi', 'sigma' ,'param'
                      ,'T_start', 'Nacept', 'Nreject'] 
         self.save_path = {}
         # Top is model
@@ -288,6 +300,11 @@ class Param_MCMC(object):
                 os.mkdir(os.path.join(cur_parent, model))
             cur_parent = os.path.join(cur_parent, model)
             self.save_path[model] = {}
+            # save model param
+            for glob_modle in ['T_stop', 'burnin']:
+                nu.savetxt(os.path.join(cur_parent,glob_modle + '.csv'),
+                           [eval('self.%s'%glob_modle)])
+            
             # Gal or obj
             for gal in self.chi[model]:
                 if not os.path.exists(os.path.join(cur_parent, gal)):
@@ -300,8 +317,16 @@ class Param_MCMC(object):
                         continue
                     # [save_obj, path]
                     cur_parent = os.path.join(cur_parent, param +'.csv')
-                    self.save_path[model][gal][param] = [open(cur_parent,'a'),
-                                                         cur_parent]
+                    # whether to append
+                    self.save_path[model][gal][param] =[]
+                    appender = self.save_path[model][gal][param].append
+                    if param in ['sigma','T_start', 'Nacept', 'Nreject']:
+                        # Overwrite
+                        appender(cur_parent)
+                    else:
+                        # Append
+                        appender(open(cur_parent,'a'))
+                    appender(cur_parent)
                     cur_parent = os.path.split(cur_parent)[0]
                 cur_parent = os.path.split(cur_parent)[0]
             cur_parent = os.path.split(cur_parent)[0]

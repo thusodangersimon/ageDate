@@ -16,6 +16,8 @@ import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning) 
 '''Likelyhood and functions needed for MCMC for LRGS'''
 
+
+
 class Multi_LRG_burst(lik.Example_lik_class):
     '''Single core, LRG likelihood function'''
     def __init__(self, data, db_name='burst_dtau_10.db', have_dust=False,

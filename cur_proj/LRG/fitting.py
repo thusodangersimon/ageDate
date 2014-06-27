@@ -64,7 +64,7 @@ if __name__ == "__main__":
     Param, real_param, data = Multiple_LRG_model(models)
     mpi.COMM_WORLD.barrier()
     t_multi = mpi.Wtime()
-    Param, real_param, data = open_mp_LRG_model(models)
+    #Param, real_param, data = open_mp_LRG_model(models)
     t_multi -= mpi.Wtime()
     #import cPickle as pik
     #pik.dump((Param, real_param, data),open('test.pik','w'),2)
