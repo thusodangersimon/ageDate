@@ -237,6 +237,7 @@ class Param_MCMC(object):
             self.param[bins][gal] = [self.active_param[bins][gal].copy()]
             self.T_start[gal] = abs(nu.max(self.chi[bins].values()))
         self.SA(0)
+        self.save_state(0, lik_fun)
         return not nu.all(nu.isfinite(self.chi[bins].values()))
 
     def fail_recover(self, path):
@@ -284,7 +285,7 @@ class Param_MCMC(object):
                         continue
                     self.save_path[model][gal][param][0].flush()
 
-    def _create_dir_sturct(self, path):
+    def _create_dir_sturct(self, path, lik):
         '''Create dir structure for failure recovery.
         Each model -> gal or object is giving a dir and
         each varible is given own file. Global vars like sigma will be under
@@ -304,13 +305,16 @@ class Param_MCMC(object):
             for glob_modle in ['T_stop', 'burnin']:
                 nu.savetxt(os.path.join(cur_parent,glob_modle + '.csv'),
                            [eval('self.%s'%glob_modle)])
-            
+                
             # Gal or obj
             for gal in self.chi[model]:
                 if not os.path.exists(os.path.join(cur_parent, gal)):
                     os.mkdir(os.path.join(cur_parent, gal))
                 cur_parent = os.path.join(cur_parent, gal)
                 self.save_path[model][gal] = {}
+                # save fitting data
+                nu.savetxt(os.path.join(cur_parent, gal+ '.csv'), lik.data[gal]
+                           ,header='wavelength, flux*%2.2f'%lik.norm_prior[gal])
                 # Params in each Gal
                 for param in vars(self):
                     if not param in save_list :
@@ -331,17 +335,17 @@ class Param_MCMC(object):
                 cur_parent = os.path.split(cur_parent)[0]
             cur_parent = os.path.split(cur_parent)[0]
  
-    def save_state(self, itter):
+    def save_state(self, itter, lik=None):
         '''Saves current state of chain incase run crashes'''
         # Make state folder if none created
         save_num = 50 #self._look_back
-        if itter == 0:
+        if itter == 0 and not lik is None:
             # Make directory for saving
             if not os.path.exists('save_files'):
                 os.mkdir('save_files')
             else:
-                raise OSError('Fail recovery exsits. Please delete before running agai')
-            self._create_dir_sturct('save_files')
+                raise OSError('Fail recovery exsits. Please delete before running again')
+            self._create_dir_sturct('save_files', lik)
         if itter % save_num == 0 and itter > 0:
             self._save_csv(itter, save_num)
             print 'done'
