@@ -52,7 +52,7 @@ def multi_main(fun, option, burnin=5*10**3,  max_iter=10**5,
     Param = Param_MCMC(fun, burnin)
     if fail_recover:
         # fail recovery
-        Param.fail_recover(fail_recover)
+        fun, option, burnin = Param.fail_recover(fail_recover,fun, option)
     else:
         # initalize and check if param are in range
         timeInit = Time.time()
@@ -65,10 +65,12 @@ def multi_main(fun, option, burnin=5*10**3,  max_iter=10**5,
         if option.current % 1 == 0 and option.current > 0:
             acpt = nu.min([i[-1] for i in Param.acept_rate[bins].values()])
             chi = nu.sum([i[-1] for i in Param.chi[bins].values()])
-            
-            show = ('acpt = %.2f,log lik = %e, model = %s, steps = %i,ESS = %2.0f'
+            try:
+                show = ('acpt = %.2f,log lik = %e, model = %s, steps = %i,ESS = %2.0f'
                     %(acpt, chi, bins, option.current, nu.min(Param.sa.values())))
-            print show
+                print show
+            except:
+                pass
             sys.stdout.flush()
         # stay, try or jump
         doStayTryJump =  nu.random.rand()
@@ -240,10 +242,82 @@ class Param_MCMC(object):
         self.save_state(0, lik_fun)
         return not nu.all(nu.isfinite(self.chi[bins].values()))
 
-    def fail_recover(self, path):
+    def fail_recover(self, path, lik_fun, option):
         '''Loads params from old run'''
-        raise NotImplementedError
-        
+        out_size = 0
+        if isinstance(path, str):
+            # Path is a path
+            if not os.path.exists(path):
+                # Print warning and make save recovery dir
+                pass
+        else:
+            # standard path
+            if not os.path.exists('save_files'):
+                pass
+            else:
+                path = 'save_files'
+        self.save_path = {}
+        lik_fun.data = {}
+        # should be 3 layers of files [models,gal,local_parameters]
+        walker = os.walk(path)
+        dir, models,files = walker.next()
+        for model in models:
+            self.save_path[model] = {}
+        # Get gal
+        dir, gals, files = walker.next()
+        dir = path
+        for model in models:
+            self.bins = model
+            dir = os.path.join(dir, model)
+            # global params
+            for globes in files:
+                g = globes.split('.')[0]
+                if not g in ['burnin']:
+                    exec('self.%s = nu.loadtxt(open(os.path.join(dir,globes)))'%g)
+                    
+                else:
+                    burnin = nu.loadtxt(open(os.path.join(dir,globes)))
+            for gal in gals:
+                dir = os.path.join(dir, gal)
+                self.save_path[model][gal] = {}
+                files = os.listdir(dir)
+                for param in files:
+                    p = param.split('.')[0]
+                    if p in gals:
+                        lik_fun.data[p] = nu.loadtxt(os.path.join(dir,param))
+                        # Get header?
+                        continue
+                    self.save_path[model][gal][p] = []
+                    # Path
+                    self.save_path[model][gal][p].append(os.path.join(dir,param))
+                    # Open file
+                    self.save_path[model][gal][p].append(open(os.path.join(dir,param),
+                                                              'a'))
+                    # Load param
+                    try:
+                        exec('self.%s["%s"]["%s"]'%(p, model, gal)
+                            +' = nu.loadtxt(open(os.path.join(dir,param)))')
+                        #print 'self.%s["%s"]["%s"]'%(p, model, gal)
+                        # Check shape
+                        size = eval('self.%s["%s"]["%s"].size'%(p, model, gal))
+                        if size > 1 and not p in ['sigma']:
+                            out_size = max(out_size,
+                                eval('self.%s["%s"]["%s"].shape[0]'%(p, model, gal)))
+                            exec('self.%s["%s"]["%s"] = '%(p, model, gal) +
+                                 'self.%s["%s"]["%s"][-self._look_back:]'%(p, model, gal))
+                    except KeyError:
+                        exec('self.%s["%s"]'%(p, gal)
+                            +' = nu.loadtxt(open(os.path.join(dir,param)))')
+                        #print 'self.%s["%s"]'%(p, gal)
+                    
+                    # Remove all but curent few
+                dir = os.path.split(dir)[0]
+                # set activie param
+                self.active_chi[model][gal] = nu.copy(self.chi[model][gal][-1])
+                self.active_param[model][gal] = nu.copy(self.param[model][gal][-1])
+        option.current = nu.array([[out_size]])
+        return lik_fun, option, burnin
+    
     def _save_csv(self, indici, dump_number):
         '''Saves current state of chain incase run crashes'''
         for model in self.save_path:

@@ -30,7 +30,11 @@
 """ Utilites used for makeing and accessing databases"""
 
 import numpy as nu
-import tables as tab
+try:
+    import tables as tab
+    tab_import = True
+except ImportError:
+    tab_import = False
 import os
 from interp_utils import n_dim_interp
 from sklearn.neighbors import NearestNeighbors as NN
@@ -38,8 +42,8 @@ import sqlite3
 import io
 
 '''Pytable utils for searching and adding spectra with params to a .h5 file'''
-
-class CV_lib(tab.IsDescription):
+if tab_import:
+ class CV_lib(tab.IsDescription):
     '''Storage param and spectra for white dwarf atomspheres'''
     Temp = tab.Float64Col()
     logg = tab.Float64Col()
