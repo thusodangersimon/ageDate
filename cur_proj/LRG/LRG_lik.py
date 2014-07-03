@@ -337,18 +337,26 @@ class LRG_mpi_lik(Multi_LRG_burst):
         index = -1
         recv_num = []
         # send to all
-        for worker in xrange(1,  self._comm.size):
+        while True:
             status = mpi.Status()
             recv = self._comm.recv(source=mpi.ANY_SOURCE, tag=mpi.ANY_TAG,
                                    status=status)
             if not status.tag == 1:
                 print "Didn't get right signal"
                 raise
+            if recv[0]['rank'] in recv_num:
+                continue
             recv_num.append(recv[0]['rank'])
             # Send data
             self._comm.send((self.data,self.norm_prior,self.norm), dest=status.source,
                              tag=3)
-            
+            # Check if all workers have data
+            if nu.all(nu.sort(recv_num) == nu.sort(self._workers)):
+                # send a 5 so they listen again
+                for worker in recv_num:
+                    self._comm.send([], dest=worker, tag=5)
+                break
+        
     def get_workers(self):
         self._workers = range(1,self._size)
 
