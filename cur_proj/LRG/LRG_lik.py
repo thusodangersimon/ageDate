@@ -130,9 +130,8 @@ class Multi_LRG_burst(lik.Example_lik_class):
                 step_size /= 1.05
         #cov matrix
         if itter % 200 == 0 and itter > 0.:
-            #print 'here'
             #ipdb.set_trace()
-            step_size = nu.cov(param[-2000:].T)
+            step_size = nu.cov(nu.vstack(param[-2000:]).T)
             #make sure not stuck
             '''if nu.any(temp.diagonal() > 10**-6):
             step_size[model][gal] = temp'''
@@ -183,8 +182,8 @@ class Multi_LRG_burst(lik.Example_lik_class):
             out_lik = nu.sum([stats_dist.uniform.logpdf(param[bins][gal].iloc[0][i],
                                                          ran.min(),ran.ptp())
                                 for i,ran in enumerate(self.param_range)])
-            
             norm = param[bins][gal]['normalization'] < -50
+            
             if norm.bool():
                 out_lik += -nu.inf
             else:

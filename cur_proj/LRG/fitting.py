@@ -4,18 +4,22 @@ import model
 import mpi_top
 from mpi4py import MPI as mpi
 from numpy.random import randint
+import cPickle as pik
 '''Called for fitting of LRG'''
 
 
 
-def Single_LRG_model():
+def Single_LRG_model(db_path='/home/thuso/Phd/experements/hierarical/LRG_Stack/burst_dtau_10.db'):
     '''Does fit for sigle LRG model. Plots results'''
     # make model
-    data, real_param = get_data(1)
+    data, real_param = get_data(1, db_path)
     #fit model
-    fun = lik.Multi_LRG_burst(data,'/home/thuso/Phd/experements/hierarical/LRG_Stack/burst_dtau_10.db')
+    fun = lik.Multi_LRG_burst(data, db_path)
     top = mpi_top.Topologies('single')
-    out_class =  mltry.multi_main(fun, top)
+    try:
+        out_class =  mltry.multi_main(fun, top, fail_recover=True)
+    except mltry.MCMCError:
+        out_class =  mltry.multi_main(fun, top)
     #plot marginal historgram
     
 
@@ -44,7 +48,12 @@ def open_mp_LRG_model(num_gal, db_path='/home/thuso/Phd/experements/hierarical/L
         fun.lik_worker()
     else:
         top = mpi_top.Topologies('single')
-        out_class =  mltry.multi_main(fun, top, max_iter=10**6)
+        try:
+            out_class =  mltry.multi_main(fun, top, max_iter=10**6,
+                                          fail_recover=True)
+        except mltry.MCMCError:
+            pik.dump((data, real_param), open('save_param.pik','w'), 2)
+            out_class =  mltry.multi_main(fun, top, max_iter=10**6)
         return out_class, real_param, data
     
     
@@ -65,16 +74,17 @@ if __name__ == "__main__":
     #Param, real_param, data = Multiple_LRG_model(models)
     mpi.COMM_WORLD.barrier()
     t_multi = mpi.Wtime()
-    if mpi.Get_processor_name() == 'mightee.ast.uct.ac.za':
-        db_path = '/home/thuso/Phd/experements/hierarical/LRG_Stack/burst_dtau_10.db'
-    else:
-        db_path = '/mnt/burst_dtau_10.db'
+    #if mpi.Get_processor_name() == 'mightee.ast.uct.ac.za':
+    db_path = '/home/thuso/Phd/experements/hierarical/LRG_Stack/burst_dtau_10.db'
+    #else:
+        #db_path = '/mnt/burst_dtau_10.db'
     if not os.path.exists(db_path):
         
         print '%s rank %i cannot find db'%(mpi.Get_processor_name(),
                                            mpi.COMM_WORLD.rank)
     Param, real_param, data = open_mp_LRG_model(models, db_path)
+    #Single_LRG_model()
     t_multi -= mpi.Wtime()
     #import cPickle as pik
-    #pik.dump((Param, real_param, data),open('test.pik','w'),2)
+    pik.dump((Param, real_param, data),open('test.pik','w'),2)
     #print 'Sigle time %f. Multi time %f'%(abs(t_single),abs(t_multi))

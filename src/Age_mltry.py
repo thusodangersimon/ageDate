@@ -253,11 +253,12 @@ class Param_MCMC(object):
         else:
             # standard path
             if not os.path.exists('save_files'):
-                pass
+                raise MCMCError('No fail recovery. Turn off in options')
             else:
                 path = 'save_files'
         self.save_path = {}
         lik_fun.data = {}
+        lik_fun.norm_prior = {}
         # should be 3 layers of files [models,gal,local_parameters]
         walker = os.walk(path)
         dir, models,files = walker.next()
@@ -285,41 +286,66 @@ class Param_MCMC(object):
                     p = param.split('.')[0]
                     if p in gals:
                         lik_fun.data[p] = nu.loadtxt(os.path.join(dir,param))
+                        lik_fun.norm_prior[p] = 1.
                         # Get header?
                         continue
                     self.save_path[model][gal][p] = []
+                    # Open file
+                    if p in ['sigma', 'T_start', 'Nacept', 'Nreject']:
+                        self.save_path[model][gal][p].append(os.path.join(dir,param))
+                    else:
+                        self.save_path[model][gal][p].append(open(os.path.join(dir,param),
+                                                              'a'))
                     # Path
                     self.save_path[model][gal][p].append(os.path.join(dir,param))
-                    # Open file
-                    self.save_path[model][gal][p].append(open(os.path.join(dir,param),
-                                                              'a'))
                     # Load param
                     try:
-                        exec('self.%s["%s"]["%s"]'%(p, model, gal)
+                        if p == 'param':
+                            self.param[model][gal] = []
+                            temp = pd.DataFrame.from_csv(open(os.path.join(dir,param)),
+                                                              sep=' ',index_col=None
+                                                              ,header=0)
+                            # append into param
+                            for i in range(temp.index.max()-self._look_back,
+                                           temp.index.max()):
+                                self.param[model][gal].append(temp.irow([i]))
+                        else:
+                            exec('self.%s["%s"]["%s"]'%(p, model, gal)
                             +' = nu.loadtxt(open(os.path.join(dir,param)))')
-                        #print 'self.%s["%s"]["%s"]'%(p, model, gal)
-                        # Check shape
-                        size = eval('self.%s["%s"]["%s"].size'%(p, model, gal))
-                        if size > 1 and not p in ['sigma']:
-                            out_size = max(out_size,
-                                eval('self.%s["%s"]["%s"].shape[0]'%(p, model, gal)))
-                            exec('self.%s["%s"]["%s"] = '%(p, model, gal) +
+                            #print 'self.%s["%s"]["%s"]'%(p, model, gal)
+                            # Check shape
+                            size = eval('self.%s["%s"]["%s"].size'%(p, model, gal))
+                            if size > 1 and not p in ['sigma']:
+                                out_size = max(out_size,
+                                    eval('self.%s["%s"]["%s"].shape[0]'%(p, model, gal)))
+                                exec('self.%s["%s"]["%s"] = '%(p, model, gal) +
                                  'self.%s["%s"]["%s"][-self._look_back:]'%(p, model, gal))
+                            elif not p in ['sigma']:
+                                # change from ndarray(0-d) to float or int
+                                #print 'self.%s["%s"]["%s"].shape[0]'%(p, model, gal)
+                                exec('self.%s["%s"]["%s"] = '%(p, model, gal) +
+                                 'float(self.%s["%s"]["%s"])'%(p, model, gal))
                     except KeyError:
                         exec('self.%s["%s"]'%(p, gal)
-                            +' = nu.loadtxt(open(os.path.join(dir,param)))')
+                            +' = float(nu.loadtxt(open(os.path.join(dir,param))))')
                         #print 'self.%s["%s"]'%(p, gal)
                     
                     # Remove all but curent few
                 dir = os.path.split(dir)[0]
                 # set activie param
                 self.active_chi[model][gal] = nu.copy(self.chi[model][gal][-1])
-                self.active_param[model][gal] = nu.copy(self.param[model][gal][-1])
+                self.chi[model][gal] = [i for i in self.chi[model][gal]]
+                self.acept_rate[model][gal] = [i for i in self.acept_rate[model][gal]]
+                self.active_param[model][gal] = self.param[model][gal][-1].copy()
+            self.active_param[model] = pd.Panel(self.active_param[model])
         option.current = nu.array([[out_size]])
+        self.SA(out_size)
+        #ipdb.set_trace()
         return lik_fun, option, burnin
     
     def _save_csv(self, indici, dump_number):
         '''Saves current state of chain incase run crashes'''
+        #ipdb.set_trace()
         for model in self.save_path:
             for gal in self.save_path[model]:
                 for param in self.save_path[model][gal]:
@@ -337,6 +363,7 @@ class Param_MCMC(object):
                             ipdb.set_trace()
                     if isinstance(save_param, (nu.ndarray,list)):
                         #check contents
+                        
                         if isinstance(save_param[0], (float, nu.ndarray, list)):
                             #check if
                             nu.savetxt(self.save_path[model][gal][param][0],
@@ -345,9 +372,8 @@ class Param_MCMC(object):
                             nu.savetxt(self.save_path[model][gal][param][0],
                                     [i.values[0] for i in save_param[:-1]])
                         # Save only current val
-                        #ipdb.set_trace()
-                        #skip sigma
                         if param in ['sigma']:
+                            nu.savetxt(self.save_path[model][gal][param][0],save_param)
                             continue
                         exec('self.%s["%s"]["%s"]=[save_param[-1]]'%(param, model, gal))
                     elif isinstance(save_param, (float,int)):
@@ -405,6 +431,11 @@ class Param_MCMC(object):
                         # Append
                         appender(open(cur_parent,'a'))
                     appender(cur_parent)
+                    if param == 'param':
+                        # Save header
+                        writer = self.save_path[model][gal][param][0].write
+                        writer(' '.join(self.param[model][gal][0].columns)+'\n')
+                        self.save_path[model][gal][param][0].flush()
                     cur_parent = os.path.split(cur_parent)[0]
                 cur_parent = os.path.split(cur_parent)[0]
             cur_parent = os.path.split(cur_parent)[0]
@@ -412,7 +443,7 @@ class Param_MCMC(object):
     def save_state(self, itter, lik=None):
         '''Saves current state of chain incase run crashes'''
         # Make state folder if none created
-        save_num = 50 #self._look_back
+        save_num = self._look_back
         if itter == 0 and not lik is None:
             # Make directory for saving
             if not os.path.exists('save_files'):
@@ -455,11 +486,13 @@ class Param_MCMC(object):
     def step(self, fun, num_iter,step_freq=500.):
         '''check if time to change step size'''
         bins = self.bins
-        if num_iter % step_freq == 0 and num_iter > 0:
+        #if num_iter % step_freq == 0 and num_iter > 0:
+        if num_iter > 10:
             for gal in self.sigma[bins]:
+                
                 self.sigma[bins][gal] = fun.step_func(self.acept_rate[bins][gal][-1],
                                             self.param[bins][gal],
-                                            self.sigma[bins][gal],self._look_back)
+                                            self.sigma[bins][gal],num_iter)
         
     def cal_accept(self):
         '''Calculates accepance rate'''
