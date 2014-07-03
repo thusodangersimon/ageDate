@@ -79,7 +79,6 @@ if __name__ == "__main__":
     #else:
         #db_path = '/mnt/burst_dtau_10.db'
     if not os.path.exists(db_path):
-        
         print '%s rank %i cannot find db'%(mpi.Get_processor_name(),
                                            mpi.COMM_WORLD.rank)
     Param, real_param, data = open_mp_LRG_model(models, db_path)

@@ -224,7 +224,11 @@ class Multi_LRG_burst(lik.Example_lik_class):
         '''Does any wrap ups before exiting'''
         pass
 
-    
+    def send_fitting_data(self):
+        '''Send data to workers'''
+        # Not needed with out mpi so return None
+        return None
+        
 class LRG_mpi_lik(Multi_LRG_burst):
     '''Does LRG fitting and sends likelihood cal to different
     processors'''
@@ -242,7 +246,6 @@ class LRG_mpi_lik(Multi_LRG_burst):
         else:
             self.calc_lik = self.lik
             self.lik = self.lik_worker
-    
 
     def lik_worker(self):
         '''Does lik calculation for sent galaxies, returns likelihood'''
@@ -279,6 +282,10 @@ class LRG_mpi_lik(Multi_LRG_burst):
             if status.tag == 5:
                 #do nothing
                 pass
+            if status.tag == 3:
+                # recive fitting data
+                print "%i recived new data from root"%self._rank
+                self.data, self.norm_prior, self.norm = recv
                 
     def lik_root(self, param, bins, return_model=False):
         '''Root lik calculator, manages workers for likelihood calcs'''
@@ -287,6 +294,7 @@ class LRG_mpi_lik(Multi_LRG_burst):
         # tag 10 codes for requesting more data.
         # tag 5 codes for doing nothing
         # Tag 2 codes for a worker exiting.
+        # Tag 3 codes to send/recive new fitting data
         index = -1
         #gal = param[bins].keys()[index]
         recv_num = []
@@ -321,6 +329,26 @@ class LRG_mpi_lik(Multi_LRG_burst):
                 # Worker crashed
                 self.remove_workers(status.source)
                 
+    def send_fitting_data(self):
+        '''Sends fitting data to workers from root'''
+        # check if needed
+        if self._comm.size < 2:
+            return None
+        index = -1
+        recv_num = []
+        # send to all
+        for worker in xrange(1,  self._comm.size):
+            status = mpi.Status()
+            recv = self._comm.recv(source=mpi.ANY_SOURCE, tag=mpi.ANY_TAG,
+                                   status=status)
+            if not status.tag == 1:
+                print "Didn't get right signal"
+                raise
+            recv_num.append(recv[0]['rank'])
+            # Send data
+            self._comm.send((self.data,self.norm_prior,self.norm), dest=status.source,
+                             tag=3)
+            
     def get_workers(self):
         self._workers = range(1,self._size)
 

@@ -339,8 +339,9 @@ class Param_MCMC(object):
                 self.active_param[model][gal] = self.param[model][gal][-1].copy()
             self.active_param[model] = pd.Panel(self.active_param[model])
         option.current = nu.array([[out_size]])
-        self.SA(out_size)
-        #ipdb.set_trace()
+        # if multiprocessing send data
+        lik_fun.send_fitting_data()
+        self.SA(out_size, True)
         return lik_fun, option, burnin
     
     def _save_csv(self, indici, dump_number):
@@ -523,10 +524,10 @@ class Param_MCMC(object):
                 self.on[self.bins]]))
         # group on correlation
 
-    def SA(self, chain_number):
+    def SA(self, chain_number, fail_recover=False):
         '''Calculates anneeling parameter'''
         bins = self.bins
-        if chain_number < self.burnin:
+        if chain_number < self.burnin or fail_recover:
             for gal in self.T_start:
                 # make temp close to chi
                 chi_max = abs(nu.max(self.chi[bins][gal]))
