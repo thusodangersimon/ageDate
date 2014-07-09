@@ -130,11 +130,11 @@ class Multi_LRG_burst(lik.Example_lik_class):
                 step_size /= 1.05
         #cov matrix
         if itter % 200 == 0 and itter > 0.:
-            #ipdb.set_trace()
-            step_size = nu.cov(nu.vstack(param[-2000:]).T)
+            
+            Tstep_size = nu.cov(nu.vstack(param[-2000:]).T)
             #make sure not stuck
-            '''if nu.any(temp.diagonal() > 10**-6):
-            step_size[model][gal] = temp'''
+            index = nu.isclose(Tstep_size, 0, rtol=1e-04) == False
+            step_size[index] = Tstep_size[index]
         
         return step_size
 
@@ -182,7 +182,7 @@ class Multi_LRG_burst(lik.Example_lik_class):
             out_lik = nu.sum([stats_dist.uniform.logpdf(param[bins][gal].iloc[0][i],
                                                          ran.min(),ran.ptp())
                                 for i,ran in enumerate(self.param_range)])
-            norm = param[bins][gal]['normalization'] < -50
+            norm = param[bins][gal]['normalization'] < -10
             
             if norm.bool():
                 out_lik += -nu.inf
@@ -233,7 +233,7 @@ class LRG_mpi_lik(Multi_LRG_burst):
     '''Does LRG fitting and sends likelihood cal to different
     processors'''
     def __init__(self,  data, db_name='burst_dtau_10.db', have_dust=False,
-                 have_losvd=False):
+                 have_losvd=False, use_mpi=False):
         # Set up like Muliti
         Multi_LRG_burst.__init__(self, data, db_name, have_dust, have_losvd)
         self._comm = mpi.COMM_WORLD
@@ -243,6 +243,7 @@ class LRG_mpi_lik(Multi_LRG_burst):
         if self._rank == 0:
             self.get_workers()
             self.lik = self.lik_root
+            # 
         else:
             self.calc_lik = self.lik
             self.lik = self.lik_worker

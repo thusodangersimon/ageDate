@@ -49,11 +49,11 @@ def open_mp_LRG_model(num_gal, db_path='/home/thuso/Phd/experements/hierarical/L
     else:
         top = mpi_top.Topologies('single')
         try:
-            out_class =  mltry.multi_main(fun, top, max_iter=10**6,
+            out_class =  mltry.multi_main(fun, top, max_iter=5*10**5.,
                                           fail_recover=True)
         except mltry.MCMCError:
             pik.dump((data, real_param), open('save_param.pik','w'), 2)
-            out_class =  mltry.multi_main(fun, top, max_iter=10**6)
+            out_class =  mltry.multi_main(fun, top, max_iter=5*10**5)
         return out_class, real_param, data
     
     
@@ -81,8 +81,8 @@ if __name__ == "__main__":
     if not os.path.exists(db_path):
         print '%s rank %i cannot find db'%(mpi.Get_processor_name(),
                                            mpi.COMM_WORLD.rank)
-    Param, real_param, data = open_mp_LRG_model(models, db_path)
-    #Single_LRG_model()
+    #Param, real_param, data = open_mp_LRG_model(models, db_path)
+    Single_LRG_model()
     t_multi -= mpi.Wtime()
     #import cPickle as pik
     pik.dump((Param, real_param, data),open('test.pik','w'),2)

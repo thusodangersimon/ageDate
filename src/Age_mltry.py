@@ -310,8 +310,11 @@ class Param_MCMC(object):
                                            temp.index.max()):
                                 self.param[model][gal].append(temp.irow([i]))
                         else:
-                            exec('self.%s["%s"]["%s"]'%(p, model, gal)
-                            +' = nu.loadtxt(open(os.path.join(dir,param)))')
+                            try:
+                                exec('self.%s["%s"]["%s"]'%(p, model, gal)
+                                +' = nu.loadtxt(open(os.path.join(dir,param)))')
+                            except:
+                                ipdb.set_trace()
                             #print 'self.%s["%s"]["%s"]'%(p, model, gal)
                             # Check shape
                             size = eval('self.%s["%s"]["%s"].size'%(p, model, gal))
