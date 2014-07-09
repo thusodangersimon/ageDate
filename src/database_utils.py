@@ -38,7 +38,10 @@ except ImportError:
 import os
 from interp_utils import n_dim_interp
 from sklearn.neighbors import NearestNeighbors as NN
-import sqlite3
+try:
+    import sqlite3
+except ImportError:
+    from pysqlite2 import dbapi2 as sqlite3
 import io
 
 '''Pytable utils for searching and adding spectra with params to a .h5 file'''
@@ -229,7 +232,10 @@ def adapt_array(arr):
 
 
 def convert_array(text):
-    out = io.BytesIO(text)
+    try:
+        out = io.BytesIO(text)
+    except TypeError:
+        out = io.BytesIO(str(text))
     out.seek(0)
     return nu.load(out)
 
