@@ -135,7 +135,11 @@ class Multi_LRG_burst(lik.Example_lik_class):
             #make sure not stuck
             index = nu.isclose(Tstep_size, 0, rtol=1e-04) == False
             step_size[index] = Tstep_size[index]
-        
+        # make sure none of the diagonal elements are smaller than 10**-4
+        diag = nu.diagonal(step_size)
+        index = nu.where(diag < 10**-4)[0]
+        for i in index:
+            step_size[i,i] = 10**-4
         return step_size
 
     def initalize_param(self, bins):
