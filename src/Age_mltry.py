@@ -86,7 +86,8 @@ def multi_main(fun, option, burnin=5*10**3,  max_iter=10**5,
             pass
             # jump(Param, fun, birth_rate)'''
         # Change Step size
-        Param.step(fun, option.current, 500)
+        if option.current < burnin * 2:
+            Param.step(fun, option.current, 500)
         # Change parameter grouping
         # reconfigure(Param)
         # Change temperature
