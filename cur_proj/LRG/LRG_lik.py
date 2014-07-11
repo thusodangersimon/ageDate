@@ -123,17 +123,36 @@ class Multi_LRG_burst(lik.Example_lik_class):
         changes step size during burn-in perior. Outputs new step size
         '''
         diag = nu.diagonal(step_size)
-        # ipdb.set_trace()
-        if nu.all(step_crit > 0.3) and nu.all(diag < 8.):
+        
+        '''if nu.all(step_crit > 0.3) and nu.all(diag < 8.):
             step_size *= 1.05
         elif nu.all(step_crit < 0.2) and nu.any(diag > 10**-6):
-                step_size /= 1.05
+                step_size /= 1.05'''
+        # Switch statement
+        if step_crit < 0.001:
+            # reduce by 90 percent
+            step_size *= 0.1
+        elif step_crit < 0.05:
+            # reduce by 50 percent
+            step_size *= 0.5
+        elif step_crit < 0.2:
+            # reduce by ten percent
+            step_size *= 0.9
+        elif step_crit > 0.95:
+            # increase by factor of ten
+            step_size *= 10.0
+        elif step_crit > 0.75:
+            # increase by double
+            step_size *= 2.0
+        elif step_crit > 0.5:
+            # increase by ten percent
+            step_size *= 1.1
         #cov matrix
-        if itter % 200 == 0 and itter > 0.:
+        if itter % 500 == 0 and itter > 0.:
             
             Tstep_size = nu.cov(nu.vstack(param[-2000:]).T)
             #make sure not stuck
-            index = nu.isclose(Tstep_size, 0, rtol=1e-04) == False
+            index = nu.isclose(Tstep_size, 0, rtol=1e-6) == False
             step_size[index] = Tstep_size[index]
         # make sure none of the diagonal elements are smaller than 10**-4
         diag = nu.diagonal(step_size)

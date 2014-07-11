@@ -491,9 +491,8 @@ class Param_MCMC(object):
         '''check if time to change step size'''
         bins = self.bins
         #if num_iter % step_freq == 0 and num_iter > 0:
-        if num_iter > 10:
+        if num_iter > 10 and  num_iter % step_freq*.1 == 0:
             for gal in self.sigma[bins]:
-                
                 self.sigma[bins][gal] = fun.step_func(self.acept_rate[bins][gal][-1],
                                             self.param[bins][gal],
                                             self.sigma[bins][gal],num_iter)
