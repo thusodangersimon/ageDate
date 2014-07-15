@@ -34,6 +34,9 @@ class Multi_LRG_burst(lik.Example_lik_class):
             self.norm_prior[i] = self.norm + 0
             self.data[i] = data[i].copy()
             self.data[i][:,1] *= self.norm
+            if self.data[i].shape[1] == 3:
+                # Propagate the uncertany
+                data[i][:,2] *= self.norm
         self.db = util.numpy_sql(db_name)
         # Tell which models are avalible and how many galaxies to fit
         self.models = {'burst': data.keys()}

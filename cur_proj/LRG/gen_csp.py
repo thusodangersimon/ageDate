@@ -35,7 +35,7 @@ def make_burst(tau, lib_path='/home/thuso/Phd/stellar_models/ezgal', imf='chab',
 
 
 def make_csp_lib(csp_type, csp_num=10, save_path='.'):
-    '''Makes a csp library. does n steps of tau in GYR to 0-11 GYR.
+    '''Makes a csp library. does n steps of tau in GYR to 0.05-11 GYR.
     With multicore processing
     '''
     # get burst function
@@ -59,7 +59,9 @@ def make_csp_lib(csp_type, csp_num=10, save_path='.'):
     for csp in models:
         for meta_gal in csp:
             for age in nu.log10(1+meta_gal.ages):
-                if nu.isclose(10**(age-9),20):
+                if age == 0:
+                    age = nu.log10(1*10**5)
+                if nu.isclose(10**(age-9), 20):
                     data = nu.vstack((meta_gal.ls, meta_gal.get_sed(20))).T
                 else:
                     data = nu.vstack((meta_gal.ls,
@@ -84,7 +86,7 @@ def index_DB(db):
     '''Index database made like above to improve query speed.'''
     # get table name
     table_name = db.execute('select * from sqlite_master').fetchall()[0][1]
-    db.execute('CREATE UNIQUE INDEX i ON %s (imf, model, tau, age,metalicity)'%table_name)
+    db.execute('CREATE UNIQUE INDEX i ON %s (imf, model, tau, age, metalicity)'%table_name)
     db.commit()
 
     

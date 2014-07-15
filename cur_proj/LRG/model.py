@@ -28,7 +28,14 @@ def random_exp_gal(db_path='/home/thuso/Phd/experements/hierarical/LRG_Stack/exp
 
     return data, param
 
+def make_noise_gal(SN, db_path='/home/thuso/Phd/experements/hierarical/LRG_Stack/exp_dtau_10.db'):
+    '''Makes a noisey galaxy with a signal to noise as specified'''
+    data, param = random_burst_gal(db_path)
+    data[:,1] += max(data[:,1]/float(SN)) * nu.random.randn(len(data[:,0]))
+    data = nu.hstack((data, nu.ones((data[:,1].shape[0],1)) *
+                     max(data[:,1] / float(SN))))
 
+    return data, param
 def get_points(db, has_dust=False, has_losvd=False):
     '''return points in range of parameters'''
     param_range = make_param_range(db)
