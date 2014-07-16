@@ -68,13 +68,13 @@ def get_data(num_gal, db_path):
         id = 'SDSS %04d'%randint(9999)
         if id in data:
             id = 'SDSS %04d'%randint(9999)
-        data[id], real_param[id] = model.random_burst_gal(db_path)
+        data[id], real_param[id] = model.make_noise_gal(float(id[-2:]), db_path)
     return data, real_param
 
 if __name__ == "__main__":
     #Single_LRG_model()
     import os
-    models = 2
+    models = 1
     #Param, real_param, data = Multiple_LRG_model(models)
     mpi.COMM_WORLD.barrier()
     t_multi = mpi.Wtime()
