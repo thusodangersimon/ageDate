@@ -28,12 +28,16 @@ class Multi_LRG_burst(lik.Example_lik_class):
         
         self.data = {}
         #get mean data values to 1
-        self.norm = 1./nu.vstack(data.values())[:,1].mean()
+        self.norm = {}
         self.norm_prior = {}
         for i in data:
-            self.norm_prior[i] = self.norm + 0
+            self.norm[i] = 1./data[i][:,1].mean()
+            self.norm_prior[i] = nu.log10(self.norm[i])
             self.data[i] = data[i].copy()
-            self.data[i][:,1] *= self.norm
+            self.data[i][:,1] *= self.norm[i]
+            if self.data[i].shape[1] == 3:
+                # Propagate the uncertany
+                self.data[i][:,2] *= self.norm[i]
         self.db = util.numpy_sql(db_name)
         # Tell which models are avalible and how many galaxies to fit
         self.models = {'burst': data.keys()}
@@ -80,6 +84,7 @@ class Multi_LRG_burst(lik.Example_lik_class):
             
             model = {'wave':spec[:,0],
                      0: spec[:,1] * 10**param[bins][gal]['normalization'].iat[0]}
+           
             # Dust
             if self.has_dust:
                 columns = ['$T_{bc}$','$T_{ism}$']
@@ -173,7 +178,7 @@ class Multi_LRG_burst(lik.Example_lik_class):
         #uniform dist for everything except redshift
         param = [nu.random.rand()*i.ptp() + i.min() for i in self.param_range]
         #norm
-        param.append(nu.random.rand()*nu.log10(self.norm)+15)
+        param.append(nu.random.rand()*nu.mean(self.norm_prior.values())+15)
         #redshift
         param.append(0.)
         if self.has_dust:

@@ -260,6 +260,7 @@ class Param_MCMC(object):
         self.save_path = {}
         lik_fun.data = {}
         lik_fun.norm_prior = {}
+        lik_fun.norm = {}
         # should be 3 layers of files [models,gal,local_parameters]
         walker = os.walk(path)
         dir, models,files = walker.next()
@@ -288,7 +289,9 @@ class Param_MCMC(object):
                     if p in gals:
                         lik_fun.data[p] = nu.loadtxt(os.path.join(dir,param))
                         lik_fun.norm_prior[p] = 1.
-                        # Get header?
+                        # Get header
+                        header = open(os.path.join(dir,param)).readline()
+                        lik_fun.norm[p] = float(header.split('*')[-1])
                         continue
                     self.save_path[model][gal][p] = []
                     # Open file
@@ -307,9 +310,12 @@ class Param_MCMC(object):
                                                               sep=' ',index_col=None
                                                               ,header=0)
                             # append into param
-                            for i in range(temp.index.max()-self._look_back,
-                                           temp.index.max()):
-                                self.param[model][gal].append(temp.irow([i]))
+                            self.param[model][gal] = [temp.irow([i])
+            for i in range(temp.index.max()-self._look_back,temp.index.max())]
+                           
+                        elif p == 'T_start':
+                            exec('self.%s["%s"]'%(p, gal)
+                                +' = float(nu.loadtxt(open(os.path.join(dir,param))))')
                         else:
                             try:
                                 exec('self.%s["%s"]["%s"]'%(p, model, gal)
@@ -318,7 +324,7 @@ class Param_MCMC(object):
                                 ipdb.set_trace()
                             #print 'self.%s["%s"]["%s"]'%(p, model, gal)
                             # Check shape
-                            size = eval('self.%s["%s"]["%s"].size'%(p, model, gal))
+                            size = nu.size(eval('self.%s["%s"]["%s"]'%(p, model, gal)))
                             if size > 1 and not p in ['sigma']:
                                 out_size = max(out_size,
                                     eval('self.%s["%s"]["%s"].shape[0]'%(p, model, gal)))
@@ -419,7 +425,7 @@ class Param_MCMC(object):
                 self.save_path[model][gal] = {}
                 # save fitting data
                 nu.savetxt(os.path.join(cur_parent, gal+ '.csv'), lik.data[gal]
-                           ,header='wavelength, flux*%2.2f'%lik.norm_prior[gal])
+                           ,header='wavelength, flux*%2.2f'%lik.norm[gal])
                 # Params in each Gal
                 for param in vars(self):
                     if not param in save_list :
@@ -478,12 +484,15 @@ class Param_MCMC(object):
     def reject(self, gal):
         '''Rejects current state and gets data from memory'''
         #ipdb.set_trace()
+        print self.active_param[self.bins][gal],self.active_chi[self.bins][gal]
         if gal in self.Nreject[self.bins]:
             self.Nreject[self.bins][gal] += 1
         else:
             self.Nreject[self.bins][gal] = 1
         
-        self.active_param[self.bins][gal] = self.param[self.bins][gal][-1].copy()
+        self.active_param[self.bins][gal] = pd.DataFrame(
+            self.param[self.bins][gal][-1].values.copy(),index=[0],
+            columns=self.param[self.bins][gal][-1].columns.copy())
         self.param[self.bins][gal].append(self.param[self.bins][gal][-1].copy())
         self.chi[self.bins][gal].append(self.chi[self.bins][gal][-1].copy())
         self.active_chi[self.bins][gal] = self.chi[self.bins][gal][-1].copy()
@@ -515,17 +524,12 @@ class Param_MCMC(object):
                                                 float(self.Nacept[bins][gal] +
                                                 self.Nreject[bins][gal]))
 
-    def reconfigure(self, param_max):
-        '''Changes grouping or something'''
-        # each param is different
-        self.on[self.bins] = self.active_param[self.bins].keys()[0]
-        self.on_dict[self.bins] = range(self.bins)
-        # make new step size
-        self.sigma[self.bins] = {}
-        for i in self.on_dict[self.bins]:
-            self.sigma[self.bins][i] = nu.eye(len(self.active_param[self.bins][
-                self.on[self.bins]]))
-        # group on correlation
+    def unstick(self):
+        '''Reninitializes MCMC from current chain, if is stuck'''
+        # Decide if stuck
+        # Inital chi isn't much better
+        # Params are near edge
+        # Low acceptance rate early on
 
     def SA(self, chain_number, fail_recover=False):
         '''Calculates anneeling parameter'''
