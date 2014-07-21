@@ -74,7 +74,7 @@ def get_data(num_gal, db_path):
 if __name__ == "__main__":
     #Single_LRG_model()
     import os
-    models = 1
+    models = 8
     #Param, real_param, data = Multiple_LRG_model(models)
     mpi.COMM_WORLD.barrier()
     t_multi = mpi.Wtime()
@@ -85,8 +85,8 @@ if __name__ == "__main__":
     if not os.path.exists(db_path):
         print '%s rank %i cannot find db'%(mpi.Get_processor_name(),
                                            mpi.COMM_WORLD.rank)
-    #Param, real_param, data = open_mp_LRG_model(models, db_path)
-    Param, real_param, data = Single_LRG_model(db_path)
+    Param, real_param, data = open_mp_LRG_model(models, db_path)
+    #Param, real_param, data = Single_LRG_model(db_path)
     t_multi -= mpi.Wtime()
     #import cPickle as pik
     pik.dump((Param, real_param, data), open('test.pik', 'w'), 2)

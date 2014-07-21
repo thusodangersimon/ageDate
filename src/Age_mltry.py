@@ -53,6 +53,7 @@ def multi_main(fun, option, burnin=5*10**3,  max_iter=10**5,
     if fail_recover:
         # fail recovery
         fun, option, burnin = Param.fail_recover(fail_recover,fun, option)
+        Param.burnin =  burnin
     else:
         # initalize and check if param are in range
         timeInit = Time.time()
@@ -92,6 +93,9 @@ def multi_main(fun, option, burnin=5*10**3,  max_iter=10**5,
         # reconfigure(Param)
         # Change temperature
         Param.SA(option.current)
+        # Tunr SA after burin tuneing
+        if option.current > burnin * 2 and  option.current < burnin * 3:
+            Param.tune_sa()
         # Convergence assement
         if option.current % 5000 == 0 and option.current > 1:
             pass
@@ -524,13 +528,34 @@ class Param_MCMC(object):
                                                 float(self.Nacept[bins][gal] +
                                                 self.Nreject[bins][gal]))
 
-    def unstick(self):
-        '''Reninitializes MCMC from current chain, if is stuck'''
-        # Decide if stuck
-        # Inital chi isn't much better
-        # Params are near edge
-        # Low acceptance rate early on
-
+    def tune_sa(self):
+        '''Tune acceptace rate by changing the SA param'''
+        bins = self.Nacept.keys()[0]
+        gal =  self.Nacept[bins].keys()[0]
+        if (not hasattr(self, 'sa_accept') or
+            self.Nacept[bins][gal] + self.Nreject[bins][gal] % 500):
+            # first time
+            self.sa_accept = {}
+            self.sa_reject = {}
+            for bins in self.Nacept:
+                self.sa_accept[bins] = {}
+                self.sa_reject[bins] = {}
+                for gal in self.Nacept[bins]:
+                    self.sa_accept[bins][gal] = self.Nacept[bins][gal] + 0
+                    self.sa_reject[bins][gal] = self.Nreject[bins][gal] + 0
+        if self.Nacept[bins][gal] + self.Nreject[bins][gal] % 20 == 0:
+            accept_rate = 0
+            for bins in self.Nacept:
+                for gal in self.Nacept[bins]:
+                    acept = self.Nacept[bins][gal] - self.sa_accept[bins][gal]
+                    reject = self.Nreject[bins][gal] - self.sa_reject[bins][gal]
+                    accept_rate = acept/float(acept+reject)
+                    if accept_rate < .2:
+                        self.sa[gal] += 1
+                    if accept_rate > .5:
+                         self.sa[gal] -= 1
+                    print self.sa[gal]
+        
     def SA(self, chain_number, fail_recover=False):
         '''Calculates anneeling parameter'''
         bins = self.bins
