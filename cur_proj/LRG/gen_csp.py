@@ -92,6 +92,6 @@ def index_DB(db):
     
 if __name__ == '__main__':
     
-    #make_csp_lib('burst')
+    make_csp_lib('burst')
     
     make_csp_lib('exp')
