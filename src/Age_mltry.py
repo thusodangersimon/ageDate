@@ -56,9 +56,10 @@ def multi_main(fun, option, burnin=5*10**3,  max_iter=10**5,
         Param.burnin =  burnin
     else:
         # initalize and check if param are in range
-        timeInit = Time.time()
+        timeInit = 0
         while Param.initalize(fun):
-            if Time.time() - timeInit > 60.:
+            timeInit += 0
+            if  timeInit > 10:
                 raise MCMCError('Bad Starting position, check params')
     # Start RJMCMC
     while option.iter_stop:
@@ -223,8 +224,8 @@ class Param_MCMC(object):
                 self.active_param[bins][gal], self.sigma[bins][gal] = lik_fun.initalize_param(gal)
                 #self.active_chi[bins][gal] = {}
                 self.out_sigma[bins][gal]  =  [self.sigma[bins][gal][:]]
-            #self.reconfigure(i)
-            self.acept_rate[bins][gal] = []
+            
+                self.acept_rate[bins][gal] = []
             
         # check if params are in range
         lik, prior = (lik_fun.lik(self.active_param, bins),
@@ -236,6 +237,7 @@ class Param_MCMC(object):
                 return True
             self.chi[bins][gal] = [Prior]
             self.active_chi[bins][gal] = Prior
+            
         for Lik, gal in lik:
             if not nu.isfinite(Lik):
                 return True
@@ -243,6 +245,7 @@ class Param_MCMC(object):
             self.active_chi[bins][gal] = Lik
             self.param[bins][gal] = [self.active_param[bins][gal].copy()]
             self.T_start[gal] = abs(nu.max(self.chi[bins].values()))
+            
         self.SA(0)
         self.save_state(0, lik_fun)
         return not nu.all(nu.isfinite(self.chi[bins].values()))
@@ -468,7 +471,7 @@ class Param_MCMC(object):
             self._create_dir_sturct('save_files', lik)
         if itter % save_num == 0 and itter > 0:
             self._save_csv(itter, save_num)
-            print 'done'
+            #print 'done'
             
     def singleObjSplit(self):
         '''Checks correlation between params to see if should split'''
@@ -488,7 +491,7 @@ class Param_MCMC(object):
     def reject(self, gal):
         '''Rejects current state and gets data from memory'''
         #ipdb.set_trace()
-        print self.active_param[self.bins][gal],self.active_chi[self.bins][gal]
+        #print self.active_param[self.bins][gal],self.active_chi[self.bins][gal]
         if gal in self.Nreject[self.bins]:
             self.Nreject[self.bins][gal] += 1
         else:
