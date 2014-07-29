@@ -23,7 +23,7 @@ if mpi.Get_processor_name() == 'mightee.ast.uct.ac.za':
     db_path = '/home/thuso/Phd/experements/hierarical/LRG_Stack/burst_dtau_10.db'
 else:
     db_path = '/mnt/burst_dtau_10.db'
-#db_path = '/home/thuso/Phd/experements/hierarical/LRG_Stack/burst_dtau_10.db'
+db_path = '/home/thuso/Phd/experements/hierarical/LRG_Stack/burst_dtau_10.db'
 fun = lik.LRG_mpi_lik(data, db_path, have_dust=True, have_losvd=True)
 top = mpi_top.Topologies('single')
 #start mcmc

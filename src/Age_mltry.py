@@ -68,7 +68,7 @@ def multi_main(fun, option, burnin=5*10**3,  max_iter=10**5,
             acpt = nu.min([i[-1] for i in Param.acept_rate[bins].values()])
             chi = nu.sum([i[-1] for i in Param.chi[bins].values()])
             try:
-                show = ('acpt = %.2f,log lik = %e, model = %s, steps = %i,ESS = %2.0f'
+                show = ('acpt = %.2f,log lik = %e, model = %s, steps = %i,Temp = %2.0f'
                     %(acpt, chi, bins, option.current, nu.min(Param.sa.values())))
                 print show
             except:
@@ -237,7 +237,6 @@ class Param_MCMC(object):
                 return True
             self.chi[bins][gal] = [Prior]
             self.active_chi[bins][gal] = Prior
-            
         for Lik, gal in lik:
             if not nu.isfinite(Lik):
                 return True

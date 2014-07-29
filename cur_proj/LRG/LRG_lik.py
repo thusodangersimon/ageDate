@@ -210,6 +210,7 @@ class Multi_LRG_burst(lik.Example_lik_class):
             out_lik = nu.sum([stats_dist.uniform.logpdf(param[bins][gal].iloc[0][i],
                                                          ran.min(),ran.ptp())
                                 for i,ran in enumerate(self.param_range)])
+            # make sure norm isn't too small
             norm = param[bins][gal]['normalization'] < -10
             
             if norm.bool():
@@ -223,8 +224,7 @@ class Multi_LRG_burst(lik.Example_lik_class):
                                                 '$T_{bc}$']],0,4).sum()
             if self.has_losvd:
                 out_lik += stats_dist.uniform.logpdf(param[bins][gal]['$\\sigma$'],
-                                                 nu.log10(self.resolu[gal]),
-                                                 3- nu.log10(self.resolu[gal]))
+                                                 0,3.2)
                 out_lik += stats_dist.uniform.logpdf(param[bins][gal]['$V$'],0,4)
             yield out_lik, gal
     
@@ -239,7 +239,8 @@ class Multi_LRG_burst(lik.Example_lik_class):
             try:
                 out[gal] =  nu.random.multivariate_normal(mu, Sigma[gal])
             except:
-                ipdb.set_trace()
+                pass
+                #ipdb.set_trace()
             # put back into DataFrame
             out[gal] = pd.DataFrame(out[gal],Mu[gal].columns).T
         #set h3 and h4 to 0
@@ -285,11 +286,7 @@ class LRG_mpi_lik(Multi_LRG_burst):
             self._comm.send([{'rank': self._rank,
                               'name':self._proc_name}], dest=0, tag=1)
             status = mpi.Status()
-            #try:
             recv = self._comm.recv(source=0, tag=mpi.ANY_TAG, status=status)
-            #except EOFError:
-                # Didn't recive anything
-                #pass
             # check if should quit
             if  status.tag == 2:
                #print 'trying to quit worker %i'%self._rank
@@ -298,16 +295,18 @@ class LRG_mpi_lik(Multi_LRG_burst):
             # recived data
             if status.tag == 10:
                 #Multi_LRG_burst.lik
-                #out_lik = -999999
                 gal = recv[1]
-                #print recv
                 Lik = self.calc_lik({0:{gal:recv[0]}},0)
                 out_lik = Lik.next()[0]
-                #print recv,out_lik
-                #print 'Recived %s from root'%gal
-                # return result
                 self._comm.send((gal, out_lik, self.norm_prior[gal]),
                                 dest=0, tag=10)
+            if status.tag == 11:
+                #Multi_LRG_burst.lik return model too
+                gal = recv[1]
+                Lik = self.calc_lik({0:{gal:recv[0]}}, 0, True)
+                out_lik = Lik.next()
+                self._comm.send((gal, out_lik[0], self.norm_prior[gal],out_lik[2]),
+                                dest=0, tag=11)
             if status.tag == 5:
                 #do nothing
                 pass
@@ -321,6 +320,7 @@ class LRG_mpi_lik(Multi_LRG_burst):
         # feed all queued jobs to workers
         # tag 1 codes for initialization.
         # tag 10 codes for requesting more data.
+        # tag 11 codes for requesting more data but return model spectra
         # tag 5 codes for doing nothing
         # Tag 2 codes for a worker exiting.
         # Tag 3 codes to send/recive new fitting data
@@ -336,12 +336,17 @@ class LRG_mpi_lik(Multi_LRG_burst):
                 if index+1 < len(param[bins]):
                     index += 1
                     gal = param[bins].keys()[index]
-                    self._comm.send((param[bins][gal],gal),
-                                    dest=status.source, tag=10)
+                    if not return_model:
+                        self._comm.send((param[bins][gal],gal),
+                                        dest=status.source, tag=10)
+                    else:
+                        self._comm.send((param[bins][gal],gal),
+                                        dest=status.source, tag=11)
                     #print 'Send %s to %i'%(gal,status.source)
                 else:
                     # send nothing
                     self._comm.send([], dest=status.source, tag=5)
+                    
             if status.tag == 10:
                 #recive likelyhoods
                 recv_gal, recv_lik, recv_norm = recv
@@ -353,7 +358,18 @@ class LRG_mpi_lik(Multi_LRG_burst):
                 if len(recv_num) == len(param[bins].keys()):
                     #print 'done'
                     break
-
+                
+            if status.tag == 11:
+                recv_gal, recv_lik, recv_norm, recv_model = recv
+                self.norm_prior[recv_gal] = recv_norm
+                #print 'Recived %s with chi %f'%(recv_gal,recv_lik)
+                yield recv_lik, recv_gal, recv_model
+                recv_num.append(recv_gal)
+                # Check if should exit
+                if len(recv_num) == len(param[bins].keys()):
+                    #print 'done'
+                    break
+                
             if status.tag == 2:
                 # Worker crashed
                 self.remove_workers(status.source)
