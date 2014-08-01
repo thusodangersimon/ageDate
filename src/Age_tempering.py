@@ -43,7 +43,7 @@ from glob import glob
 a = nu.seterr(all='ignore')
 
 
-def multi_main(fun, option, burnin=5*10**3,  max_iter=10**5,
+def tempering_main(fun, option, burnin=5*10**3,  max_iter=10**5,
             seed=None, fail_recover=False):
     '''Main multi RJMCMC program. Like gibbs sampler but for RJMCMC'''
     # see if to use specific seed

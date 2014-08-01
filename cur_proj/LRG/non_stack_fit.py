@@ -1,4 +1,4 @@
-from Age_mltry import multi_main
+from Age_tempering import tempering_main
 import LRG_lik
 from mpi4py import MPI as mpi
 import cPickle as pik
@@ -41,6 +41,20 @@ def load_data():
         
     pik.dump(data, open('spectra.pik','w'),2)
 
+def return_unprocessed(path):
+    '''Returns list of unproceed spectra. Can use a place holder instead of actuall data'''
+    
+
+def start_galaxy(database_path, outpath, cpus):
+    '''starts parallel tempering on galxies.
+    database_path is path to .pickle file containing spectra
+    outpath is where data is stored. can be a website or something.
+    cpus is number of cpus to be used in fitting. each one will have a different
+    delta t'''
+    database = pik.load(open(database_path))
+    if not os.path.exists(outpath):
+        
+    
 if __name__ == __main__:
     import cPickle as pik
     import Age_mltry as mltry
