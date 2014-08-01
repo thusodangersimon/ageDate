@@ -1,6 +1,6 @@
 #!/usr/bin/env python2.7
 #
-# Name:  Age multiy-try metropolis with RJMCMC
+# Name:  Age multi object metropolis with RJMCMC
 #
 # Author: Thuso S Simon
 #
