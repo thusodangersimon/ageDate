@@ -37,6 +37,7 @@ import MC_utils as MC
 import pandas as pd
 from Age_mltry import Param_MCMC, MCMCError
 import ipdb
+from mpi4py import MPI as mpi
 # import acor
 # from memory_profiler import profile
 from glob import glob
@@ -49,6 +50,8 @@ def tempering_main(fun, option, burnin=5*10**3,  max_iter=10**5,
     # see if to use specific seed
     if seed is not None:
         nu.random.seed(seed)
+    # set mpi comm
+    comm = mpi.COMM_WORLD
     # initalize paramerts/class for use by program
     Param = Param_temp(fun, burnin)
     if fail_recover:
@@ -80,8 +83,9 @@ def tempering_main(fun, option, burnin=5*10**3,  max_iter=10**5,
         # Change Step size
         if option.current < burnin * 2:
             Param.step(fun, option.current, 500)
+            Param.SA(option.current)
        # Tune delta T
-        if option.current > burnin * 2 and  option.current < burnin * 3:
+        if option.current > burnin and  option.current < burnin * 3:
             Param.tune_sa()
         # stop SA and run chains in parallel
         # Convergence assement
@@ -141,9 +145,12 @@ def mh_critera(chi_old, chi_new, sa=1.):
     
 class Param_temp(Param_MCMC):
 
-    def initalize(self, lik_fun):
+    def initalize(self, lik_fun, comm):
         '''initalize parallel tempering'''
         self.bins = lik_fun.models.keys()[0]
+        self.comm = comm
+        self.temp_exchange = {'accept':1,'reject':1}
+        lik_fun.initalize_temp(comm.size)
         for bins in lik_fun.models:
             # model level
             for gal in lik_fun.models[bins]:
@@ -170,15 +177,95 @@ class Param_temp(Param_MCMC):
             self.active_chi[bins][gal] = Lik
             self.param[bins][gal] = [self.active_param[bins][gal].copy()]
             self.T_start[gal] = abs(nu.max(self.chi[bins].values()))
-            
+        # initalize tempering
         self.SA(0)
         self.save_state(0, lik_fun)
         return not nu.all(nu.isfinite(self.chi[bins].values()))
 
-    def tune_sa(self):
+    def tune_sa(self, min_rate=.2, max_rate=.6):
         '''Turns T and delta T so interchange rate is 20-60%'''
 
+    def _change_state(self, src, dest, swap=True):
+        '''Changes state of mcmc. Everything except aneeling param'''
+        if swap:
+            #make temps
+            temp_chi = nu.copy(self.chi[bins][src][-1])
+            temp_active_chi = nu.copy(self.active_chi[bins][src])
+            temp_param = self.param[bins][src][-1].copy()
+            temp_active_param = self.active_param[bins][src].copy()
+            temp_Sigma = nu.copy(self.Sigma[bins][src])
+            # save to src
+            self.chi[bins][src][-1] = nu.copy(self.chi[bins][dest][-1])
+            self.active_chi[bins][src] = nu.copy(self.active_chi[bins][dest])
+            self.param[bins][src][-1] = self.param[bins][dest][-1].copy()
+            self.active_param[bins][src] = self.active_param[bins][dest].copy()
+            self.Sigma[bins][src] = nu.copy(self.Sigma[bins][dest])
+            # save to dest
+            self.chi[bins][dest][-1] = temp_chi
+            self.active_chi[bins][dest] = temp_active_chi
+            self.param[bins][dest][-1] = temp_param
+            self.active_param[bins][dest] = temp_active_param
+            self.Sigma[bins][dest] = temp_Sigma      
+        else:
+            key = src
+            gal = dest
+            self.chi[bins][gal][-1] = nu.copy(self.chi[bins][key][-1])
+            self.active_chi[bins][gal] = nu.copy(self.active_chi[bins][key])
+            self.param[bins][gal][-1] = self.param[bins][key][-1].copy()
+            self.active_param[bins][gal] = self.active_param[bins][key].copy()
+            self.Sigma[bins][gal] = nu.copy(self.Sigma[bins][key])
+
+                
     def stop_tempering(self):
         '''stops tempering and starts all chains at T=1 state in
         parallel to save time'''
-    
+        bins = self.active_param.keys()[0]
+        # find gal key for min temperature
+        for key in self.active_param[bins]:
+            if int(key.split('_')[-1]) == 0:
+                break
+        for gal in self.active_param[bins]:
+            self._change_state(key, gal, False)
+            self.sa[gal] = 1.
+
+            
+    def SA(self, chain_number, fail_recover=False):
+        '''Calculates and initalizes anneeling params'''
+        bins = self.active_param.keys()[0]
+        max_chi = nu.max(self.active_chi[bins].values())
+        min_chi = nu.min(self.active_chi[bins].values())
+        if chain_number == 0 or fail_recover:
+            # initalize
+            self.sa = {}
+            self.T_start = {}
+            self.T_stop = {}
+            self.delta_T = (max_chi - min_chi) / float(self.comm.size)
+            # set range of temperatures
+            for gal,sa in enumerate(nu.arange(min_chi, max_chi, self.delta_T)):
+                for key in self.active_chi[bins]:
+                    if int(key.split('_')[-1]) == gal:
+                        # stop at temp before current
+                        if gal == 0:
+                            self.T_stop[key] = 1.
+                        else:
+                            self.T_stop[key] = nu.max(self.sa.values())
+                        self.sa[key] = abs(sa)
+                        self.T_start[gal] = abs(sa)
+            if fail_recover:
+                # Check if before or after burnin
+                if chain_number > self.burnin * 2:
+                    for key in self.sa:
+                        self.sa[key] = 1.
+                elif chain_number > self.burnin and chain_number < self.burnin * 2:
+                    # initalize at bottom levels
+                    for key in self.sa:
+                        self.sa[key] = self.T_stop[key] + 0.
+                        
+        else:
+            if chain_number < self.burnin:
+                # reduce anneeling incase likely places
+                for gal in self.active_chi[bins]:
+                    self.sa[gal] = MC.SA(chain_number, self.burnin,
+                                         self.T_start[gal], self.T_stop[gal])
+                    
+                

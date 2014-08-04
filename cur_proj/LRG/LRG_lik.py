@@ -24,6 +24,7 @@ class Multi_LRG_burst(lik.Example_lik_class):
                  have_losvd=False):
         self.has_dust = have_dust
         self.has_losvd = have_losvd
+        self.db_name = db_name
         #check if data is right type
         
         self.data = {}
@@ -428,6 +429,30 @@ class LRG_mpi_lik(Multi_LRG_burst):
             if status.tag == 2:
                 # remove worker
                 self.remove_workers(status.source)
+
+                
+
+class LRG_Tempering(LRG_mpi_lik):
+    '''parallel Tempering liklihood'''
+    def __init__(self, data, db_name='burst_dtau_10.db', have_dust=False,
+                 have_losvd=False):
+        # initalize from old class
+        LRG_mpi_lik.__init__(self, data ,db_name, have_dust, have_losvd)
+        # Check data should only have 1 gal
+        assert len(data.keys()) == 1, 'Only 1 gal at a time'
+
+    def initalize_temp(self, num_temp):
+        '''Initalize different tempering spaced by delta_t'''
+        # make temp data from 0=no to num ofcpu =high temp
+        data = {}
+        key = self.data.keys()[0]
+        for cpu in range(num_temp):
+            data[key+'_%03d'%cpu] = nu.copy(self.data[key])
+        self.data = data
+        LRG_mpi_lik.__init__(self, data ,self.db_name, self.has_dust,
+                             self.has_losvd)
+        
+
                 
             
 def grid_search(point, param_range):

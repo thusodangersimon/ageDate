@@ -16,6 +16,16 @@ def load_param(path):
             params[i] = all_data[i]['param']
     return params
 
+def load_accept(path):
+    '''loads in acceptance rate'''
+    all_data = recover_save_param(path)
+    #retive only params
+    params = {}
+    for i in all_data:
+        if 'acept_rate' in all_data[i]:
+            params[i] = all_data[i]['acept_rate']
+    return params
+
 
 def load_debug():
     pass
