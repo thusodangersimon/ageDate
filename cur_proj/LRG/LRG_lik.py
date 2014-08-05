@@ -48,10 +48,14 @@ class Multi_LRG_burst(lik.Example_lik_class):
             self.param_range.append(nu.sort(nu.ravel(self.db.execute(
                 'Select DISTINCT %s FROM burst'%column).fetchall())))
         self._hull = None
+        # make resolution
+        self._define_resolu()
+        
+    def _define_resolu(self):
         # resolution for CB07 and BC03 in km/s
         self.resolu = {}
-        for gal in data:
-            self.resolu[gal] = 3. * 299792.458 / data[gal][:,0].mean()
+        for gal in self.data:
+            self.resolu[gal] = 3. * 299792.458 / self.data[gal][:,0].mean()
 
     def _make_hull(self):
         '''Make convex hull obj for telling if param is in range'''
@@ -179,7 +183,7 @@ class Multi_LRG_burst(lik.Example_lik_class):
         #uniform dist for everything except redshift
         param = [nu.random.rand()*i.ptp() + i.min() for i in self.param_range]
         #norm
-        param.append(nu.random.rand()*nu.mean(self.norm_prior.values())+15)
+        param.append(nu.random.rand()*nu.mean(self.norm_prior.values())+25)
         #redshift
         param.append(0.)
         if self.has_dust:
@@ -315,6 +319,9 @@ class LRG_mpi_lik(Multi_LRG_burst):
                 # recive fitting data
                 print "%i recived new data from root"%self._rank
                 self.data, self.norm_prior, self.norm = recv
+                # change resolution
+                self._define_resolu()
+                
                 
     def lik_root(self, param, bins, return_model=False):
         '''Root lik calculator, manages workers for likelihood calcs'''
@@ -394,6 +401,7 @@ class LRG_mpi_lik(Multi_LRG_burst):
                 continue
             recv_num.append(recv[0]['rank'])
             # Send data
+            #print self.data.keys()
             self._comm.send((self.data,self.norm_prior,self.norm), dest=status.source,
                              tag=3)
             # Check if all workers have data
@@ -446,7 +454,7 @@ class LRG_Tempering(LRG_mpi_lik):
         # make temp data from 0=no to num ofcpu =high temp
         data = {}
         key = self.data.keys()[0]
-        for cpu in range(num_temp):
+        for cpu in range(num_temp-1):
             data[key+'_%03d'%cpu] = nu.copy(self.data[key])
         self.data = data
         LRG_mpi_lik.__init__(self, data ,self.db_name, self.has_dust,
