@@ -5,6 +5,7 @@ from Age_tempering import tempering_main, MCMCError
 import LRG_lik as lik
 import mpi_top
 from mpi4py import MPI as mpi
+import ipdb
 
 data = {}
 if mpi.COMM_WORLD.rank == 0:
@@ -12,7 +13,7 @@ if mpi.COMM_WORLD.rank == 0:
     #make data array
 
     for i,file in enumerate(files):
-        print file,i
+        #print file, i
         temp = pik.load(open(file))
         data[file] = temp[-1]
         break
@@ -36,5 +37,6 @@ if  mpi.COMM_WORLD.size > 1:
             Param = tempering_main(fun, top, fail_recover=True)
         except MCMCError:
             Param = tempering_main(fun, top)
-
-        pik.dump((Param, real_param, data), open('stacked_results.pik', 'w'), 2)    
+        
+        pik.dump((Param,  data), open('stacked_results.pik', 'w'), 2)    
+        ipdb.set_trace()

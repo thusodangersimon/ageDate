@@ -97,7 +97,7 @@ def tempering_main(fun, option, burnin=5*10**3,  max_iter=10**5,
             pass
             #Param.eff = MC.effectiveSampleSize(Param.param[bins])
         # Save currnent Chain state
-        Param.save_state(option.current)
+        #Param.save_state(option.current)
         option.current += 1
         if option.current >= max_iter:
             option.iter_stop = False
@@ -119,15 +119,15 @@ def mcmc(Param, fun, itter):
     for Prior,index in prior:
         new_chi[index] = Prior
     for Lik,index,spec in lik:
-        if len(spec) > 0 and itter% 50 == 0 :
+        '''if len(spec) > 0 and itter% 1000 == 0 :
             lab.figure()
             lab.title(index)
             lab.plot(fun.data[index][:,0],fun.data[index][:,1])
             print Lik
-            lab.plot( fun.data[index][:,0], spec[0])
+            lab.plot( fun.data[index][:,0], spec[0])'''
         if nu.isfinite(new_chi[index]):
             new_chi[index] += Lik
-    lab.show()
+    #lab.show()
     #MH critera
     for key in new_chi.keys():
         if mh_critera(Param.active_chi[bins][key], new_chi[key],
@@ -159,16 +159,43 @@ def swap_temp(Param, itter, swap_it=10):
     if itter % swap_it == 0 and itter > 0:
         #select 2 chains to swap
         bins = Param.bins
-        gal1, gal2 = nu.random.choice(Param.active_param[bins].keys(), 2, False)
+        keys = list(Param.active_param[bins].keys())
+        gal1 = nu.random.choice(keys)
+        # check if swap up or down one
+        if int(gal1.split('_')[-1]) == 0:
+            # Must be up
+            goto = 1
+        elif int(gal1.split('_')[-1]) == len(keys) -1 :
+            # must be down
+            goto = len(keys) - 2
+        else:
+            if nu.random.rand() > .5:
+                # Go up
+                goto = int(gal1.split('_')[-1]) + 1
+                
+            else:
+                # Go down
+                goto = int(gal1.split('_')[-1]) - 1
+        for gal in keys:
+            if int(gal.split('_')[-1]) == goto:
+                gal2 = gal + ''
+                break
+        else:
+            print gal1, keys,'problem'
         # MH criera with SA to see if should swap
         if mh_critera(Param.active_chi[bins][gal1]/Param.sa[gal1],
                       Param.active_chi[bins][gal2]/Param.sa[gal2]):
             # accept
             Param._change_state(gal1, gal2)
-            Param.temp_exchange['accept'] += 1
+            Param.temp_exchange[bins][gal1]['accept'] += 1
+            # reset Naccepted and Nrejected
+            for gal in [gal1, gal2]:
+                Param.Nacept[bins][gal] = 1.
+                Param.Nreject[bins][gal] = 1.
+            print gal1, gal2
         else:
             # reject don't do anything
-            Param.temp_exchange['reject'] += 1
+            Param.temp_exchange[bins][gal1]['reject'] += 1
         Param.tune_sa()
 
             
@@ -178,12 +205,13 @@ class Param_temp(Param_MCMC):
         '''initalize parallel tempering'''
         self.bins = lik_fun.models.keys()[0]
         self.comm = comm
-        self.temp_exchange = {'accept':1,'reject':1}
+        self.temp_exchange = {self.bins: {}}
         lik_fun.initalize_temp(comm.size)
         lik_fun.send_fitting_data()
         for bins in lik_fun.models:
             # model level
             for gal in lik_fun.models[bins]:
+                self.temp_exchange[bins][gal] = {'accept':1,'reject':1}
                 self.active_param[bins][gal], self.sigma[bins][gal] = lik_fun.initalize_param(gal)
                 #self.active_chi[bins][gal] = {}
                 self.out_sigma[bins][gal]  =  [self.sigma[bins][gal][:]]
@@ -214,20 +242,26 @@ class Param_temp(Param_MCMC):
 
     def tune_sa(self, min_rate=.2, max_rate=.6):
         '''Turns T and delta T so interchange rate is 20-60%'''
-        rate = self.temp_exchange['accept'] / float(self.temp_exchange['accept']+
-                                                   self.temp_exchange['reject'])
-        if rate > .8:
-            # 1/2 max temp
-            for gal in self.T_start:
-                self.T_start /= 2.
-        if rate < min_rate:
-            # decrease delta_t
-            self.delta_T *= 1.05
-            self._chg_delta_t()
-        elif rate > max_rate:
-            # increase delta_t
-            self.delta_T /= 1.05
-            self._chg_delta_t()
+        bins = self.bins
+        for gal in self.acept_rate[bins]:
+            if self.acept_rate[bins][gal][-1] < .2:
+                # increase temp
+                self.T_start[gal] *= 1.05
+            elif self.acept_rate[bins][gal][-1] > .5:
+                # decrease temp
+                self.T_start[gal] /= 1.05
+        for gal in self.temp_exchange[bins]:
+            rate = (self.temp_exchange[bins][gal]['accept'] /
+                    float(self.temp_exchange[bins][gal]['accept']+
+                          self.temp_exchange[bins][gal]['reject']))
+            if rate < min_rate:
+                # decrease delta_t
+                self.delta_T[gal] *= 1.05
+                self._chg_delta_t()
+            elif rate > max_rate:
+                # increase delta_t
+                self.delta_T[gal] /= 1.05
+                self._chg_delta_t()
 
             
         print rate #, self.T_stop,self.sa
@@ -239,8 +273,8 @@ class Param_temp(Param_MCMC):
         stop_temp = min(self.T_stop.values())
         for gal in self.T_start:
             mult = int(gal.split('_')[-1])
-            self.T_start[gal] = start_temp + self.delta_T * mult
-            self.T_stop[gal] = stop_temp + self.delta_T * mult
+            self.T_start[gal] = start_temp + self.delta_T[gal] * mult
+            self.T_stop[gal] = stop_temp + self.delta_T[gal] * mult
             # make sure T_stop is smaller
             if self.T_stop[gal] > self.T_start[gal]:
                 temp = self.T_start[gal] + 0
@@ -299,15 +333,19 @@ class Param_temp(Param_MCMC):
         bins = self.active_param.keys()[0]
         max_chi = 0 #nu.max(self.active_chi[bins].values())
         min_chi = nu.min(self.active_chi[bins].values())
+        
         if chain_number == 0 or fail_recover:
             # initalize
+            self.delta_T = {}
+            delta_T = (max_chi - min_chi) / float(self.comm.size)
             self.sa = {}
             self.T_start = {}
             self.T_stop = {}
-            self.delta_T = (max_chi - min_chi) / float(self.comm.size)
             # set range of temperatures
-            for gal,sa in enumerate(nu.arange(min_chi, max_chi, self.delta_T)):
+            for gal,sa in enumerate(nu.arange(min_chi, max_chi, delta_T)):
                 for key in self.active_chi[bins]:
+                    #print key
+                    self.delta_T[key] = (max_chi - min_chi) / float(self.comm.size)
                     if int(key.split('_')[-1]) == gal:
                         # stop at temp before current
                         if gal == 0:
@@ -333,5 +371,9 @@ class Param_temp(Param_MCMC):
                     self.sa[gal] = MC.SA(chain_number, self.burnin,
                                          abs(self.T_start[gal]),
                                          abs(self.T_stop[gal]))
+                    # check if sa is 0 and set to 1
+                    if self.sa[gal] <= 0:
+                        self.sa[gal] = 1.
                     
-                
+              
+    
