@@ -29,10 +29,9 @@ db_path = '/home/thuso/Phd/experements/hierarical/LRG_Stack/burst_dtau_10.db'
 fun = lik.LRG_Tempering(data, db_path, have_dust=True, have_losvd=True)
 top = mpi_top.Topologies('single')
 #start mcmc
-if  mpi.COMM_WORLD.size > 1:
-    if mpi.COMM_WORLD.rank > 0:
+if mpi.COMM_WORLD.rank > 0:
         fun.lik_worker()
-    else:
+else:
         try:
             Param = tempering_main(fun, top, fail_recover=True)
         except MCMCError:

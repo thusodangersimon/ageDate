@@ -85,10 +85,10 @@ def tempering_main(fun, option, burnin=5*10**3,  max_iter=10**5,
         if option.current < burnin * 2:
             Param.step(fun, option.current, 500)
             Param.SA(option.current)
+            swap_temp(Param, option.current)
         # swap anneeling states
         if option.current < burnin * 3:
-            swap_temp(Param, option.current)
-            
+            Param.step(fun, option.current, 100)
         # stop SA and run chains in parallel
         if option.current == burnin * 3:
              Param.stop_tempering()
@@ -119,15 +119,16 @@ def mcmc(Param, fun, itter):
     for Prior,index in prior:
         new_chi[index] = Prior
     for Lik,index,spec in lik:
-        '''if len(spec) > 0 and itter% 1000 == 0 :
+        if len(spec) > 0 and itter% 5000 == 0 :
             lab.figure()
             lab.title(index)
             lab.plot(fun.data[index][:,0],fun.data[index][:,1])
-            print Lik
-            lab.plot( fun.data[index][:,0], spec[0])'''
+            print Lik, index,Param.active_param[bins][index]
+            lab.plot( fun.data[index][:,0], spec[0])
+            ipdb.set_trace()
         if nu.isfinite(new_chi[index]):
             new_chi[index] += Lik
-    #lab.show()
+    lab.show()
     #MH critera
     for key in new_chi.keys():
         if mh_critera(Param.active_chi[bins][key], new_chi[key],
@@ -154,7 +155,7 @@ def mh_critera(chi_old, chi_new, sa=1.):
         # rejected
         return False
 
-def swap_temp(Param, itter, swap_it=10):
+def swap_temp(Param, itter, swap_it=20):
     '''Does temp swap every few itterations'''
     if itter % swap_it == 0 and itter > 0:
         #select 2 chains to swap
@@ -186,13 +187,14 @@ def swap_temp(Param, itter, swap_it=10):
         if mh_critera(Param.active_chi[bins][gal1]/Param.sa[gal1],
                       Param.active_chi[bins][gal2]/Param.sa[gal2]):
             # accept
+            #ipdb.set_trace()
             Param._change_state(gal1, gal2)
             Param.temp_exchange[bins][gal1]['accept'] += 1
             # reset Naccepted and Nrejected
             for gal in [gal1, gal2]:
                 Param.Nacept[bins][gal] = 1.
                 Param.Nreject[bins][gal] = 1.
-            print gal1, gal2
+            #print gal1, gal2
         else:
             # reject don't do anything
             Param.temp_exchange[bins][gal1]['reject'] += 1
@@ -206,7 +208,7 @@ class Param_temp(Param_MCMC):
         self.bins = lik_fun.models.keys()[0]
         self.comm = comm
         self.temp_exchange = {self.bins: {}}
-        lik_fun.initalize_temp(comm.size)
+        lik_fun.initalize_temp(lik_fun._size)
         lik_fun.send_fitting_data()
         for bins in lik_fun.models:
             # model level
@@ -236,7 +238,7 @@ class Param_temp(Param_MCMC):
             self.param[bins][gal] = [self.active_param[bins][gal].copy()]
             self.T_start[gal] = abs(nu.max(self.chi[bins].values()))
         # initalize tempering
-        self.SA(0)
+        self.SA(0, size=lik_fun._size)
         #self.save_state(0, lik_fun)
         return not nu.all(nu.isfinite(self.chi[bins].values()))
 
@@ -244,12 +246,12 @@ class Param_temp(Param_MCMC):
         '''Turns T and delta T so interchange rate is 20-60%'''
         bins = self.bins
         for gal in self.acept_rate[bins]:
-            if self.acept_rate[bins][gal][-1] < .2:
+            '''if self.acept_rate[bins][gal][-1] < .2:
                 # increase temp
                 self.T_start[gal] *= 1.05
             elif self.acept_rate[bins][gal][-1] > .5:
                 # decrease temp
-                self.T_start[gal] /= 1.05
+                self.T_start[gal] /= 1.05'''
         for gal in self.temp_exchange[bins]:
             rate = (self.temp_exchange[bins][gal]['accept'] /
                     float(self.temp_exchange[bins][gal]['accept']+
@@ -280,7 +282,15 @@ class Param_temp(Param_MCMC):
                 temp = self.T_start[gal] + 0
                 self.T_start[gal] = self.T_stop[gal] + 0
                 self.T_stop[gal] = temp
-            
+        # check if in right order
+        orderd_start = nu.sort(self.T_start.values())
+        orderd_stop = nu.sort(self.T_stop.values())
+        for gal in self.T_start:
+            mult = int(gal.split('_')[-1])
+            if not orderd_start[mult] == self.T_start[gal]:
+                self.T_start[gal] = orderd_start[mult] +0
+            if not orderd_stop[mult] == self.T_stop[gal]:
+                self.T_stop[gal] = orderd_stop[mult] +0
         #print 'start',self.T_stop
 
     def _change_state(self, src, dest, swap=True):
@@ -328,7 +338,7 @@ class Param_temp(Param_MCMC):
             self.sa[gal] = 1.
         self.T_stop[gal] = 1.
             
-    def SA(self, chain_number, fail_recover=False):
+    def SA(self, chain_number, fail_recover=False, size=5):
         '''Calculates and initalizes anneeling params'''
         bins = self.active_param.keys()[0]
         max_chi = 0 #nu.max(self.active_chi[bins].values())
@@ -337,7 +347,7 @@ class Param_temp(Param_MCMC):
         if chain_number == 0 or fail_recover:
             # initalize
             self.delta_T = {}
-            delta_T = (max_chi - min_chi) / float(self.comm.size)
+            delta_T = (max_chi - min_chi) / float(size)
             self.sa = {}
             self.T_start = {}
             self.T_stop = {}
@@ -345,7 +355,7 @@ class Param_temp(Param_MCMC):
             for gal,sa in enumerate(nu.arange(min_chi, max_chi, delta_T)):
                 for key in self.active_chi[bins]:
                     #print key
-                    self.delta_T[key] = (max_chi - min_chi) / float(self.comm.size)
+                    self.delta_T[key] = (max_chi - min_chi) / float(size)
                     if int(key.split('_')[-1]) == gal:
                         # stop at temp before current
                         if gal == 0:

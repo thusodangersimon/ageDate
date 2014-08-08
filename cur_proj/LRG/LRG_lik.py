@@ -40,13 +40,14 @@ class Multi_LRG_burst(lik.Example_lik_class):
                 # Propagate the uncertany
                 self.data[i][:,2] *= self.norm[i]
         self.db = util.numpy_sql(db_name)
+        self._table_name = self.db.execute('select * from sqlite_master').fetchall()[0][1]
         # Tell which models are avalible and how many galaxies to fit
         self.models = {'burst': data.keys()}
         # Get param range (tau, age, metal)
         self.param_range = []
         for column in ['tau', 'age', 'metalicity']:
             self.param_range.append(nu.sort(nu.ravel(self.db.execute(
-                'Select DISTINCT %s FROM burst'%column).fetchall())))
+                'Select DISTINCT %s FROM %s'%(column,self._table_name)).fetchall())))
         self._hull = None
         # make resolution
         self._define_resolu()
@@ -70,7 +71,7 @@ class Multi_LRG_burst(lik.Example_lik_class):
             self._make_hull()
         return self._hull.find_simplex(point) >= 0
     
-    def lik(self, param, bins, return_model=False):
+    def lik(self, param, bins, return_model=False, normalize=True):
         '''Calculates log likelyhood for burst model'''
         for gal in param[bins]:
             #ipdb.set_trace()
@@ -86,10 +87,14 @@ class Multi_LRG_burst(lik.Example_lik_class):
                 else:
                     yield -nu.inf, gal
                 continue
-            
-            model = {'wave':spec[:,0],
+            if normalize:
+                model = {'wave':spec[:,0],0: spec[:,1]}
+            else:
+                model = {'wave':spec[:,0],
                      0: spec[:,1] * 10**param[bins][gal]['normalization'].iat[0]}
-           
+            # Redshift
+            model['wave'] = ag.redshift(model['wave'],
+                                        param[bins][gal]['redshift']) 
             # Dust
             if self.has_dust:
                 columns = ['$T_{bc}$','$T_{ism}$']
@@ -109,8 +114,10 @@ class Multi_LRG_burst(lik.Example_lik_class):
             #match data wavelengths with model
             model = ag.data_match(self.data[gal], model)
             #calculate map for normalization
-            self.norm_prior[gal] = nu.log10(ag.normalize(self.data[gal],
-                                                         model[0]))
+            norm = ag.normalize(self.data[gal], model[0])
+            self.norm_prior[gal] = nu.log10(norm)
+            if normalize:
+                model[0] *= norm
             # Calc liklihood
             if self.data[gal].shape[1] >= 3:
                 # Has Uncertanty
@@ -215,6 +222,9 @@ class Multi_LRG_burst(lik.Example_lik_class):
             out_lik = nu.sum([stats_dist.uniform.logpdf(param[bins][gal].iloc[0][i],
                                                          ran.min(),ran.ptp())
                                 for i,ran in enumerate(self.param_range)])
+            # Redshift
+            out_lik += stats_dist.uniform.logpdf(param[bins][gal]['redshift'],
+                                                 0,.055)
             # make sure norm isn't too small
             norm = param[bins][gal]['normalization'] < -10
             
@@ -223,7 +233,7 @@ class Multi_LRG_burst(lik.Example_lik_class):
             else:
                 out_lik += stats_dist.norm.logpdf(param[bins][gal]['normalization'],
                                               self.norm_prior[gal], 10)
-            #out_lik += redshift
+            
             if self.has_dust:
                 out_lik += stats_dist.uniform.logpdf(param[bins][gal][['$T_{ism}$',
                                                 '$T_{bc}$']],0,4).sum()
@@ -248,10 +258,11 @@ class Multi_LRG_burst(lik.Example_lik_class):
                 #ipdb.set_trace()
             # put back into DataFrame
             out[gal] = pd.DataFrame(out[gal],Mu[gal].columns).T
-        #set h3 and h4 to 0
-        if self.has_losvd:
-            out[gal]['$h_3$'] = 0.
-            out[gal]['$h_4$'] = 0.
+            #set h3 and h4 to 0
+            if self.has_losvd:
+                out[gal]['$h_3$'] = 0.
+                out[gal]['$h_4$'] = 0.
+                out[gal]['$V$'] = 0.
         return pd.Panel(out)
 
     def exit_signal(self):
@@ -273,14 +284,17 @@ class LRG_mpi_lik(Multi_LRG_burst):
         self._comm = mpi.COMM_WORLD
         self._rank = self._comm.Get_rank()
         self._size = self._comm.Get_size()
-        # get workers
-        if self._rank == 0:
-            self.get_workers()
-            self.lik = self.lik_root
-            # 
+        if self._size > 1:
+            # get workers
+            if self._rank == 0:
+                self.get_workers()
+                self.lik = self.lik_root
+                 
+            else:
+                self.calc_lik = self.lik
+                self.lik = self.lik_worker
         else:
-            self.calc_lik = self.lik
-            self.lik = self.lik_worker
+            self._size = 5
 
     def lik_worker(self):
         '''Does lik calculation for sent galaxies, returns likelihood'''

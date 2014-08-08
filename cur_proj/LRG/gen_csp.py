@@ -18,9 +18,13 @@ def make_exp(tau, lib_path='/home/thuso/Phd/stellar_models/ezgal', imf='chab',
     # make sure is matched for interpolatioin
     SSP.is_matched = True
     #make exp
+    #if tau=0 then is ssp
     for ssp in SSP:
-        yield ssp.make_exponential(tau)
-
+        if tau == 0:
+            yield ssp
+        else:
+            yield ssp.make_burst(tau)
+    
     
 def make_burst(tau, lib_path='/home/thuso/Phd/stellar_models/ezgal', imf='chab',
              model='cb07'):
@@ -30,12 +34,16 @@ def make_burst(tau, lib_path='/home/thuso/Phd/stellar_models/ezgal', imf='chab',
     # make sure is matched for interpolatioin
     SSP.is_matched = True
     #make exp
+    #if tau=0 then is ssp
     for ssp in SSP:
-        yield ssp.make_burst(tau)
+        if tau == 0:
+            yield ssp
+        else:
+            yield ssp.make_burst(tau)
 
 
 def make_csp_lib(csp_type, csp_num=10, save_path='.'):
-    '''Makes a csp library. does n steps of tau in GYR to 0.05-11 GYR.
+    '''Makes a csp library. does n steps of tau in GYR to 0 -5 GYR.
     With multicore processing
     '''
     # get burst function
@@ -45,7 +53,7 @@ def make_csp_lib(csp_type, csp_num=10, save_path='.'):
     else:
         model = make_exp
     #pool = Pool()
-    tau = nu.linspace(0.1, 11, csp_num)
+    tau = nu.linspace(0, 5, csp_num)
     models = map(model, tau)
     # save spectra to database
     save_name = os.path.join(save_path, '%s_dtau_%d.db'%(csp_type,csp_num))
@@ -72,6 +80,9 @@ def make_csp_lib(csp_type, csp_num=10, save_path='.'):
                     length = float(meta_gal.meta_data['length'])
                 elif 'tau' in meta_gal.meta_data:
                     length = float(meta_gal.meta_data['tau'])
+                else:
+                    # if SSP
+                    length = 0.
                 
                 insert  = (meta_gal.meta_data['imf'],meta_gal.meta_data['model']
                            , length, age,

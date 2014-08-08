@@ -454,7 +454,7 @@ def data_match(data, model, keep_wave=False):
 
 def redshift(wave, redshift):
    #changes redshift of models
-   return wave * (1. + redshift)
+   return wave * (1. + nu.asarray(redshift))
 
 def normalize(data, model):
     #normalizes the model spectra so it is closest to the data
