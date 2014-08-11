@@ -79,6 +79,13 @@ class Multi_LRG_burst(lik.Example_lik_class):
             #check if points are in range
             columns = ['tau', 'age', 'metalicity']
             if self.is_in_hull(param[bins][gal][columns]):
+                # check if db works
+                try:
+                    self.db.execute('select * from sqlite_master').fetchall()[0][1]
+                except: #ProgrammingError:
+                    #make new database connection
+                    self.db = util.numpy_sql(self.db_name)
+                    
                 spec = tri_lin_interp(self.db,
                     param[bins][gal][columns], self.param_range)
             else:
@@ -294,6 +301,7 @@ class LRG_mpi_lik(Multi_LRG_burst):
                 self.calc_lik = self.lik
                 self.lik = self.lik_worker
         else:
+            self.get_workers()
             self._size = 5
 
     def lik_worker(self):
@@ -426,7 +434,11 @@ class LRG_mpi_lik(Multi_LRG_burst):
                 break
         
     def get_workers(self):
-        self._workers = range(1,self._size)
+        if self._comm.Get_size() > 1:
+            self._workers = range(1,self._size)
+        else:
+            # single processing
+            self._workers = ''
 
     def remove_workers(self, del_work):
         if del_work in self._workers:
@@ -435,7 +447,7 @@ class LRG_mpi_lik(Multi_LRG_burst):
 
     def exit_signal(self):
         '''Sets varables needed for mpi'''
-        if not self._rank == 0:
+        if not self._rank == 0 or isinstance(self._workers, str):
             return None
         # send exit signal to all workers
         while len(self._workers) > 0:

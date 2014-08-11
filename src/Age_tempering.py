@@ -125,10 +125,10 @@ def mcmc(Param, fun, itter):
             lab.plot(fun.data[index][:,0],fun.data[index][:,1])
             print Lik, index,Param.active_param[bins][index]
             lab.plot( fun.data[index][:,0], spec[0])
-            ipdb.set_trace()
+            #ipdb.set_trace()
         if nu.isfinite(new_chi[index]):
             new_chi[index] += Lik
-    lab.show()
+    #lab.show()
     #MH critera
     for key in new_chi.keys():
         if mh_critera(Param.active_chi[bins][key], new_chi[key],
