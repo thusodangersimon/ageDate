@@ -503,18 +503,25 @@ def grid_search(point, param_range):
     index = nu.asarray(index)
     len_array = nu.asarray(len_array)
     # check if at on an edge
-    if nu.any(index == 0):
-        ipdb.set_trace()
-        raise NotImplementedError
-    if nu.any(index == len_array):
-        ipdb.set_trace()
-        raise NotImplementedError
+    if nu.any(index == 0) or nu.any(index == len_array):
+        com_tupple = []
+        for j, i in enumerate(index):
+            if i == 0:
+                # param is on lower edge return 1 points that are the same
+                com_tupple.append((param_range[j][i],))
+            elif i == len_array[j]:
+                # param is on upper edge
+                com_tupple.append((param_range[j][i],))
+            else:
+                com_tupple.append((param_range[j][i-1], param_range[j][i]))
+        
     # check if on plane
-    if nu.any(nu.hstack(on_plane)):
+    elif nu.any(nu.hstack(on_plane)):
         ipdb.set_trace()
         raise NotImplementedError
     # iterate around the point
-    com_tupple = [(param_range[j][i-1], param_range[j][i])
+    else:
+        com_tupple = [(param_range[j][i-1], param_range[j][i])
                   for j,i in enumerate(index)]
     interp_points = nu.asarray([p for p in
                              itertools.product(*com_tupple)])
@@ -536,6 +543,23 @@ def tri_lin_interp(db, param, param_range):
             wave = util.convert_array(spec[-1])[:,0]
         spec[-1] = util.convert_array(spec[-1])[:,1]
     # do interpolation
-    out_spec = nu.vstack((wave, griddata(points, spec, param))).T
+    # check if on edge or less than normal spectra
+    if len(spec) == 4:
+        # bi-linear inter is needed
+        # find which param is the same
+        arange = nu.arange(nu.asarray(param).shape[1])
+        for i in arange:
+            if nu.all(points[:,i] == nu.asarray(param)[0][i]):
+                # cut it out
+                points = points[:, arange != i]
+                eval_points = nu.asarray(param)[:, arange != i]
+                break
+        spec = interp.bilinear_interpolation(points[:,0], points[:,1],spec,
+                                             eval_points[0,0],eval_points[0,1])
+        
+    else:
+        #tri-linear is needed
+        spec = griddata(points, spec, param)
+    out_spec = nu.vstack((wave, spec)).T
     return  out_spec
     
