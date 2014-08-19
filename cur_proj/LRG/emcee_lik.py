@@ -7,6 +7,7 @@ from mpi4py import MPI
 import matplotlib.pyplot as pl
 from mpl_toolkits.mplot3d import Axes3D
 
+
 class LRG_emcee(Multi_LRG_burst):
     '''makes my likelihood work with emcee sampler'''
 
@@ -26,8 +27,12 @@ class LRG_emcee(Multi_LRG_burst):
         for Lik, index in lik:
             pass
         return Lik + Prior
+    
+    def dummy_prior(self, param):
+        '''Dummy prior for PTsampler'''
+        return 0.
         
-
+    
     def ndim(self):
         '''returns number of dimensions'''
         inital = self.initalize_param(self.data.keys()[0])[1]
@@ -43,10 +48,12 @@ class LRG_emcee(Multi_LRG_burst):
         # galaxy name
         self._gal = self.data.keys()[0]
         
-    def inital_pos(self, nwalkers):
+    def inital_pos(self, nwalkers, ntemps=None):
         '''returns vector of valid positons for emcee
-        returns parameters in shape (nwalkers, dim)'''
-        
+        returns parameters in shape (nwalkers, dim). If Ntemp is not none
+        then make inital params for pt sampler (ntemps, nwalkers, dim)'''
+        if not ntemps is None:
+            return self._pt_inital_pos(ntemps, nwalkers)
         out = []
         for walker in xrange(nwalkers):
             kill = False
@@ -64,6 +71,34 @@ class LRG_emcee(Multi_LRG_burst):
         # vectorize
         return  nu.asarray(out)
 
+    def _pt_inital_pos(self, ntemps, nwalkers):
+        '''makes inital possition for PTsampler'''
+        dim = self.ndim()
+        out = nu.zeros((ntemps, nwalkers, dim))
+        # iterate of walkers to make 3d array
+        for temp in range(ntemps):
+            out[temp,:,:] = self.inital_pos(nwalkers, None)
+        return out
+class LRG_emcee_PT(LRG_emcee):
+    '''Likilyhood for PTsamplers'''
+
+    def __call__(self, param):
+        '''makes ok for my input'''
+        #print param
+        #ipdb.set_trace()
+        p = pd.DataFrame([param], columns=self._columns, index=[0])
+        p = {self._bins: { self._gal: p}}
+        # check prior first
+        prior = self.prior(p, self._bins)
+        for Prior, gal in prior:
+            if not nu.isfinite(Prior):
+                return -nu.inf,-nu.inf
+        #likihood
+        lik = self.lik(p, self._bins , normalize=False)
+        for Lik, index in lik:
+            pass
+        return Lik, Prior
+          
 class MPIPool_stay_alive(emcee.utils.MPIPool):
     '''
     Like emcee pool object, but has own instance of likeihood function.

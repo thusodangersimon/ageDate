@@ -68,7 +68,7 @@ def make_wavelenght(lam_min, lam_max):
     '''makes random wavelenth coverage using inputs'''
     return nu.arange(lam_min, lam_max)
 
-def do_fit(fit_dir, db_path):
+def do_fit_ensemble(fit_dir, db_path):
     '''Fits data using emcee'''
     comm = mpi.COMM_WORLD
     pool = emcee_lik.MPIPool_stay_alive(loadbalance=True)
@@ -92,15 +92,58 @@ def do_fit(fit_dir, db_path):
             pos, prob = [], []
             i = 0
             for tpos, tprob, _ in sampler.sample(pos0, iterations=iterations):
-                print '%i out of %i'%(i, iterations)
+                acept = sampler.acceptance_fraction.mean()
+                print '%i out of %i, accept=%2.1f'%(i, iterations, acept)
                 pos.append(tpos)
                 prob.append(tprob)
                 i+=1
             pik.dump((temp,(pos, prob)), open(gal + '.res', 'w'), 2)
+            pool.close()
         else:
             pool.wait(posterior)
+            
+def dummy_prior(param):
+    #ipdb.set_trace()
+    return 0.
         
-        
+def do_fit_PT(fit_dir, db_path):
+    '''Fits data using emcee.PTtempering'''
+    comm = mpi.COMM_WORLD
+    pool = emcee_lik.MPIPool_stay_alive(loadbalance=True)
+    files = glob(path.join(fit_dir, '*.pik'))
+    # start fits
+    for gal in files:
+        comm.barrier()
+        data = {}
+        temp = pik.load(open(gal))
+        data[gal] = temp[-1]
+        data = comm.bcast(data, root=0)
+        posterior = emcee_lik.LRG_emcee_PT(data, db_path, have_dust=True,
+                                            have_losvd=False)
+        posterior.init()
+        nwalkers = 2 *  posterior.ndim()
+        ntemps = 20
+        if pool.is_master():
+            # need to make pos0 (ntemps, nwalkers, dim)
+            pos0 = posterior.inital_pos(nwalkers, ntemps)
+            sampler = emcee.PTSampler(ntemps, nwalkers, posterior.ndim() ,
+                                            posterior, dummy_prior,
+                                            pool=pool)
+            iterations = 10 * 10**3
+            pos, prob = [], []
+            i = 0
+            
+            for tpos, tprob, _ in sampler.sample(pos0, iterations=iterations):
+                acept = sampler.acceptance_fraction.mean()
+                print '%i out of %i, accept=%2.1f'%(i, iterations, acept)
+                pos.append(tpos)
+                prob.append(tprob)
+                i+=1
+            pik.dump((temp,(pos, prob)), open(gal + '.res', 'w'), 2)
+            pool.close()
+        else:
+            pool.wait(posterior)
+            
 if __name__ == "__main__":
     '''makes fake spectra'''
     db_path = '/home/thuso/Phd/experements/hierarical/LRG_Stack/burst_dtau_10.db'
@@ -109,6 +152,6 @@ if __name__ == "__main__":
         make_CSP_grid(db_path, '/home/thuso/Phd/experements/hierarical/LRG_Stack/stacked_real/Fake_CSP')
     else:
         fit_dir = '/home/thuso/Phd/experements/hierarical/LRG_Stack/stacked_real/Fake_SSP'
-        do_fit(fit_dir, db_path)
+        do_fit_PT(fit_dir, db_path)
         fit_dir = '/home/thuso/Phd/experements/hierarical/LRG_Stack/stacked_real/Fake_CSP'
         do_fit(fit_dir, db_path)
