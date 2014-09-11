@@ -1,9 +1,8 @@
-
 # By Anne M. Archibald, 2007 and 2009
 #from https://github.com/aarchiba/kuiper.git
 import numpy as np
 from numpy import copy, sort, amax, arange, exp, sqrt, abs, floor, searchsorted
-from scipy import factorial, comb
+from scipy.misc import factorial, comb
 import itertools
 
 def kuiper_FPP(D,N):
