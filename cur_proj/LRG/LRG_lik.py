@@ -119,7 +119,10 @@ class Multi_LRG_burst(lik.Example_lik_class):
                 model = ag.LOSVD(model, send_param,
                                    wave_range, self.resolu[gal])
             #match data wavelengths with model
-            model = ag.data_match(self.data[gal], model)
+            try:
+                model = ag.data_match(self.data[gal], model)
+            except:
+                model = ag.data_match(self.data[gal], model, rebin=False)
             #calculate map for normalization
             norm = ag.normalize(self.data[gal], model[0])
             self.norm_prior[gal] = nu.log10(norm)
@@ -226,9 +229,19 @@ class Multi_LRG_burst(lik.Example_lik_class):
         # Uniform
         # tau, age, metalicity
         for gal in param[bins]:
-            out_lik = nu.sum([stats_dist.uniform.logpdf(param[bins][gal].iloc[0][i],
+            out_lik = 0.
+            for i,ran in enumerate(self.param_range):
+                if i ==1:
+                    #age
+                    if param[bins][gal].iloc[0][i] > ran.max():
+                        out_lik += -nu.inf
+                    else:
+                        out_lik += stats_dist.norm.logpdf(param[bins][gal].iloc[0][i], 9.65, 0.43)
+                else:
+                    #other
+                    out_lik += stats_dist.uniform.logpdf(param[bins][gal].iloc[0][i],
                                                          ran.min(),ran.ptp())
-                                for i,ran in enumerate(self.param_range)])
+                                
             # Redshift
             out_lik += stats_dist.uniform.logpdf(param[bins][gal]['redshift'],
                                                  0,.055)

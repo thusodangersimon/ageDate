@@ -7,7 +7,7 @@ import cPickle as pik
 from os import path
 from glob import glob
 import mpi4py.MPI as mpi
-import ipdb
+import pylab as lab
 
 '''Makes fake SSPs and CSP for fitting with different noise'''
 
@@ -97,7 +97,7 @@ def do_fit_ensemble(fit_dir, db_path):
                 pos.append(tpos)
                 prob.append(tprob)
                 i+=1
-            pik.dump((temp,(pos, prob)), open(gal + '.res', 'w'), 2)
+            pik.dump((temp,(pos, prob)), open(gal + '.ens', 'w'), 2)
             pool.close()
         else:
             pool.wait(posterior)
@@ -118,40 +118,54 @@ def do_fit_PT(fit_dir, db_path):
         temp = pik.load(open(gal))
         data[gal] = temp[-1]
         data = comm.bcast(data, root=0)
-        posterior = emcee_lik.LRG_emcee_PT(data, db_path, have_dust=True,
+        posterior = emcee_lik.LRG_emcee_PT(data, db_path, have_dust=False,
                                             have_losvd=False)
         posterior.init()
         nwalkers = 2 *  posterior.ndim()
-        ntemps = 20
+        #ntemps = 20
+        Tmax = 1.7*10**12
         if pool.is_master():
             # need to make pos0 (ntemps, nwalkers, dim)
             pos0 = posterior.inital_pos(nwalkers, ntemps)
-            sampler = emcee.PTSampler(ntemps, nwalkers, posterior.ndim() ,
-                                            posterior, dummy_prior,
+            sampler = emcee.PTSampler(None, nwalkers, posterior.ndim() ,
+                                            posterior, dummy_prior,Tmax=Tmax,
                                             pool=pool)
+            burnin = 2000
             iterations = 10 * 10**3
-            pos, prob = [], []
+            #pos, prob = [], []
             i = 0
-            
-            for tpos, tprob, _ in sampler.sample(pos0, iterations=iterations):
+            #burn in
+            pos, prob, state = sampler.run_mcmc(pos0, burnin)
+            sampler.reset()
+            #mcmc
+            for tpos, tprob, _ in sampler.sample(pos, iterations=iterations
+                                                 , rstate0=state):
                 acept = sampler.acceptance_fraction.mean()
                 print '%i out of %i, accept=%2.1f'%(i, iterations, acept)
-                pos.append(tpos)
-                prob.append(tprob)
+                if i % 100:
+                     pik.dump((temp,sampler), open(gal + '.pt.incomplte', 'w'), 2)
                 i+=1
-            pik.dump((temp,(pos, prob)), open(gal + '.res', 'w'), 2)
+            pik.dump((temp,sampler), open(gal + '.pt', 'w'), 2)
             pool.close()
         else:
             pool.wait(posterior)
             
 if __name__ == "__main__":
     '''makes fake spectra'''
-    db_path = '/home/thuso/Phd/experements/hierarical/LRG_Stack/burst_dtau_10.db'
+    #get database
+    if mpi.Get_processor_name() in ['mightee.ast.uct.ac.za','workhorse',
+                                    'darkstar'] :
+        db_path = '/home/thuso/Phd/experements/hierarical/LRG_Stack/burst_dtau_10.db'
+    else:
+        db_path = '/mnt/burst_dtau_10.db'
+    #path to spectra
     if not path.exists('/home/thuso/Phd/experements/hierarical/LRG_Stack/stacked_real/Fake_SSP'):
         make_SSP_grid(db_path, '/home/thuso/Phd/experements/hierarical/LRG_Stack/stacked_real/Fake_SSP')
         make_CSP_grid(db_path, '/home/thuso/Phd/experements/hierarical/LRG_Stack/stacked_real/Fake_CSP')
     else:
+        # fit ssps
         fit_dir = '/home/thuso/Phd/experements/hierarical/LRG_Stack/stacked_real/Fake_SSP'
         do_fit_PT(fit_dir, db_path)
         fit_dir = '/home/thuso/Phd/experements/hierarical/LRG_Stack/stacked_real/Fake_CSP'
-        do_fit(fit_dir, db_path)
+        #fit csps
+        do_fit_PT(fit_dir, db_path)

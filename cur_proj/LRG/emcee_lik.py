@@ -79,6 +79,8 @@ class LRG_emcee(Multi_LRG_burst):
         for temp in range(ntemps):
             out[temp,:,:] = self.inital_pos(nwalkers, None)
         return out
+
+    
 class LRG_emcee_PT(LRG_emcee):
     '''Likilyhood for PTsamplers'''
 

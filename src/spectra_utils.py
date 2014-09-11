@@ -427,7 +427,7 @@ def data_match_all(data, spect):
     spect = nu.copy(out)
     return spect, out_data
 
-def data_match(data, model, keep_wave=False):
+def data_match(data, model, keep_wave=False, rebin=True):
    '''(ndarray,dict(ndarray),bool) -> dict(ndarray)
    Makes sure data and model have same wavelength range 
     and points but with a dictionary
@@ -441,13 +441,17 @@ def data_match(data, model, keep_wave=False):
           if i == 'wave':
               continue
           out[i] = model[i]
-   else: #not same shape, interp 
+   else:
+     #not same shape, interp or rebin flux (correct way)
       for i in model.keys():
         if i == 'wave':
           continue
-        
-        out[i] = rebin_spec(model['wave'], model[i], data[:,0])
-        
+        if rebin:
+            out[i] = rebin_spec(model['wave'], model[i], data[:,0])
+        else:
+          # interpolate
+          out[i] = linear_interpolation(model['wave'], model[i], data[:,0])
+          
    if keep_wave:
       out['wave'] = nu.copy(data[:,0])
    return out
