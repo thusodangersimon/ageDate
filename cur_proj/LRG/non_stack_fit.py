@@ -75,15 +75,15 @@ class Server(object):
         '''starts all sockets'''
         # send
         self.gal_send = self.context.socket(zmq.PUSH)
-        self.gal_send.bind("tcp://127.0.0.1:%i"%self.sendport)
+        self.gal_send.bind("tcp://*:%i"%self.sendport)
         self.gal_send.setsockopt(zmq.IDENTITY, b'gal send')
         # recive results
         self.results_receiver = self.context.socket(zmq.PULL)
-        self.results_receiver.bind("tcp://127.0.0.1:%i"%self.recivport)
+        self.results_receiver.bind("tcp://*:%i"%self.recivport)
         self.results_receiver.setsockopt(zmq.IDENTITY, b'gal recive')
         # manage
         self.control_sender = self.context.socket(zmq.PUB)
-        self.control_sender.bind("tcp://127.0.0.1:%i"%self.manageport)
+        self.control_sender.bind("tcp://*:%i"%self.manageport)
         self.control_sender.setsockopt(zmq.IDENTITY, b'gal manage')
         # make poll
         self.poller = zmq.Poller()
@@ -139,7 +139,7 @@ class Server(object):
         # record status
         self.cur_workers[id][1] = ess
         for ID in self.cur_workers:
-            print '%s is has ESS of %f'%(id, int(ess))
+            print '%s is has ESS of %f'%(ID, int(ess))
             
     def finalize(self, id):
         '''When data is finished. Saves and removes from working list'''
@@ -188,15 +188,17 @@ class Client(object):
         '''Reqests data for processing'''
         # tell client that it's ready
         self.results_sender.send_pyobj((b'need data', self.id, []))
+        sock = dict(self.poller.poll(100))
         # check is all work is done
-        done = self.check_done()
-        if done:
-            return None, None
+        #done = self.check_done()
+        #if done:
+        #    return None, None
         while True:
             try:
                 id, pyobj= self.work_receiver.recv_pyobj(zmq.NOBLOCK)
                 if id == self.id:
                     data, param = pyobj
+                    self.results_sender.send_pyobj((b'got it', self.id, []))
                     break
             except zmq.Again:
                 print 'trouble reciving data try again in 5 seconds'
@@ -247,7 +249,7 @@ def worker_fit(db_path, host_addr):
         if data is None:
             sys.exit(0)
         # get postieror function
-        posterior = emcee_lik.LRG_emcee(data, db_path, have_dust=True, have_losvd=False)
+        posterior = emcee_lik.LRG_emcee({'test':data}, db_path, have_dust=True, have_losvd=False)
         posterior.init()
         nwalkers = 2 *  posterior.ndim()
         if not pool.is_master():
@@ -312,6 +314,15 @@ def fit_all(db_path, save_path, min_wave=3500, max_wave=8000):
                 server.add(id, data_param)
                 server.update(id, 0)
                 server.gal_send.send_pyobj((id, (data, data_param)))
+                while True:
+                    socks = dict(server.poller.poll(1))
+                    if server.results_receiver in socks:
+                        msg, tid, _ = server.results_receiver.recv_pyobj(zmq.NOBLOCK)
+                        if tid == id and msg == 'got it':
+                            break
+                    else:
+                        server.gal_send.send_pyobj((id, (data, data_param)))
+                        time.sleep(1)
             elif msg == 'status':
                 # log status
                 server.update(id, py_obj)
@@ -330,4 +341,4 @@ def fit_all(db_path, save_path, min_wave=3500, max_wave=8000):
 if __name__ == '__main__':
     # start worker'
     db_path = '/home/thuso/Phd/experements/hierarical/LRG_Stack/burst_dtau_10.db'
-    worker_fit(db_path, 'localhost')
+    worker_fit(db_path, '137.158.95.121')
