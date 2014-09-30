@@ -149,6 +149,7 @@ class Server(object):
     def close(self):
         '''Send mesgage for all processers to close'''
         self.control_sender.send('exit')
+        self.control_sender.send('exit')
 
 class Client(object):
     '''
@@ -189,11 +190,11 @@ class Client(object):
         # tell client that it's ready
         self.results_sender.send_pyobj((b'need data', self.id, []))
         sock = dict(self.poller.poll(100))
-        # check is all work is done
-        #done = self.check_done()
-        #if done:
-        #    return None, None
         while True:
+            # check is all work is done
+            done = self.check_done()
+            if done:
+                return None, None
             try:
                 id, pyobj= self.work_receiver.recv_pyobj(zmq.NOBLOCK)
                 if id == self.id:
@@ -264,6 +265,8 @@ def worker_fit(db_path, host_addr):
         for pos, prob, rstate in sampler.sample(pos0, iterations=500):
             show = 'Burn-in: Postieror=%e acceptance=%2.1f autocorr=%2.1f'%(np.mean(prob), 100*accept,autocorr)
             print show
+            if len(sampler.flatchain) % 100 == 0:
+                client.send_update(-1)
         # get ready for real run
         sampler.reset()
         ess = 0.
@@ -277,6 +280,8 @@ def worker_fit(db_path, host_addr):
             client.send_update(ess)
             if ess >= 1000:
                 break
+        # tell workers to stop
+        pool.close()
         # send results
         client.send_results((data, data_param, sampler.flatchain,
                              sampler.flatlnprobability))
@@ -294,7 +299,7 @@ def fit_all(db_path, save_path, min_wave=3500, max_wave=8000):
     print 'Starting server'
     spec_index = 0
     while True:
-        if spec_index == spec[param[:,1]>9].shape[0]:
+        if spec_index >= spec[param[:,1]>9].shape[0]:
             # don't take any more data
             server.done = True
             server.close()
@@ -333,7 +338,9 @@ def fit_all(db_path, save_path, min_wave=3500, max_wave=8000):
                 data_param = py_obj[1]
                 out_name = '%2.2f_%2.2f_%2.2f.pik'%(data_param[0], data_param[1],
                                                 data_param[2])
-                pik.dump(py_obj, open(os.path.join(out_path,out_name),'w'), 2)
+                pik.dump(py_obj, open(os.path.join(save_path,out_name),'w'), 2)
+                spec_index = spec[param[:,1]>9].shape[0]
+                continue
             if len(server.cur_workers) == 0:
                 print 'exiting'
                 break
