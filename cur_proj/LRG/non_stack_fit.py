@@ -70,6 +70,10 @@ class Server(object):
         self.initalize()
         # other varibles
         self.done = False
+        if os.path.exists('complete_log.pik'):
+            self.complete = pik.load(open('complete_log.pik'))
+        else:
+            self.complete = {}
         
     def initalize(self):
         '''starts all sockets'''
@@ -122,10 +126,10 @@ class Server(object):
                 self.close()
             
  
-    def add(self, id, param):
+    def add(self, id, param, spec_index):
         '''Adds id to busy list'''
         # param, ess
-        self.cur_workers[id] = [param, 0, []]
+        self.cur_workers[id] = [param, 0, spec_index]
         
     def get_next(self):
         '''Gets next data to send and checks how many gal are left'''
@@ -133,7 +137,7 @@ class Server(object):
         self.done = True
         return None, None
     
-    def update(self, id, ess, chains=None):
+    def update(self, id, ess):
         '''Keeps track of all data that is being processed and prints message
         about status'''
         # record status
@@ -144,6 +148,9 @@ class Server(object):
     def finalize(self, id):
         '''When data is finished. Saves and removes from working list'''
         print 'worker %s is done' %id
+        self.complete[self.cur_workers[id][2]] = self.cur_workers[id][0]
+        # save list
+        pik.dump(self.complete, open('complete_log.pik' ,'w'), 2)
         self.cur_workers.pop(id)
         
     def close(self):
@@ -203,6 +210,7 @@ class Client(object):
                     break
             except zmq.Again:
                 print 'trouble reciving data try again in 5 seconds'
+                self.results_sender.send_pyobj((b'waiting', self.id, []))
                 time.sleep(5)
             
         print 'recived_data'
@@ -296,9 +304,15 @@ def fit_all(db_path, save_path, min_wave=3500, max_wave=8000):
     wave = wave[index]
     spec = spec[:,index]
     server = Server('','')
-    print 'Starting server'
+    print 'Ready for requests'
     spec_index = 0
     while True:
+        # skip index till new one is found
+        while True:
+            if spec_index in server.complete:
+                spec_index += 1
+            # check if in working
+            server.cur_workers[id][1]
         if spec_index >= spec[param[:,1]>9].shape[0]:
             # don't take any more data
             server.done = True
@@ -315,17 +329,31 @@ def fit_all(db_path, save_path, min_wave=3500, max_wave=8000):
                 print 'sending data to %s'%id
                 data = np.vstack((wave, spec[param[:,1]>9][spec_index,:])).T
                 data_param = param[param[:,1]>9][spec_index]
+                server.add(id, data_param, spec_index)
                 spec_index += 1
-                server.add(id, data_param)
                 server.update(id, 0)
                 server.gal_send.send_pyobj((id, (data, data_param)))
                 while True:
+                    print 'trying to send'
                     socks = dict(server.poller.poll(1))
                     if server.results_receiver in socks:
                         msg, tid, _ = server.results_receiver.recv_pyobj(zmq.NOBLOCK)
                         if tid == id and msg == 'got it':
+                            print 'sent to %s'%id
                             break
                     else:
+                        server.gal_send.send_pyobj((id, (data, data_param)))
+                        time.sleep(1)
+            elif msg == 'waiting':
+                # if process is waiting for data resend
+                print 'trying to send'
+                socks = dict(server.poller.poll(1))
+                if server.results_receiver in socks:
+                    msg, tid, _ = server.results_receiver.recv_pyobj(zmq.NOBLOCK)
+                    if tid == id and msg == 'got it':
+                        print 'sent to %s'%id
+                    else:
+                        # resend
                         server.gal_send.send_pyobj((id, (data, data_param)))
                         time.sleep(1)
             elif msg == 'status':
@@ -348,4 +376,4 @@ def fit_all(db_path, save_path, min_wave=3500, max_wave=8000):
 if __name__ == '__main__':
     # start worker'
     db_path = '/home/thuso/Phd/experements/hierarical/LRG_Stack/burst_dtau_10.db'
-    worker_fit(db_path, '137.158.95.121')
+    worker_fit(db_path, '54-4-a6-a-f4-28.lan.uct.ac.za')
