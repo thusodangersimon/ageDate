@@ -124,6 +124,7 @@ class Server(object):
             # check if finished
             if self.done:
                 self.close()
+                
     def check_current(self, spec_index=None):
         '''checks if index is being used or has been completed all ready.
         If spec_index is None then starts from lowest index'''
@@ -153,9 +154,15 @@ class Server(object):
         '''Keeps track of all data that is being processed and prints message
         about status'''
         # record status
-        self.cur_workers[id][1] = ess
+        if id in self.cur_workers[id]:
+            self.cur_workers[id][1] = ess
+        else:
+            # echo from finished param?
         for ID in self.cur_workers:
-            print '%s is has ESS of %f'%(ID, int(ess))
+            if ess > 0:
+                print '%s is has ESS of %f'%(ID, int(ess))
+            else:
+                 print '%s is in burnin'%ID
             
     def finalize(self, id):
         '''When data is finished. Saves and removes from working list'''
@@ -281,19 +288,23 @@ def worker_fit(db_path, host_addr):
         sampler = emcee.EnsembleSampler(nwalkers, posterior.ndim() ,
                                             posterior, pool=pool)
         pos0 = posterior.inital_pos(nwalkers)
-        autocorr, accept = 0, 0
+        i = 0
+        accept = 0
         for pos, prob, rstate in sampler.sample(pos0, iterations=500):
-            show = 'Burn-in: Postieror=%e acceptance=%2.1f autocorr=%2.1f'%(np.mean(prob), 100*accept,autocorr)
+            show = 'Burn-in: Postieror=%e acceptance=%2.1f'%(np.mean(prob),accept)
             print show
-            if len(sampler.flatchain) % 100 == 0:
+            accept = np.mean(sampler.acceptance_fraction)
+            i += 1
+            if i % 100 == 0:
                 client.send_update(-1)
         # get ready for real run
         sampler.reset()
-        ess = 0.
+        ess, accept = 0., 0.
         while True:
             for pos, prob, rstate in sampler.sample(pos, iterations=100, rstate0=rstate):
                 show = 'Real run: Postieror=%e acceptance=%2.1f ESS=%2.1f'%(np.mean(prob), 100*accept, ess)
                 print show
+                accept = np.mean(sampler.acceptance_fraction)
             ess = (sampler.flatchain.shape[0]/
                     np.nanmin(sampler.get_autocorr_time()))
             # send update
@@ -324,7 +335,6 @@ def fit_all(db_path, save_path, min_wave=3500, max_wave=8000):
             # don't take any more data
             server.done = True
             server.close()
-        time.sleep(1)
         # check results
         socks = dict(server.poller.poll(1000))           
         if server.results_receiver in socks:
@@ -354,7 +364,6 @@ def fit_all(db_path, save_path, min_wave=3500, max_wave=8000):
                         time.sleep(1)
             elif msg == 'waiting':
                 # if process is waiting for data resend
-                print 'trying to send'
                 socks = dict(server.poller.poll(1))
                 if server.results_receiver in socks:
                     msg, tid, _ = server.results_receiver.recv_pyobj(zmq.NOBLOCK)
@@ -362,8 +371,13 @@ def fit_all(db_path, save_path, min_wave=3500, max_wave=8000):
                         print 'sent to %s'%id
                     else:
                         # resend
+                        print 'trying to send to %s'%id
+                        # get data to send
+                        temp_index = self.cur_workers[id][2]
+                        data = np.vstack((wave, spec[param[:,1]>9][temp_index,:])).T
+                        data_param = param[param[:,1]>9][temp_index]
                         server.gal_send.send_pyobj((id, (data, data_param)))
-                        time.sleep(1)
+                       
             elif msg == 'status':
                 # log status
                 server.update(id, py_obj)
