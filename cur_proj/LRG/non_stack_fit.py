@@ -124,7 +124,19 @@ class Server(object):
             # check if finished
             if self.done:
                 self.close()
-            
+    def check_current(self, spec_index=None):
+        '''checks if index is being used or has been completed all ready.
+        If spec_index is None then starts from lowest index'''
+        if spec_index is None:
+            if len(self.complete) == 0:
+                return 0
+            else:
+                spec_index = 0
+        # get list of working indexes
+        working_index = [self.cur_workers[i][2] for i in self.cur_workers]
+        while spec_index in self.complete or spec_index in working_index:
+            spec_index += 1
+        return spec_index
  
     def add(self, id, param, spec_index):
         '''Adds id to busy list'''
@@ -305,14 +317,9 @@ def fit_all(db_path, save_path, min_wave=3500, max_wave=8000):
     spec = spec[:,index]
     server = Server('','')
     print 'Ready for requests'
-    spec_index = 0
+    spec_index = server.check_current()
     while True:
         # skip index till new one is found
-        while True:
-            if spec_index in server.complete:
-                spec_index += 1
-            # check if in working
-            server.cur_workers[id][1]
         if spec_index >= spec[param[:,1]>9].shape[0]:
             # don't take any more data
             server.done = True
@@ -331,6 +338,7 @@ def fit_all(db_path, save_path, min_wave=3500, max_wave=8000):
                 data_param = param[param[:,1]>9][spec_index]
                 server.add(id, data_param, spec_index)
                 spec_index += 1
+                spec_index = server.check_current(spec_index)
                 server.update(id, 0)
                 server.gal_send.send_pyobj((id, (data, data_param)))
                 while True:
