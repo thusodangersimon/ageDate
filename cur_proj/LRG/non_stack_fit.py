@@ -154,13 +154,14 @@ class Server(object):
         '''Keeps track of all data that is being processed and prints message
         about status'''
         # record status
-        if id in self.cur_workers[id]:
+        if id in self.cur_workers:
             self.cur_workers[id][1] = ess
         else:
             # echo from finished param?
+            pass
         for ID in self.cur_workers:
-            if ess > 0:
-                print '%s is has ESS of %f'%(ID, int(ess))
+            if  self.cur_workers[ID][1] > 0:
+                print '%s is has ESS of %f'%(ID, int(self.cur_workers[ID][1]))
             else:
                  print '%s is in burnin'%ID
             
@@ -300,6 +301,7 @@ def worker_fit(db_path, host_addr):
         # get ready for real run
         sampler.reset()
         ess, accept = 0., 0.
+        trys = 0
         while True:
             for pos, prob, rstate in sampler.sample(pos, iterations=100, rstate0=rstate):
                 show = 'Real run: Postieror=%e acceptance=%2.1f ESS=%2.1f'%(np.mean(prob), 100*accept, ess)
@@ -310,7 +312,12 @@ def worker_fit(db_path, host_addr):
             # send update
             client.send_update(ess)
             if ess >= 1000:
-                break
+                # Try to keep from randomly getting an ess 
+                trys +=1
+                if trys > 2:
+                    break
+            else:
+                trys = 0
         # tell workers to stop
         pool.close()
         # send results
@@ -336,7 +343,9 @@ def fit_all(db_path, save_path, min_wave=3500, max_wave=8000):
             server.done = True
             server.close()
         # check results
-        socks = dict(server.poller.poll(1000))           
+        print 'Polling'
+        socks = dict(server.poller.poll(1000))
+        print 'Done Polling'
         if server.results_receiver in socks:
             # get results
             msg = None
