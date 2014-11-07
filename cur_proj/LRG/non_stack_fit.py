@@ -341,15 +341,17 @@ def fit_all(db_path, save_path, min_wave=3500, max_wave=8000):
         if spec_index >= spec[param[:,1]>9].shape[0]:
             # don't take any more data
             server.done = True
+            if len(server.cur_workers) == 0:
+                print 'exiting'
+                break
             server.close()
         # check results
-        print 'Polling'
         socks = dict(server.poller.poll(1000))
-        print 'Done Polling'
         if server.results_receiver in socks:
             # get results
             msg = None
             msg, id, py_obj = server.results_receiver.recv_pyobj(zmq.NOBLOCK)
+            print msg, id
             if msg == 'need data' and not server.done:
                 # Send data and record worker
                 print 'sending data to %s'%id
@@ -360,36 +362,23 @@ def fit_all(db_path, save_path, min_wave=3500, max_wave=8000):
                 spec_index = server.check_current(spec_index)
                 server.update(id, 0)
                 server.gal_send.send_pyobj((id, (data, data_param)))
-                while True:
-                    print 'trying to send'
-                    socks = dict(server.poller.poll(1))
-                    if server.results_receiver in socks:
-                        msg, tid, _ = server.results_receiver.recv_pyobj(zmq.NOBLOCK)
-                        if tid == id and msg == 'got it':
-                            print 'sent to %s'%id
-                            break
-                    else:
-                        server.gal_send.send_pyobj((id, (data, data_param)))
-                        time.sleep(1)
+                
             elif msg == 'waiting':
                 # if process is waiting for data resend
-                socks = dict(server.poller.poll(1))
-                if server.results_receiver in socks:
-                    msg, tid, _ = server.results_receiver.recv_pyobj(zmq.NOBLOCK)
-                    if tid == id and msg == 'got it':
-                        print 'sent to %s'%id
-                    else:
-                        # resend
-                        print 'trying to send to %s'%id
-                        # get data to send
-                        temp_index = self.cur_workers[id][2]
-                        data = np.vstack((wave, spec[param[:,1]>9][temp_index,:])).T
-                        data_param = param[param[:,1]>9][temp_index]
-                        server.gal_send.send_pyobj((id, (data, data_param)))
+                try:
+                    temp_index = server.cur_workers[id][2]
+                    data = np.vstack((wave, spec[param[:,1]>9][temp_index,:])).T
+                    data_param = param[param[:,1]>9][temp_index]
+                    print 'sending again to %s'%id
+                    server.gal_send.send_pyobj((id, (data, data_param)))
+                except KeyError:
+                    # if getting echo after has finnished
+                    continue
                        
             elif msg == 'status':
                 # log status
                 server.update(id, py_obj)
+                
             elif msg == 'done':
                 # get results and send more data or tell processes to finish
                 server.finalize(id)
@@ -400,10 +389,7 @@ def fit_all(db_path, save_path, min_wave=3500, max_wave=8000):
                 pik.dump(py_obj, open(os.path.join(save_path,out_name),'w'), 2)
                 spec_index = spec[param[:,1]>9].shape[0]
                 continue
-            if len(server.cur_workers) == 0:
-                print 'exiting'
-                break
-
+            
 if __name__ == '__main__':
     # start worker'
     db_path = '/home/thuso/Phd/experements/hierarical/LRG_Stack/burst_dtau_10.db'

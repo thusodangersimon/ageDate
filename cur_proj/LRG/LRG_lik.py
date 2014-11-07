@@ -1,5 +1,5 @@
 import likelihood_class as lik
-import numpy as nu
+import numpy as np
 import database_utils as util
 import interp_utils as interp
 from scipy.spatial import Delaunay
@@ -33,7 +33,7 @@ class Multi_LRG_burst(lik.Example_lik_class):
         self.norm_prior = {}
         for i in data:
             self.norm[i] = 1./data[i][:,1].mean()
-            self.norm_prior[i] = nu.log10(self.norm[i])
+            self.norm_prior[i] = np.log10(self.norm[i])
             self.data[i] = data[i].copy()
             self.data[i][:,1] *= self.norm[i]
             if self.data[i].shape[1] == 3:
@@ -46,7 +46,7 @@ class Multi_LRG_burst(lik.Example_lik_class):
         # Get param range (tau, age, metal)
         self.param_range = []
         for column in ['tau', 'age', 'metalicity']:
-            self.param_range.append(nu.sort(nu.ravel(self.db.execute(
+            self.param_range.append(np.sort(np.ravel(self.db.execute(
                 'Select DISTINCT %s FROM %s'%(column,self._table_name)).fetchall())))
         self._hull = None
         # make resolution
@@ -61,7 +61,7 @@ class Multi_LRG_burst(lik.Example_lik_class):
     def _make_hull(self):
         '''Make convex hull obj for telling if param is in range'''
         # Make all points in param space
-        points = nu.asarray([point for point in
+        points = np.asarray([point for point in
                              itertools.product(*self.param_range)])
         self._hull = Delaunay(points)
 
@@ -90,9 +90,9 @@ class Multi_LRG_burst(lik.Example_lik_class):
                     param[bins][gal][columns], self.param_range)
             else:
                 if return_model:
-                    yield -nu.inf, gal, []
+                    yield -np.inf, gal, []
                 else:
-                    yield -nu.inf, gal
+                    yield -np.inf, gal
                 continue
             if normalize:
                 model = {'wave':spec[:,0],0: spec[:,1]}
@@ -125,7 +125,7 @@ class Multi_LRG_burst(lik.Example_lik_class):
                 model = ag.data_match(self.data[gal], model, rebin=False)
             #calculate map for normalization
             norm = ag.normalize(self.data[gal], model[0])
-            self.norm_prior[gal] = nu.log10(norm)
+            self.norm_prior[gal] = np.log10(norm)
             if normalize:
                 model[0] *= norm
             # Calc liklihood
@@ -149,11 +149,11 @@ class Multi_LRG_burst(lik.Example_lik_class):
         Evaluates step_criteria, with help of param and model and 
         changes step size during burn-in perior. Outputs new step size
         '''
-        diag = nu.diagonal(step_size)
+        diag = np.diagonal(step_size)
         
-        '''if nu.all(step_crit > 0.3) and nu.all(diag < 8.):
+        '''if np.all(step_crit > 0.3) and np.all(diag < 8.):
             step_size *= 1.05
-        elif nu.all(step_crit < 0.2) and nu.any(diag > 10**-6):
+        elif np.all(step_crit < 0.2) and np.any(diag > 10**-6):
                 step_size /= 1.05'''
         # Switch statement
         if step_crit < 0.001:
@@ -177,13 +177,13 @@ class Multi_LRG_burst(lik.Example_lik_class):
         #cov matrix
         if itter % 500 == 0 and itter > 0.:
             
-            Tstep_size = nu.cov(nu.vstack(param[-2000:]).T)
+            Tstep_size = np.cov(np.vstack(param[-2000:]).T)
             #make sure not stuck
-            index = nu.isclose(Tstep_size, 0, rtol=1e-6) == False
+            index = np.isclose(Tstep_size, 0, rtol=1e-6) == False
             step_size[index] = Tstep_size[index]
         # make sure none of the diagonal elements are smaller than 10**-4
-        diag = nu.diagonal(step_size)
-        index = nu.where(diag < 10**-4)[0]
+        diag = np.diagonal(step_size)
+        index = np.where(diag < 10**-4)[0]
         for i in index:
             step_size[i,i] = 10**-4
         return step_size
@@ -198,31 +198,31 @@ class Multi_LRG_burst(lik.Example_lik_class):
         dtype.append(('normalization',float))
         dtype.append(('redshift', float))
         #uniform dist for everything except redshift
-        param = [nu.random.rand()*i.ptp() + i.min() for i in self.param_range]
+        param = [np.random.rand()*i.ptp() + i.min() for i in self.param_range]
         #norm
-        param.append(nu.random.rand()*nu.mean(self.norm_prior.values())+25)
+        param.append(np.random.rand()*np.mean(self.norm_prior.values())+25)
         #redshift
         param.append(0.)
         if self.has_dust:
             dtype.append((r'$T_{bc}$',float))
             dtype.append((r'$T_{ism}$', float))
             #uniform between 0 ,4
-            param += [nu.random.rand()*4 for i in range(2)]
+            param += [np.random.rand()*4 for i in range(2)]
         if self.has_losvd:
             dtype.append((r'$\sigma$', float))
             dtype.append((r'$V$', float))
             dtype.append((r'$h_3$', float))
             dtype.append((r'$h_4$', float))
             #sigma and v
-            param += [nu.random.rand()*3 for i in range(2)]
+            param += [np.random.rand()*3 for i in range(2)]
             # h3 and h4 off for now
             param += [0. for i in range(2)]
         # create array and assign values
-        out_param = nu.empty(1, dtype=dtype)
+        out_param = np.empty(1, dtype=dtype)
         for index,elmt in enumerate(param):
             out_param[0][index] = elmt
         out_param = pd.DataFrame(out_param)
-        return out_param, nu.eye(len(param))*.01
+        return out_param, np.eye(len(param))*.01
     
     def prior(self, param, bins):
         '''Calculates priors of all parameters'''
@@ -234,7 +234,7 @@ class Multi_LRG_burst(lik.Example_lik_class):
                 if i ==1:
                     #age
                     if param[bins][gal].iloc[0][i] > ran.max():
-                        out_lik += -nu.inf
+                        out_lik += -np.inf
                     else:
                         out_lik += stats_dist.norm.logpdf(param[bins][gal].iloc[0][i], 9.65, 0.43)
                 else:
@@ -249,7 +249,7 @@ class Multi_LRG_burst(lik.Example_lik_class):
             norm = param[bins][gal]['normalization'] < -10
             
             if norm.bool():
-                out_lik += -nu.inf
+                out_lik += -np.inf
             else:
                 out_lik += stats_dist.norm.logpdf(param[bins][gal]['normalization'],
                                               self.norm_prior[gal], 10)
@@ -272,7 +272,7 @@ class Multi_LRG_burst(lik.Example_lik_class):
         for gal in Mu:
             mu = Mu[gal].values[0]
             try:
-                out[gal] =  nu.random.multivariate_normal(mu, Sigma[gal])
+                out[gal] =  np.random.multivariate_normal(mu, Sigma[gal])
             except:
                 pass
                 #ipdb.set_trace()
@@ -440,7 +440,7 @@ class LRG_mpi_lik(Multi_LRG_burst):
             self._comm.send((self.data,self.norm_prior,self.norm), dest=status.source,
                              tag=3)
             # Check if all workers have data
-            if nu.all(nu.sort(recv_num) == nu.sort(self._workers)):
+            if np.all(np.sort(recv_num) == np.sort(self._workers)):
                 # send a 5 so they listen again
                 for worker in recv_num:
                     self._comm.send([], dest=worker, tag=5)
@@ -494,7 +494,7 @@ class LRG_Tempering(LRG_mpi_lik):
         data = {}
         key = self.data.keys()[0]
         for cpu in range(num_temp-1):
-            data[key+'_%03d'%cpu] = nu.copy(self.data[key])
+            data[key+'_%03d'%cpu] = np.copy(self.data[key])
         self.data = data
         LRG_mpi_lik.__init__(self, data ,self.db_name, self.has_dust,
                              self.has_losvd)
@@ -505,18 +505,23 @@ class LRG_Tempering(LRG_mpi_lik):
 def grid_search(point, param_range):
     '''Finds points that make a cube around input point and returns them with
     their spectra'''
-    points = point.get_values()[0]
+    if isinstance(point, dict):
+        points = point.get_values()[0]
+    elif isinstance(point, (list, np.ndarray)):
+        points = point
+    else:
+        raise TypeError('Array must be a list,dictionary or np.ndarray')
     index = []
     len_array = []
     on_plane = []
     for i in range(len(points)):
         len_array.append(len(param_range[i]))
-        index.append(nu.searchsorted(param_range[i],points[i]))
+        index.append(np.searchsorted(param_range[i],points[i]))
         on_plane.append(param_range[i] == points[i])
-    index = nu.asarray(index)
-    len_array = nu.asarray(len_array)
+    index = np.asarray(index)
+    len_array = np.asarray(len_array)
     # check if at on an edge
-    if nu.any(index == 0) or nu.any(index == len_array):
+    if np.any(index == 0) or np.any(index == len_array):
         com_tupple = []
         for j, i in enumerate(index):
             if i == 0:
@@ -529,14 +534,14 @@ def grid_search(point, param_range):
                 com_tupple.append((param_range[j][i-1], param_range[j][i]))
         
     # check if on plane
-    elif nu.any(nu.hstack(on_plane)):
+    elif np.any(np.hstack(on_plane)):
         ipdb.set_trace()
         raise NotImplementedError
     # iterate around the point
     else:
         com_tupple = [(param_range[j][i-1], param_range[j][i])
                   for j,i in enumerate(index)]
-    interp_points = nu.asarray([p for p in
+    interp_points = np.asarray([p for p in
                              itertools.product(*com_tupple)])
     return interp_points
 
@@ -560,12 +565,12 @@ def tri_lin_interp(db, param, param_range):
     if len(spec) == 4:
         # bi-linear inter is needed
         # find which param is the same
-        arange = nu.arange(nu.asarray(param).shape[1])
+        arange = np.arange(np.asarray(param).shape[1])
         for i in arange:
-            if nu.all(points[:,i] == nu.asarray(param)[0][i]):
+            if np.all(points[:,i] == np.asarray(param)[0][i]):
                 # cut it out
                 points = points[:, arange != i]
-                eval_points = nu.asarray(param)[:, arange != i]
+                eval_points = np.asarray(param)[:, arange != i]
                 break
         spec = interp.bilinear_interpolation(points[:,0], points[:,1],spec,
                                              eval_points[0,0],eval_points[0,1])
@@ -573,6 +578,6 @@ def tri_lin_interp(db, param, param_range):
     else:
         #tri-linear is needed
         spec = griddata(points, spec, param)
-    out_spec = nu.vstack((wave, spec)).T
+    out_spec = np.vstack((wave, spec)).T
     return  out_spec
     

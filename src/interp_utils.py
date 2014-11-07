@@ -29,8 +29,6 @@
 ''' Interpolation library uses numpy and numexpr to speed up interpolation of arrays
     
 '''
-
-
 import numpy as nu
 #import numexpr as ne
 from scipy.interpolate import griddata
@@ -38,10 +36,10 @@ import numpy as np
 import scipy.spatial.qhull as qhull
 import warnings
 
-def bilinear_interpolation(x,y,z_temp,x_eval,y_eval):
+def bilinear_interpolation(x, y, z_temp, x_eval, y_eval):
     '''takes in x,y as a len(x)=4, z is a len(z)>4 array and x_eval and y_eval
     are floats'''
-    x,y=nu.unique(x),nu.unique(y)
+    x, y=nu.unique(x), nu.unique(y)
     return ((z_temp[0] * (x[1] - x_eval) * (y[1]-y_eval) +
             z_temp[1] * (x_eval - x[0]) * (y[1]-y_eval) + 
             z_temp[2] * (x[1] - x_eval) * (y_eval - y[0]) + 
@@ -61,7 +59,7 @@ def linear_interpolation(x,y_temp,x_eval):
     return y_temp[0] + (x_eval - x[0]) * (y_temp[1] - y_temp[0])/(x[1] - x[0])
 
 def spectra_lin_interp(x,y,x_eval):
-    #interpolates spectra with x to x_eval
+    '''interpolates spectra with x to x_eval'''
     return nu.interp(x_eval, x, y)
 
 def n_dim_interp(points, eval_points,spec):
@@ -82,23 +80,3 @@ def n_dim_interp(points, eval_points,spec):
         return out
     except: #qhullerror
         return spec[0] * nu.nan
-
-if __name__ == '__main__':
-    import likelihood_class as lik
-    import numpy as nu
-    from database_utils import NN,get_param_from_hdf5
-
-    fun = lik.CV_fit(None)
-    param = fun.initalize(1)[0]
-    
-    Nei_clas = NN(len(param)*2).fit(fun.all_param)
-    index = Nei_clas.kneighbors(param)[1]
-    #get spec
-    spec = []
-    for i in index[0]:
-        spec.append(fun.tab.cols.spec[i][:,1])
-    #try interpolation
-    points, eval_points = all_param[index],param
-    
-    a = LinearNDInterpolator(points[0],spec)
-     
